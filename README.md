@@ -256,17 +256,19 @@ The Arduino IDE compiles everything as a single translation unit. Include order 
 
 ## Flash Pre-Compiled Binary (No Arduino IDE Required)
  
+Official binaries are built automatically by GitHub Actions and attached to each [GitHub Release](https://github.com/jimisola/AutoLee/releases) (they are no longer committed to the repo). Each release tag follows the form `vX.Y` and matches `FW_VERSION` in `AutoLee/config.h`.
+
 If you don't want to set up the Arduino IDE and compile the firmware yourself, you can flash a pre-built binary directly to the ESP32-C6 using a web browser.
  
 ### What You Need
  
 - A **Chrome** or **Edge** browser (Web Serial is not supported in Firefox or Safari)
 - A **USB-C cable** connected to the Waveshare ESP32-C6 board
-- The merged firmware `.bin` file from the [`/Firmware`](Firmware/) folder in this repo
+- The merged firmware `.bin` file from the [latest release](https://github.com/jimisola/AutoLee/releases/latest)
  
 ### Steps
  
-1. Download the latest `AutoLee_vX.X_merged.bin` from the [`/Firmware`](Firmware/) folder
+1. Download the latest `AutoLee_vX.X_merged.bin` from the [Releases page](https://github.com/jimisola/AutoLee/releases/latest)
 2. Open the [**Espressif Web Flasher**](https://espressif.github.io/esptool-js/) in Chrome or Edge
 3. Click **Connect** and select the port for your ESP32-C6
 4. In the **Program** section, enter **`0x0`** in the Flash Address field
@@ -281,7 +283,7 @@ If you don't want to set up the Arduino IDE and compile the firmware yourself, y
 
 ### Updating Firmware Later
  
-Once AutoLee is on your WiFi, go to the web UI → **Firmware** page and drag-and-drop the **app-only** `.bin` file (not the merged binary). The merged binary is only needed for the initial USB flash.
+Once AutoLee is on your WiFi, go to the web UI → **Firmware** page and drag-and-drop the **app-only** `AutoLee_vX.X_update.bin` from the [latest release](https://github.com/jimisola/AutoLee/releases/latest) (not the merged binary). The merged binary is only needed for the initial USB flash.
 
 ### OTA Updates
 

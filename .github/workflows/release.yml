@@ -1,0 +1,145 @@
+name: Release firmware
+
+# Fires when a GitHub Release is *published* (created + not a draft).
+#
+# For maintainers who prefer the web UI (recommended):
+#   1. Bump FW_VERSION in AutoLee/config.h and merge it to main first.
+#   2. GitHub -> Releases -> "Draft a new release".
+#   3. Choose/create a tag named  vX.Y  (must match FW_VERSION, e.g. v1.9 -> "1.9").
+#   4. Publish. This workflow builds the firmware and attaches the two .bin
+#      assets (merged + update) to that same release.
+#
+# The tag MUST be of the form vX.Y and MUST match FW_VERSION in AutoLee/config.h,
+# otherwise the build fails fast (see the "version-guard" step).
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write        # required to upload assets onto the release
+
+env:
+  # ---- Pinned toolchain versions (reproducible builds) --------------------
+  # esp32c6 requires the arduino-esp32 core >= 3.0.0.
+  # TODO: pin to the exact core version installed in the maintainer's Arduino IDE
+  #       (Boards Manager -> "esp32 by Espressif") so CI matches the hand build.
+  ESP32_CORE_VERSION: "3.1.3"
+  # Library-Manager dependencies. LVGL and GFX versions are the ones the project
+  # documents; the rest are left unpinned for now.
+  # TODO: pin TMCStepper / FastAccelStepper / ESPAsyncWebServer / AsyncTCP to the
+  #       exact versions from the maintainer's `arduino-cli lib list`. Note that
+  #       ESPAsyncWebServer / AsyncTCP have several incompatible forks.
+  LVGL_VERSION: "8.4.0"
+  GFX_VERSION: "1.5.9"
+  FQBN: "esp32:esp32:esp32c6:PartitionScheme=min_spiffs,FlashMode=dio,FlashSize=4M"
+  BUILD_DIR: "AutoLee/build/esp32.esp32.esp32c6"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -- Fail in seconds if the release tag doesn't match FW_VERSION ---------
+      - name: Version guard (tag must match FW_VERSION)
+        id: ver
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          FW="$(grep -oP '#define\s+FW_VERSION\s+"\K[^"]+' AutoLee/config.h)"
+          echo "Release tag: ${GITHUB_REF_NAME}  ->  version '${VER}'"
+          echo "config.h FW_VERSION: '${FW}'"
+          if [ "${VER}" != "${FW}" ]; then
+            echo "::error::Release tag (${GITHUB_REF_NAME} -> ${VER}) does not match FW_VERSION in AutoLee/config.h (${FW}). Bump config.h and re-tag."
+            exit 1
+          fi
+          echo "ver=${VER}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      # -- Cache the (large) core toolchain + installed libraries -------------
+      - name: Cache Arduino data
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-${{ runner.os }}-esp32-${{ env.ESP32_CORE_VERSION }}-lvgl${{ env.LVGL_VERSION }}-gfx${{ env.GFX_VERSION }}-v1
+
+      - name: Install ESP32 core and libraries
+        run: |
+          set -euo pipefail
+          export ARDUINO_DIRECTORIES_USER="$HOME/Arduino"
+          arduino-cli config init --overwrite
+          arduino-cli config set directories.user "$HOME/Arduino"
+
+          arduino-cli core update-index
+          arduino-cli core install "esp32:esp32@${ESP32_CORE_VERSION}"
+
+          # Library-Manager dependencies. ArduinoOTA / DNSServer / WiFi / SPI /
+          # Wire / Preferences / Update ship with the esp32 core -> do NOT install.
+          arduino-cli lib install "lvgl@${LVGL_VERSION}"
+          arduino-cli lib install "GFX Library for Arduino@${GFX_VERSION}"
+          arduino-cli lib install "TMCStepper"
+          arduino-cli lib install "FastAccelStepper"
+          arduino-cli lib install "ESPAsyncWebServer"
+          arduino-cli lib install "AsyncTCP"
+
+          # LVGL quirk: lv_conf.h must sit NEXT TO the lvgl folder (libraries root),
+          # not inside it. (Copied after LVGL is installed.)
+          cp AutoLee/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
+
+          # Vendored, non-Library-Manager Waveshare touch driver.
+          cp -r third_party/esp_lcd_touch_axs5106l "$HOME/Arduino/libraries/esp_lcd_touch_axs5106l"
+
+          # One-time visibility: record the available partition-scheme tokens so
+          # the min_spiffs assumption is verifiable in the build log.
+          arduino-cli board details -b esp32:esp32:esp32c6 | sed -n '/PartitionScheme/,/^$/p' || true
+
+      - name: Compile firmware
+        run: |
+          set -euo pipefail
+          export ARDUINO_DIRECTORIES_USER="$HOME/Arduino"
+          arduino-cli compile \
+            --fqbn "${FQBN}" \
+            --export-binaries \
+            ./AutoLee
+
+      - name: Assemble release artifacts
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.ver }}"
+          mkdir -p dist
+
+          # The esp32 core's post-build hook runs esptool merge_bin automatically,
+          # so AutoLee.ino.merged.bin is produced by --export-binaries.
+          MERGED="${BUILD_DIR}/AutoLee.ino.merged.bin"
+          APP="${BUILD_DIR}/AutoLee.ino.bin"
+
+          if [ ! -f "${MERGED}" ]; then
+            echo "::warning::merged.bin not found; falling back to explicit esptool merge_bin"
+            # Fallback: build the full-flash image manually. ESP32-C6 (RISC-V, IDF5)
+            # places the bootloader at 0x0 (not 0x1000).
+            BOOT_APP0="$(find "$HOME/.arduino15/packages/esp32/hardware/esp32" -name boot_app0.bin | head -n1)"
+            python -m esptool --chip esp32c6 merge_bin \
+              -o "${MERGED}" \
+              --flash_mode dio --flash_freq 80m --flash_size 4MB \
+              0x0     "${BUILD_DIR}/AutoLee.ino.bootloader.bin" \
+              0x8000  "${BUILD_DIR}/AutoLee.ino.partitions.bin" \
+              0xe000  "${BOOT_APP0}" \
+              0x10000 "${APP}"
+          fi
+
+          cp "${MERGED}" "dist/AutoLee_v${VER}_merged.bin"
+          cp "${APP}"    "dist/AutoLee_v${VER}_update.bin"
+
+          echo "Artifacts:"
+          ls -la dist/
+
+      - name: Attach firmware to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/AutoLee_v${{ steps.ver.outputs.ver }}_merged.bin
+            dist/AutoLee_v${{ steps.ver.outputs.ver }}_update.bin
