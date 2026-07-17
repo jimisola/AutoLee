@@ -68,8 +68,14 @@ If you prefer a GUI (or don't want to touch the command line):
    - `native` → *Test* (runs the host unit tests)
 6. To flash, connect the WaveShare board over **USB-C**, then press **Upload**.
 
-> **macOS:** if the board doesn't show up as a serial port, install the WCH
-> **CH34x** USB driver, then pick the right port in the PlatformIO toolbar.
+If the board doesn't show up as a serial port, pick the right port in the
+PlatformIO toolbar, and by platform:
+
+- **Linux (Ubuntu):** the `ch341` driver is in the kernel, so it usually works.
+  Add yourself to the serial group once — `sudo usermod -aG dialout $USER` — then
+  log out/in. If the port keeps disconnecting, Ubuntu's `brltty` may be grabbing
+  it: `sudo apt remove brltty`.
+- **macOS / Windows:** install the WCH **CH34x** USB driver.
 
 Build outputs are under `.pio/build/esp32-c6/`:
 
