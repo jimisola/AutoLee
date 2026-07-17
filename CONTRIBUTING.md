@@ -77,9 +77,18 @@ The sketch stays a normal Arduino sketch, so the IDE still works:
 
 ## Build with arduino-cli (alternative)
 
-See the equivalent commands in the release workflow
-(`.github/workflows/release.yml`); the FQBN is
-`esp32:esp32:esp32c6:PartitionScheme=min_spiffs,FlashMode=dio,FlashSize=4M`.
+Install the `esp32:esp32` core and the libraries above, copy `AutoLee/lv_conf.h`
+next to the `lvgl` folder and `third_party/esp_lcd_touch_axs5106l/` into the
+libraries dir, then:
+
+```bash
+arduino-cli compile \
+  --fqbn "esp32:esp32:esp32c6:PartitionScheme=min_spiffs,FlashMode=dio,FlashSize=4M" \
+  --export-binaries ./AutoLee
+```
+
+(CI and the release pipeline both use PlatformIO — `platformio.ini` is the single
+source of truth for versions.)
 
 ## Safety features
 

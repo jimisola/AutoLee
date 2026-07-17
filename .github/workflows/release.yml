@@ -2,15 +2,15 @@ name: Release firmware
 
 # Fires when a GitHub Release is *published* (created + not a draft).
 #
-# For maintainers who prefer the web UI (recommended):
+# For maintainers (recommended, via the web UI):
 #   1. Bump FW_VERSION in AutoLee/config.h and merge it to main first.
 #   2. GitHub -> Releases -> "Draft a new release".
 #   3. Choose/create a tag named  vX.Y  (must match FW_VERSION, e.g. v1.9 -> "1.9").
-#   4. Publish. This workflow builds the firmware and attaches the two .bin
-#      assets (merged + update) to that same release.
+#   4. Publish. This workflow builds the firmware (PlatformIO) and attaches the
+#      two .bin assets (merged + update) to that same release.
 #
-# The tag MUST be of the form vX.Y and MUST match FW_VERSION in AutoLee/config.h,
-# otherwise the build fails fast (see the "version-guard" step).
+# The build uses the pinned toolchain in platformio.ini — the single source of
+# truth for library/platform versions (same as CI and local builds).
 
 on:
   release:
@@ -19,30 +19,11 @@ on:
 permissions:
   contents: write        # required to upload assets onto the release
 
-env:
-  # ---- Pinned toolchain versions (reproducible builds) --------------------
-  # esp32c6 requires the arduino-esp32 core >= 3.0.0. This combination is
-  # verified to compile the sketch cleanly for esp32c6 / Minimal SPIFFS.
-  ESP32_CORE_VERSION: "3.3.10"
-  # Library-Manager dependencies, pinned to a verified-compiling set.
-  LVGL_VERSION: "8.4.0"
-  GFX_VERSION: "1.6.6"
-  TMCSTEPPER_VERSION: "0.7.3"
-  FASTACCELSTEPPER_VERSION: "1.2.7"
-  # Async stack: the ESP32Async forks (successors to the me-no-dev libraries).
-  # These specific Library-Manager names/authors matter — other forks with
-  # similar names are not compatible with a recent esp32 core.
-  ESPASYNCWEBSERVER_VERSION: "3.11.2"    # "ESP Async WebServer" by ESP32Async
-  ASYNCTCP_VERSION: "3.4.10"             # "Async TCP" by ESP32Async
-  FQBN: "esp32:esp32:esp32c6:PartitionScheme=min_spiffs,FlashMode=dio,FlashSize=4M"
-  BUILD_DIR: "AutoLee/build/esp32.esp32.esp32c6"
-
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       # -- Fail in seconds if the release tag doesn't match FW_VERSION ---------
       - name: Version guard (tag must match FW_VERSION)
@@ -51,92 +32,42 @@ jobs:
           set -euo pipefail
           VER="${GITHUB_REF_NAME#v}"
           FW="$(grep -oP '#define\s+FW_VERSION\s+"\K[^"]+' AutoLee/config.h)"
-          echo "Release tag: ${GITHUB_REF_NAME}  ->  version '${VER}'"
-          echo "config.h FW_VERSION: '${FW}'"
+          echo "Release tag ${GITHUB_REF_NAME} -> version '${VER}'; config.h FW_VERSION='${FW}'"
           if [ "${VER}" != "${FW}" ]; then
             echo "::error::Release tag (${GITHUB_REF_NAME} -> ${VER}) does not match FW_VERSION in AutoLee/config.h (${FW}). Bump config.h and re-tag."
             exit 1
           fi
           echo "ver=${VER}" >> "$GITHUB_OUTPUT"
 
-      - name: Setup arduino-cli
-        uses: arduino/setup-arduino-cli@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      # -- Cache the (large) core toolchain + installed libraries -------------
-      - name: Cache Arduino data
+      - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
-          path: ~/.arduino15
-          key: arduino-${{ runner.os }}-esp32-${{ env.ESP32_CORE_VERSION }}-lvgl${{ env.LVGL_VERSION }}-gfx${{ env.GFX_VERSION }}-v1
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
 
-      - name: Install ESP32 core and libraries
-        run: |
-          set -euo pipefail
-          export ARDUINO_DIRECTORIES_USER="$HOME/Arduino"
-          arduino-cli config init --overwrite
-          arduino-cli config set directories.user "$HOME/Arduino"
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
 
-          arduino-cli core update-index
-          arduino-cli core install "esp32:esp32@${ESP32_CORE_VERSION}"
-
-          # Library-Manager dependencies. ArduinoOTA / DNSServer / WiFi / SPI /
-          # Wire / Preferences / Update ship with the esp32 core -> do NOT install.
-          arduino-cli lib install "lvgl@${LVGL_VERSION}"
-          arduino-cli lib install "GFX Library for Arduino@${GFX_VERSION}"
-          arduino-cli lib install "TMCStepper@${TMCSTEPPER_VERSION}"
-          arduino-cli lib install "FastAccelStepper@${FASTACCELSTEPPER_VERSION}"
-          arduino-cli lib install "ESP Async WebServer@${ESPASYNCWEBSERVER_VERSION}"
-          arduino-cli lib install "Async TCP@${ASYNCTCP_VERSION}"
-
-          # LVGL quirk: lv_conf.h must sit NEXT TO the lvgl folder (libraries root),
-          # not inside it. (Copied after LVGL is installed.)
-          cp AutoLee/lv_conf.h "$HOME/Arduino/libraries/lv_conf.h"
-
-          # Vendored, non-Library-Manager Waveshare touch driver.
-          cp -r third_party/esp_lcd_touch_axs5106l "$HOME/Arduino/libraries/esp_lcd_touch_axs5106l"
-
-          # One-time visibility: record the available partition-scheme tokens so
-          # the min_spiffs assumption is verifiable in the build log.
-          arduino-cli board details -b esp32:esp32:esp32c6 | sed -n '/PartitionScheme/,/^$/p' || true
-
-      - name: Compile firmware
-        run: |
-          set -euo pipefail
-          export ARDUINO_DIRECTORIES_USER="$HOME/Arduino"
-          arduino-cli compile \
-            --fqbn "${FQBN}" \
-            --export-binaries \
-            ./AutoLee
+      - name: Build firmware (ESP32-C6)
+        run: pio run -e esp32-c6
 
       - name: Assemble release artifacts
         run: |
           set -euo pipefail
           VER="${{ steps.ver.outputs.ver }}"
+          B=.pio/build/esp32-c6
           mkdir -p dist
-
-          # The esp32 core's post-build hook runs esptool merge_bin automatically,
-          # so AutoLee.ino.merged.bin is produced by --export-binaries.
-          MERGED="${BUILD_DIR}/AutoLee.ino.merged.bin"
-          APP="${BUILD_DIR}/AutoLee.ino.bin"
-
-          if [ ! -f "${MERGED}" ]; then
-            echo "::warning::merged.bin not found; falling back to explicit esptool merge_bin"
-            # Fallback: build the full-flash image manually. ESP32-C6 (RISC-V, IDF5)
-            # places the bootloader at 0x0 (not 0x1000).
-            BOOT_APP0="$(find "$HOME/.arduino15/packages/esp32/hardware/esp32" -name boot_app0.bin | head -n1)"
-            python -m esptool --chip esp32c6 merge_bin \
-              -o "${MERGED}" \
-              --flash_mode dio --flash_freq 80m --flash_size 4MB \
-              0x0     "${BUILD_DIR}/AutoLee.ino.bootloader.bin" \
-              0x8000  "${BUILD_DIR}/AutoLee.ino.partitions.bin" \
-              0xe000  "${BOOT_APP0}" \
-              0x10000 "${APP}"
-          fi
-
-          cp "${MERGED}" "dist/AutoLee_v${VER}_merged.bin"
-          cp "${APP}"    "dist/AutoLee_v${VER}_update.bin"
-
-          echo "Artifacts:"
+          # firmware.factory.bin = bootloader+partitions+app, flashed at 0x0.
+          # firmware.bin         = app-only image, used for OTA updates.
+          test -f "$B/firmware.factory.bin" || { echo "::error::firmware.factory.bin missing"; exit 1; }
+          cp "$B/firmware.factory.bin" "dist/AutoLee_v${VER}_merged.bin"
+          cp "$B/firmware.bin"         "dist/AutoLee_v${VER}_update.bin"
           ls -la dist/
 
       - name: Attach firmware to release
