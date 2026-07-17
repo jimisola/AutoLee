@@ -20,22 +20,16 @@ to build, test, and release the firmware.
 Firmware binaries are **not** committed — they are built by CI and attached to
 each [GitHub Release](https://github.com/jimisola/AutoLee/releases).
 
-## Toolchain (pinned)
+## Toolchain
 
-Targets **ESP32-C6**, **Minimal SPIFFS** partition. Versions verified to compile:
+Targets **ESP32-C6** with the **Minimal SPIFFS** partition. The platform and all
+library versions are pinned in [`platformio.ini`](platformio.ini) — the single
+source of truth, used by local builds, CI, and releases. Don't duplicate versions
+elsewhere.
 
-| Component | Version |
-|---|---|
-| pioarduino platform (arduino-esp32 3.3.x) | `55.03.39` |
-| LVGL | 8.4.0 |
-| GFX Library for Arduino | 1.6.6 |
-| TMCStepper | 0.7.3 |
-| FastAccelStepper | 1.2.7 |
-| ESP Async WebServer (ESP32Async) | 3.11.2 |
-| Async TCP (ESP32Async) | 3.4.10 |
-
-> ⚠️ Use the **ESP32Async** forks of the async libraries. Other forks with
-> similar names will not compile against a recent esp32 core.
+> ⚠️ Use the **ESP32Async** forks of the async libraries (`ESP Async WebServer`,
+> `Async TCP`) — other forks with similar names won't compile against a recent
+> esp32 core (this is already encoded in `platformio.ini`'s `lib_deps`).
 
 ## Build & test with PlatformIO (recommended)
 

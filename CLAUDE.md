@@ -13,9 +13,9 @@ AutoLee is Arduino/C++ firmware for a **WaveShare 1.47" ESP32-C6** touchscreen m
 Build & test with **PlatformIO** (see `platformio.ini` and CONTRIBUTING.md):
 `pio run -e esp32-c6` (firmware), `pio test -e native` (host unit tests, no hardware). It is a PlatformIO project (not an Arduino sketch anymore). CI (`.github/workflows/ci.yml`) runs both on every PR, plus an API-contract check.
 
-- **Board:** ESP32-C6. Platform: pioarduino `55.03.39` (arduino-esp32 3.3.x).
+- **Board:** ESP32-C6 (pioarduino platform / arduino-esp32 3.3.x).
 - **Partition scheme:** *Minimal SPIFFS (1.9 MB APP with OTA / 128 KB SPIFFS)* — required; firmware overflows the default layout.
-- **Libraries (pinned, verified):** LVGL 8.4.0, GFX Library for Arduino 1.6.6, TMCStepper 0.7.3, FastAccelStepper 1.2.7, **ESP32Async** forks of ESP Async WebServer 3.11.2 + Async TCP 3.4.10, plus the vendored **`esp_lcd_touch_axs5106l`** driver in `third_party/` (not in the Library Manager). PlatformIO wires the driver and `lv_conf.h` automatically.
+- **Versions:** the platform and all library versions are pinned in `platformio.ini` — the **single source of truth**; don't duplicate them here. Use the **ESP32Async** forks of the async libraries. The vendored **`esp_lcd_touch_axs5106l`** driver lives in `third_party/` (not in the Library Manager); PlatformIO wires it and `lv_conf.h` automatically.
 - **LVGL setup:** `include/lv_conf.h` is found via `-D LV_CONF_INCLUDE_SIMPLE` (set in `platformio.ini`); PlatformIO wires it and the vendored driver automatically. The LVGL `demos` folder is **not** needed.
 - **Pure logic + tests:** hardware-independent algorithms live in `lib/autolee_logic/` and are covered by Unity suites in `test/`; the firmware includes the same headers, so tested code == shipped code.
 - **Task watchdog:** `ENABLE_TASK_WDT` in `config.h`; blocking calibration/homing loops feed it via `wdt_feed()`.
