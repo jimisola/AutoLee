@@ -36,6 +36,8 @@ elsewhere.
 All versions and board settings are pinned in `platformio.ini`; the vendored
 driver and `lv_conf.h` are wired in automatically — no manual library copying.
 
+### Command line
+
 ```bash
 # Install PlatformIO Core: https://docs.platformio.org/en/latest/core/installation/
 pio run  -e esp32-c6      # build the firmware (app + merged .bin)
@@ -44,8 +46,30 @@ pio run  -e esp32-c6 -t upload   # flash over USB
 pio device monitor -b 115200     # serial monitor
 ```
 
-Or open the folder in **VS Code** with the *PlatformIO IDE* extension and use the
-Build / Upload / Test buttons.
+### VS Code + PlatformIO (GUI)
+
+If you prefer a GUI (or don't want to touch the command line):
+
+1. Install **[VS Code](https://code.visualstudio.com/)**.
+2. Open the **Extensions** panel (square icon in the sidebar) and install
+   **"PlatformIO IDE"** (publisher: *PlatformIO*). It bundles its own toolchain —
+   you do **not** need the Arduino IDE or a separate PlatformIO install. (When you
+   open this repo, VS Code also offers it automatically via
+   `.vscode/extensions.json`.)
+3. **File → Open Folder…** and choose the repository root (the folder that
+   contains `platformio.ini`).
+4. *First open only:* PlatformIO reads `platformio.ini` and downloads the ESP32
+   platform + the pinned libraries. Progress shows in the bottom status bar; it
+   takes a few minutes and is cached afterwards.
+5. Use the **PlatformIO toolbar** in the blue status bar at the bottom — ✓ **Build**,
+   → **Upload** (flash over USB), 🔌 **Serial Monitor** — or open the PlatformIO
+   sidebar (the alien-head icon) → **Project Tasks**:
+   - `esp32-c6` → *Build* / *Upload* / *Monitor*
+   - `native` → *Test* (runs the host unit tests)
+6. To flash, connect the WaveShare board over **USB-C**, then press **Upload**.
+
+> **macOS:** if the board doesn't show up as a serial port, install the WCH
+> **CH34x** USB driver, then pick the right port in the PlatformIO toolbar.
 
 Build outputs are under `.pio/build/esp32-c6/`:
 
