@@ -1,7 +1,7 @@
 // ============================================================================
 //  autolee_logic/batch.h
 //  Pure stroke-counter / batch-run math — host-testable.
-//  Mirrors the counter + batch handling in handleMotion() (AutoLee/motion.h).
+//  Mirrors the counter + batch handling in handleMotion() (src/motion.cpp).
 // ============================================================================
 #pragma once
 #include <cstdint>

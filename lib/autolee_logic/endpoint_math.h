@@ -1,7 +1,7 @@
 // ============================================================================
 //  autolee_logic/endpoint_math.h
 //  Pure endpoint / offset math — no hardware, host-testable.
-//  Mirrors clamp_i32() and recomputeEffectiveEndpoints() in AutoLee/motion.h.
+//  Mirrors clamp_i32() and recomputeEffectiveEndpoints() in src/motion.cpp.
 // ============================================================================
 #pragma once
 #include <cstdint>

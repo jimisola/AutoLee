@@ -5,7 +5,7 @@ LCD. It is **not** available in the Arduino Library Manager, so it is vendored
 here and copied into the arduino-cli sketchbook by
 `.github/workflows/release.yml`. The sketch uses its `bsp_touch_init()` /
 `bsp_touch_read()` / `bsp_touch_get_coordinates()` API
-(`AutoLee/AutoLee.ino`, `AutoLee/ui_touch.h`).
+(`src/main.cpp`, `src/ui_touch.cpp`).
 
 ## Source
 

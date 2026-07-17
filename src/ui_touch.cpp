@@ -2,10 +2,8 @@
 //  AutoLee – ui_touch.h
 //  LVGL touch UI: screen builders, helpers, event handlers, update functions
 // ============================================================================
-#pragma once
-
-// All globals and forward declarations are provided by AutoLee.ino
-// (single translation unit — Arduino IDE model)
+#include "globals.h"
+#include "esp_lcd_touch_axs5106l.h"  // bsp_touch_* API (vendored driver)
 
 // ==========================================================================
 //  ST7789 INIT
@@ -49,12 +47,12 @@ static const uint8_t PROGMEM init_operations[] = {
   END_WRITE, DELAY, 10,
   BEGIN_WRITE, WRITE_COMMAND_8, 0x29, END_WRITE
 };
-static void lcd_reg_init() { bus->batchOperation(init_operations, sizeof(init_operations)); }
+void lcd_reg_init() { bus->batchOperation(init_operations, sizeof(init_operations)); }
 
 // ==========================================================================
 //  LVGL CALLBACKS
 // ==========================================================================
-static void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
   uint32_t w = area->x2 - area->x1 + 1, h = area->y2 - area->y1 + 1;
 #if LV_COLOR_16_SWAP
   gfx->draw16bitBeRGBBitmap(area->x1, area->y1, (uint16_t *)&color_p->full, w, h);
@@ -64,7 +62,7 @@ static void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t
   lv_disp_flush_ready(disp);
 }
 
-static void touchpad_read_cb(lv_indev_drv_t *, lv_indev_data_t *data) {
+void touchpad_read_cb(lv_indev_drv_t *, lv_indev_data_t *data) {
   touch_data_t t;
   bsp_touch_read();
   if (bsp_touch_get_coordinates(&t)) {
@@ -76,7 +74,7 @@ static void touchpad_read_cb(lv_indev_drv_t *, lv_indev_data_t *data) {
 // ==========================================================================
 //  LVGL UI HELPERS
 // ==========================================================================
-static void go(lv_obj_t *scr) { lv_scr_load(scr); }
+void go(lv_obj_t *scr) { lv_scr_load(scr); }
 static void style_screen(lv_obj_t *scr) {
   lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, LV_PART_MAIN);
@@ -169,12 +167,12 @@ static lv_obj_t* make_card(lv_obj_t *p, int w, int h) {
 // ==========================================================================
 //  JAM SCREEN FUNCTIONS
 // ==========================================================================
-static void showJamScreen() {
+void showJamScreen() {
   if (jam_status_lbl) lv_label_set_text(jam_status_lbl, "Press to return home");
   go(jam_scr);
 }
 
-static void onJamReturnHome(lv_event_t *e) {
+void onJamReturnHome(lv_event_t *e) {
   LV_UNUSED(e);
   if (runState != STALLED) return;
   safeCreepHome();

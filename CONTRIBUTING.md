@@ -7,12 +7,15 @@ to build, test, and release the firmware.
 
 | Path | Purpose |
 |---|---|
-| `AutoLee/` | The Arduino sketch (1 `.ino` + 7 `.h`). Compiled as a single translation unit; include order in `AutoLee.ino` is significant. |
-| `lib/autolee_logic/` | Pure, hardware-independent logic (endpoint math, SG filter/blanking, stall FSM, batch, log ring). Shared by the firmware **and** the host tests, so tested code == shipped code. |
+| `src/` | The firmware: `main.cpp` (composition root — globals, `setup()`, `loop()`) plus the hardware modules `motion.cpp`, `ui_touch.cpp`, `web_server.cpp`, `wifi_ota.cpp`, and the shared headers `config.h` / `globals.h`. Compiled as separate translation units; every shared global is `extern` in `globals.h` and defined once in `main.cpp`. |
+| `include/lv_conf.h` | LVGL config (found via `-D LV_CONF_INCLUDE_SIMPLE`). |
+| `lib/autolee_logic/` | Pure, hardware-independent logic (endpoint math, SG filter/blanking, stall FSM, batch, log ring, calibration, state JSON, motor FSM). Shared by the firmware **and** the host tests, so tested code == shipped code. |
 | `test/` | Host (native) unit tests — one folder per module, run with `pio test -e native`. |
+| `schemas/`, `openapi.yaml`, `asyncapi.yaml` | API contract (shared JSON Schema + REST/SSE specs). |
 | `third_party/esp_lcd_touch_axs5106l/` | Vendored WaveShare touch driver (not in the Library Manager). See its README for licensing. |
+| `tools/mock_server.py` | Run the web UI on your desktop without hardware. |
 | `platformio.ini` | Build config: `esp32-c6` firmware env + `native` test env. |
-| `.github/workflows/` | CI (build + tests) and the release pipeline. |
+| `.github/workflows/` | CI (build + tests + API contract) and the release pipeline. |
 
 Firmware binaries are **not** committed — they are built by CI and attached to
 each [GitHub Release](https://github.com/jimisola/AutoLee/releases).
@@ -66,7 +69,7 @@ the sketch) so it can be tested on the host and reused by the firmware.
 ### Web UI without hardware
 
 Preview and develop the embedded web UI on your desktop — it serves the real HTML
-(extracted from `AutoLee/web_server.h`) and fakes the API + SSE with schema-valid
+(extracted from `src/web_server.cpp`) and fakes the API + SSE with schema-valid
 state:
 
 ```bash
@@ -84,32 +87,11 @@ exactly that shape; the `test_state_json` golden test and the CI contract check
 **if you change the state payload, update the module, the example, and the schema
 together.**
 
-## Build with the Arduino IDE (alternative)
-
-The sketch stays a normal Arduino sketch, so the IDE still works:
-
-1. Install the ESP32 core (Boards Manager → "esp32 by Espressif", 3.3.x) and the
-   libraries above at the pinned versions.
-2. Copy `AutoLee/lv_conf.h` to sit **next to** your `lvgl` library folder (not
-   inside it). *(The LVGL `demos` folder is not needed.)*
-3. Copy `third_party/esp_lcd_touch_axs5106l/` into your Arduino `libraries` dir.
-4. Open `AutoLee/AutoLee.ino`, select board **ESP32-C6**, partition scheme
-   **Minimal SPIFFS (1.9 MB APP with OTA / 128 KB SPIFFS)**, and compile.
-
-## Build with arduino-cli (alternative)
-
-Install the `esp32:esp32` core and the libraries above, copy `AutoLee/lv_conf.h`
-next to the `lvgl` folder and `third_party/esp_lcd_touch_axs5106l/` into the
-libraries dir, then:
-
-```bash
-arduino-cli compile \
-  --fqbn "esp32:esp32:esp32c6:PartitionScheme=min_spiffs,FlashMode=dio,FlashSize=4M" \
-  --export-binaries ./AutoLee
-```
-
-(CI and the release pipeline both use PlatformIO — `platformio.ini` is the single
-source of truth for versions.)
+> **Note on the Arduino IDE:** the firmware is now a **PlatformIO project**
+> (`src/` compilation units), not a single-file Arduino sketch, so it no longer
+> opens directly in the Arduino IDE. Use PlatformIO (CLI or the VS Code extension)
+> as shown above — `platformio.ini` pins everything and wires in the vendored
+> driver and `lv_conf.h` automatically.
 
 ## Safety features
 
@@ -122,7 +104,7 @@ source of truth for versions.)
 
 ## Versioning & releases
 
-- The firmware version lives in `AutoLee/config.h` as `FW_VERSION` (single source
+- The firmware version lives in `src/config.h` as `FW_VERSION` (single source
   of truth; read by the serial banner and the CI release guard).
 - To cut a release: bump `FW_VERSION`, merge it, then publish a GitHub Release
   with a tag of the form `vX.Y` **matching** `FW_VERSION`. CI validates the match

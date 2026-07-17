@@ -1,7 +1,7 @@
 // ============================================================================
 //  autolee_logic/sg_filter.h
 //  Median-of-5 StallGuard glitch filter — pure, host-testable.
-//  Mirrors the insertion-sort median in read_sg() (AutoLee/motion.h).
+//  Mirrors the insertion-sort median in read_sg() (src/motion.cpp).
 // ============================================================================
 #pragma once
 #include <cstdint>

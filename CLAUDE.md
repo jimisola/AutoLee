@@ -4,19 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-AutoLee is Arduino/C++ firmware for a **WaveShare 1.47" ESP32-C6** touchscreen module that automates a Lee APP decapping press. It drives a NEMA 23 stepper via a **TMC5160** driver (SPI) using sensorless StallGuard homing and jam detection, and exposes a full control surface over both an on-device LVGL touch UI and an async web UI. All code lives in `AutoLee/` (the sketch folder). Prebuilt `.bin` releases are **not** committed — they are built by CI (`.github/workflows/release.yml`) and attached to each [GitHub Release](https://github.com/jimisola/AutoLee/releases).
+AutoLee is Arduino/C++ firmware for a **WaveShare 1.47" ESP32-C6** touchscreen module that automates a Lee APP decapping press. It drives a NEMA 23 stepper via a **TMC5160** driver (SPI) using sensorless StallGuard homing and jam detection, and exposes a full control surface over both an on-device LVGL touch UI and an async web UI. All code lives under `src/` (a PlatformIO project), with hardware-independent logic in `lib/autolee_logic/`. Prebuilt `.bin` releases are **not** committed — they are built by CI (`.github/workflows/release.yml`) and attached to each [GitHub Release](https://github.com/jimisola/AutoLee/releases).
 
 ⚠️ This firmware controls a motorized press that can crush hands. Stall/jam detection guards against brass jams only — never treat it as a safety system for people. Preserve the safety semantics of motion code; do not weaken stop/backoff/homing logic.
 
 ## Build, flash, test
 
 Build & test with **PlatformIO** (see `platformio.ini` and CONTRIBUTING.md):
-`pio run -e esp32-c6` (firmware), `pio test -e native` (host unit tests, no hardware). The Arduino IDE still works (the sketch stays in `AutoLee/`). CI (`.github/workflows/ci.yml`) runs both on every PR.
+`pio run -e esp32-c6` (firmware), `pio test -e native` (host unit tests, no hardware). It is a PlatformIO project (not an Arduino sketch anymore). CI (`.github/workflows/ci.yml`) runs both on every PR, plus an API-contract check.
 
 - **Board:** ESP32-C6. Platform: pioarduino `55.03.39` (arduino-esp32 3.3.x).
 - **Partition scheme:** *Minimal SPIFFS (1.9 MB APP with OTA / 128 KB SPIFFS)* — required; firmware overflows the default layout.
 - **Libraries (pinned, verified):** LVGL 8.4.0, GFX Library for Arduino 1.6.6, TMCStepper 0.7.3, FastAccelStepper 1.2.7, **ESP32Async** forks of ESP Async WebServer 3.11.2 + Async TCP 3.4.10, plus the vendored **`esp_lcd_touch_axs5106l`** driver in `third_party/` (not in the Library Manager). PlatformIO wires the driver and `lv_conf.h` automatically.
-- **LVGL setup (Arduino IDE only):** copy `AutoLee/lv_conf.h` next to (not inside) the `lvgl` library folder. The LVGL `demos` folder is **not** needed.
+- **LVGL setup:** `include/lv_conf.h` is found via `-D LV_CONF_INCLUDE_SIMPLE` (set in `platformio.ini`); PlatformIO wires it and the vendored driver automatically. The LVGL `demos` folder is **not** needed.
 - **Pure logic + tests:** hardware-independent algorithms live in `lib/autolee_logic/` and are covered by Unity suites in `test/`; the firmware includes the same headers, so tested code == shipped code.
 - **Task watchdog:** `ENABLE_TASK_WDT` in `config.h`; blocking calibration/homing loops feed it via `wdt_feed()`.
 - **Flashing a prebuilt binary:** download `AutoLee_vX.X_merged.bin` from the [latest GitHub Release](https://github.com/jimisola/AutoLee/releases/latest) and flash at offset `0x0` via the Espressif Web Flasher (Chrome/Edge, dio mode, 4 MB). The `_update.bin` (app-only) is for OTA, not initial USB flash.
@@ -27,17 +27,13 @@ Pure-logic changes can be verified with `pio test -e native`; full hardware beha
 
 ## Architecture
 
-### Single translation unit — include order is load-bearing
+### Translation units + `globals.h` is the shared header
 
-`AutoLee.ino` is the *only* compilation unit. It defines every global (the storage for all `extern`s), then `#include`s the module headers **in a fixed order** that resolves circular dependencies:
+The firmware compiles as **separate translation units** — `src/main.cpp` plus `motion.cpp`, `ui_touch.cpp`, `web_server.cpp`, `wifi_ota.cpp`. Each `.cpp` starts with `#include "globals.h"`.
 
-```
-config.h → (globals defined in .ino) → motion.h → ui_touch.h → wifi_ota.h → web_server.h
-```
-
-Because everything is one unit, headers are not independently compilable and there are no include guards protecting against reorder. Forward declarations in `AutoLee.ino` (near the includes) let `motion.h` call UI functions defined later in `ui_touch.h`. **If you add a cross-module call, add its forward declaration in `AutoLee.ino` and keep the include order intact.**
-
-`globals.h` is a **reference/documentation file only — it is NOT `#include`d in the build.** It mirrors all shared `extern` declarations and forward declarations for human readers. If you add or rename a shared global or function, update `globals.h` too so it stays an accurate map, but know that changing it alone has no compile effect.
+- **`globals.h` is the real shared header** (it `#include`s `config.h`, the library headers, declares every shared global as `extern`, and forward-declares every cross-module function). Add new shared globals/functions here.
+- **`main.cpp` is the single definition site** for every global (hardware objects, LVGL objects, state vars, and the mutable config vars declared `extern` in `config.h`). Keeping all definitions in one TU makes initialization order well-defined — **don't scatter global definitions into the other `.cpp` files.**
+- A function called from another `.cpp` must have **external linkage** and a declaration in `globals.h`. Keep file-local helpers `static`. **Never put a mutable variable definition in a header** — each TU would get its own copy (compiles clean, breaks at runtime). `config.h`/`globals.h` hold only `extern` decls, `constexpr`, and `inline`.
 
 ### Module responsibilities
 

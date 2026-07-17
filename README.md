@@ -96,20 +96,21 @@ The stall detection and jam protection features are designed to detect brass get
 
 ## File Structure
 
-As of v1.8, the firmware is split into modular files for maintainability. All files must be in the same sketch folder.
+The firmware is a **PlatformIO project** built from separate compilation units under `src/`. Pure, hardware-independent logic lives in `lib/autolee_logic/` and is covered by host unit tests. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full layout and build instructions.
 
 | File | Purpose |
 |---|---|
-| `AutoLee.ino` | Main entry point — globals, `setup()`, `loop()`, include order |
-| `config.h` | All tuning constants, pin definitions, speed profiles |
-| `motion.h` | Motion control, stall detection, calibration, creep home |
-| `ui_touch.h` | LVGL touch UI — screen builders, helpers, event handlers |
-| `web_server.h` | Web server, API endpoints, SSE broadcast, HTML, OTA upload |
-| `wifi_ota.h` | WiFi connection, captive portal, ArduinoOTA |
-| `globals.h` | Reference document — lists all shared variables and forward declarations (not included in the build) |
-| `lv_conf.h` | LVGL configuration — display size, enabled features, font selections |
+| `src/main.cpp` | Composition root — global definitions, `setup()`, `loop()` |
+| `src/config.h` | Tuning constants, pin definitions, speed profiles (`FW_VERSION`) |
+| `src/globals.h` | Shared `extern` declarations + cross-module function decls |
+| `src/motion.cpp` | Motion control, stall detection, calibration, creep home |
+| `src/ui_touch.cpp` | LVGL touch UI — screen builders, helpers, event handlers |
+| `src/web_server.cpp` | Web server, API endpoints, SSE broadcast, HTML, OTA upload |
+| `src/wifi_ota.cpp` | WiFi connection, captive portal, ArduinoOTA |
+| `include/lv_conf.h` | LVGL configuration — display size, enabled features, fonts |
+| `lib/autolee_logic/` | Pure logic (endpoint/SG/stall/batch/calibration/state-JSON), host-tested |
 
-The Arduino IDE compiles everything as a single translation unit. Include order in `AutoLee.ino` resolves all dependencies: `config.h` → globals → `motion.h` → `ui_touch.h` → `wifi_ota.h` → `web_server.h`.
+Every shared global is declared `extern` in `globals.h` and defined once in `main.cpp`, so initialization order stays well-defined across translation units.
 
 ---
 
@@ -237,7 +238,7 @@ pio run  -e esp32-c6 -t upload   # flash over USB
 
 ## Flash Pre-Compiled Binary (No Arduino IDE Required)
  
-Official binaries are built automatically by GitHub Actions and attached to each [GitHub Release](https://github.com/jimisola/AutoLee/releases) (they are no longer committed to the repo). Each release tag follows the form `vX.Y` and matches `FW_VERSION` in `AutoLee/config.h`.
+Official binaries are built automatically by GitHub Actions and attached to each [GitHub Release](https://github.com/jimisola/AutoLee/releases) (they are no longer committed to the repo). Each release tag follows the form `vX.Y` and matches `FW_VERSION` in `src/config.h`.
 
 If you don't want to set up the Arduino IDE and compile the firmware yourself, you can flash a pre-built binary directly to the ESP32-C6 using a web browser.
  

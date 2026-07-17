@@ -2,7 +2,7 @@
 //  autolee_logic/calibration.h
 //  Pure sensorless-calibration decision logic — host-testable.
 //  Mirrors the timing/threshold math and the early/baseline/dynamic hit
-//  detection in move_until_stall() (AutoLee/motion.h). The actual stepper
+//  detection in move_until_stall() (src/motion.cpp). The actual stepper
 //  moves stay in the firmware; the *decisions* live here.
 // ============================================================================
 #pragma once

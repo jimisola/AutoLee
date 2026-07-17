@@ -1,7 +1,7 @@
 // ============================================================================
 //  autolee_logic/state_json.h
 //  Pure serializer for the /api/state JSON — host-testable, no hardware.
-//  Byte-for-byte matches buildStateJSON() in AutoLee/web_server.h, so the
+//  Byte-for-byte matches buildStateJSON() in src/web_server.cpp, so the
 //  firmware, the REST response, and the SSE state event share one contract
 //  (see schemas/state.schema.json).
 // ============================================================================

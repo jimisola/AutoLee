@@ -18,103 +18,107 @@
 #include <DNSServer.h>
 #include <esp_task_wdt.h>
 
-#include "config.h"
+// Shared declarations for every translation unit (also pulls in config.h).
+#include "globals.h"
 
 // Feed the task watchdog. Called from loop() and from the blocking
 // calibration/homing loops so long moves don't trip the watchdog.
-static inline void wdt_feed() {
+void wdt_feed() {
 #if ENABLE_TASK_WDT
   esp_task_wdt_reset();
 #endif
 }
 
-// Pure, host-testable logic modules (lib/autolee_logic/) — shared with the
-// native unit tests so the tested code and the shipped code are the same.
-#include "endpoint_math.h"
-#include "sg_filter.h"
-#include "sg_blanking.h"
-#include "batch.h"
-#include "calibration.h"
-#include "state_json.h"
-#include "motor_fsm.h"
-
 // ==========================================================================
-//  GLOBAL DEFINITIONS (storage for extern declarations in globals.h)
+//  GLOBAL DEFINITIONS — the single definition site for everything declared
+//  extern in globals.h / config.h. Keeping them all in this one translation
+//  unit gives a well-defined initialization order.
 // ==========================================================================
 TMC5160Stepper driver(TMC_CS, R_SENSE);
 FastAccelStepperEngine engine;
 FastAccelStepper *stepper = nullptr;
 
-static long rawUp = 0, rawDown = 0;
-static long endpointUp = 0, endpointDown = 0;
-static bool endpointsCalibrated = false;
-static long counter = 0;
+// Mutable config state (declared extern in config.h)
+SpeedProfile profiles[NUM_PROFILES] = {
+  { "Slow",   15000, 350, 350 },
+  { "Normal", 35000, 15, 15 },
+  { "Fast",   45000, 1, 1 },
+};
+uint8_t  activeProfile = 1;          // default to Normal
+int32_t  upOffsetSteps = 0;
+int32_t  downOffsetSteps = 0;
+uint16_t RUN_CURRENT_MA = 3500;
+int32_t  SG_WORK_ZONE_STEPS = 5500;
 
-enum RunState : uint8_t { IDLE, RUNNING, STOPPING, CALIBRATING, STALLED, HOMING };
-static volatile RunState runState = IDLE;
-static long     currentTarget = 0;
-static uint32_t stopEntryMs   = 0;
+long rawUp = 0, rawDown = 0;
+long endpointUp = 0, endpointDown = 0;
+bool endpointsCalibrated = false;
+long counter = 0;
 
-static uint32_t lastDirectionChangeMs = 0;
-static uint8_t  runSGHighCount = 0;
-static uint8_t  runSGLowCount = 0;
+volatile RunState runState = IDLE;   // RunState enum is defined in globals.h
+long     currentTarget = 0;
+uint32_t stopEntryMs   = 0;
 
-static bool wifiConnected = false;
-static bool wifiAPMode = false;
-static String wifiSSID = "", wifiPass = "";
-static String scannedOptionsHTML = "";
+uint32_t lastDirectionChangeMs = 0;
+uint8_t  runSGHighCount = 0;
+uint8_t  runSGLowCount = 0;
+
+bool wifiConnected = false;
+bool wifiAPMode = false;
+String wifiSSID = "", wifiPass = "";
+String scannedOptionsHTML = "";
 DNSServer dnsServer;
-static bool captivePortalRunning = false;
+bool captivePortalRunning = false;
 
 Preferences prefs;
 AsyncWebServer webServer(80);
 AsyncEventSource events("/events");
-static uint32_t lastSSEMs = 0;
+uint32_t lastSSEMs = 0;
 
-static volatile bool webCalRequested = false;
-static volatile bool webHomeRequested = false;
-static volatile bool rebootRequested = false;
-static uint32_t     rebootRequestMs = 0;
+volatile bool webCalRequested = false;
+volatile bool webHomeRequested = false;
+volatile bool rebootRequested = false;
+uint32_t     rebootRequestMs = 0;
 
-static int32_t  batchTarget  = 0;
-static int32_t  batchCount   = 0;
-static bool     batchActive  = false;
+int32_t  batchTarget  = 0;
+int32_t  batchCount   = 0;
+bool     batchActive  = false;
 
-static char logBuf[LOG_LINES][LOG_LINE_LEN];
-static uint16_t logHead = 0;
-static uint32_t logSerial = 0;
-static uint32_t logSentSerial = 0;
+char logBuf[LOG_LINES][LOG_LINE_LEN];
+uint16_t logHead = 0;
+uint32_t logSerial = 0;
+uint32_t logSentSerial = 0;
 
 Arduino_DataBus *bus = new Arduino_HWSPI(15, 14, 1, 2);
 Arduino_GFX *gfx = new Arduino_ST7789(bus, 22, 0, false, 172, 320, 34, 0, 34, 0);
 
 // LVGL
-static uint32_t bufSize = 0;
-static lv_disp_draw_buf_t draw_buf;
-static lv_color_t *disp_draw_buf = nullptr;
-static lv_disp_drv_t disp_drv;
+uint32_t bufSize = 0;
+lv_disp_draw_buf_t draw_buf;
+lv_color_t *disp_draw_buf = nullptr;
+lv_disp_drv_t disp_drv;
 
-static lv_obj_t *main_scr = nullptr, *settings_scr = nullptr, *config_scr = nullptr, *profile_scr = nullptr;
-static lv_obj_t *tuning_scr = nullptr, *ep_up_scr = nullptr, *ep_dn_scr = nullptr;
-static lv_obj_t *wifi_scr = nullptr;
-static lv_obj_t *counter_label = nullptr, *main_warn = nullptr, *main_warn_lbl = nullptr;
-static lv_obj_t *lbl_speed_val = nullptr;
-static lv_obj_t *profile_btns[NUM_PROFILES] = {};
-static lv_obj_t *lbl_profile_info = nullptr;
-static lv_obj_t *lbl_ep_up = nullptr, *lbl_ep_dn = nullptr, *lbl_travel = nullptr;
-static lv_obj_t *lbl_up_eff = nullptr, *lbl_dn_eff = nullptr;
-static lv_obj_t *lbl_ep_up_val = nullptr, *lbl_ep_dn_val = nullptr;
-static lv_obj_t *lbl_wifi_status = nullptr;
-static lv_obj_t *btn_run_global = nullptr;
+lv_obj_t *main_scr = nullptr, *settings_scr = nullptr, *config_scr = nullptr, *profile_scr = nullptr;
+lv_obj_t *tuning_scr = nullptr, *ep_up_scr = nullptr, *ep_dn_scr = nullptr;
+lv_obj_t *wifi_scr = nullptr;
+lv_obj_t *counter_label = nullptr, *main_warn = nullptr, *main_warn_lbl = nullptr;
+lv_obj_t *lbl_speed_val = nullptr;
+lv_obj_t *profile_btns[NUM_PROFILES] = {};
+lv_obj_t *lbl_profile_info = nullptr;
+lv_obj_t *lbl_ep_up = nullptr, *lbl_ep_dn = nullptr, *lbl_travel = nullptr;
+lv_obj_t *lbl_up_eff = nullptr, *lbl_dn_eff = nullptr;
+lv_obj_t *lbl_ep_up_val = nullptr, *lbl_ep_dn_val = nullptr;
+lv_obj_t *lbl_wifi_status = nullptr;
+lv_obj_t *btn_run_global = nullptr;
 
-static lv_obj_t *jam_scr = nullptr;
-static lv_obj_t *jam_status_lbl = nullptr;
-static lv_obj_t *stall_scr = nullptr;
-static lv_obj_t *lbl_sg_val = nullptr;
+lv_obj_t *jam_scr = nullptr;
+lv_obj_t *jam_status_lbl = nullptr;
+lv_obj_t *stall_scr = nullptr;
+lv_obj_t *lbl_sg_val = nullptr;
 
-static lv_obj_t *batch_scr = nullptr;
-static lv_obj_t *lbl_batch_val = nullptr;
-static lv_obj_t *lbl_batch_remain = nullptr;
+lv_obj_t *batch_scr = nullptr;
+lv_obj_t *lbl_batch_val = nullptr;
+lv_obj_t *lbl_batch_remain = nullptr;
 
 // ==========================================================================
 //  webLog — used by all modules
@@ -131,28 +135,6 @@ void webLog(const char *fmt, ...) {
   logHead = (logHead + 1) % LOG_LINES;
   logSerial++;
 }
-
-// ==========================================================================
-//  INCLUDE MODULES (order matters: motion before ui_touch before web_server)
-//  Forward declarations resolve circular dependencies between motion and UI.
-// ==========================================================================
-
-// UI functions called by motion.h (defined in ui_touch.h)
-static void go(lv_obj_t *scr);
-void setRunButtonState(bool running);
-void ui_update_main_warning();
-void ui_update_tuning_numbers();
-void ui_update_endpoint_edit_values();
-void ui_update_sg_val();
-
-#include "motion.h"
-
-// WiFi functions called by ui_touch.h (defined in wifi_ota.h)
-void clearWiFiCredentials();
-
-#include "ui_touch.h"
-#include "wifi_ota.h"
-#include "web_server.h"
 
 // ==========================================================================
 //  SETUP

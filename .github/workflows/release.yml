@@ -3,7 +3,7 @@ name: Release firmware
 # Fires when a GitHub Release is *published* (created + not a draft).
 #
 # For maintainers (recommended, via the web UI):
-#   1. Bump FW_VERSION in AutoLee/config.h and merge it to main first.
+#   1. Bump FW_VERSION in src/config.h and merge it to main first.
 #   2. GitHub -> Releases -> "Draft a new release".
 #   3. Choose/create a tag named  vX.Y  (must match FW_VERSION, e.g. v1.9 -> "1.9").
 #   4. Publish. This workflow builds the firmware (PlatformIO) and attaches the
@@ -31,10 +31,10 @@ jobs:
         run: |
           set -euo pipefail
           VER="${GITHUB_REF_NAME#v}"
-          FW="$(grep -oP '#define\s+FW_VERSION\s+"\K[^"]+' AutoLee/config.h)"
+          FW="$(grep -oP '#define\s+FW_VERSION\s+"\K[^"]+' src/config.h)"
           echo "Release tag ${GITHUB_REF_NAME} -> version '${VER}'; config.h FW_VERSION='${FW}'"
           if [ "${VER}" != "${FW}" ]; then
-            echo "::error::Release tag (${GITHUB_REF_NAME} -> ${VER}) does not match FW_VERSION in AutoLee/config.h (${FW}). Bump config.h and re-tag."
+            echo "::error::Release tag (${GITHUB_REF_NAME} -> ${VER}) does not match FW_VERSION in src/config.h (${FW}). Bump config.h and re-tag."
             exit 1
           fi
           echo "ver=${VER}" >> "$GITHUB_OUTPUT"

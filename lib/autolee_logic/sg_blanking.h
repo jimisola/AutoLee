@@ -2,7 +2,7 @@
 //  autolee_logic/sg_blanking.h
 //  Pure StallGuard blanking / trip formulas — host-testable.
 //  Mirrors the accel/decel/work-zone windows in handleMotion() and the
-//  dynamic-trip calc in move_until_stall() (AutoLee/motion.h).
+//  dynamic-trip calc in move_until_stall() (src/motion.cpp).
 // ============================================================================
 #pragma once
 #include <cstdint>

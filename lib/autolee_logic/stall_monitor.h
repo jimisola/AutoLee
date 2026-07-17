@@ -1,7 +1,7 @@
 // ============================================================================
 //  autolee_logic/stall_monitor.h
 //  Sliding-counter runtime stall detector — pure FSM, host-testable.
-//  Mirrors the high/low counter logic in handleMotion() (AutoLee/motion.h):
+//  Mirrors the high/low counter logic in handleMotion() (src/motion.cpp):
 //   - each reading above the trip bumps highCount (capped at needed+4)
 //   - a jam fires once highCount reaches `needed`
 //   - readings at/below trip bump lowCount; every 3 lows decay highCount by 1

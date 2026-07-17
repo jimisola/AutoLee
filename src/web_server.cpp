@@ -2,11 +2,9 @@
 //  AutoLee – web_server.h
 //  Web server, API endpoints, SSE broadcast, captive portal, OTA upload
 // ============================================================================
-#pragma once
-
+#include "globals.h"
 #include <Update.h>
-// All globals and forward declarations are provided by AutoLee.ino
-// (single translation unit — Arduino IDE model)
+#include "state_json.h"  // pure serializer used by buildStateJSON()
 
 // ==========================================================================
 //  STATE JSON BUILDER
@@ -490,7 +488,7 @@ static void setupCaptiveProbeEndpoints() {
     webServer.on(p, HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("/"); });
 }
 
-static void setupWebServer() {
+void setupWebServer() {
   // Root page: WiFi config in AP mode, control panel in STA mode
   webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
     if (wifiAPMode && !wifiConnected) {

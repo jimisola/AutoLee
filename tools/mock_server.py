@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mock AutoLee web server — develop/preview the web UI without hardware.
 
-Serves the real embedded UI (extracted from AutoLee/web_server.h) and fakes the
+Serves the real embedded UI (extracted from src/web_server.cpp) and fakes the
 /api/* endpoints and the /events SSE stream with schema-valid state
 (seeded from schemas/state.example.json). Stdlib only.
 
@@ -23,12 +23,12 @@ STATE_LOCK = threading.Lock()
 
 
 def load_index_html() -> str:
-    """Pull the INDEX_HTML raw string literal out of web_server.h."""
-    src = (ROOT / "AutoLee" / "web_server.h").read_text(encoding="utf-8", errors="replace")
+    """Pull the INDEX_HTML raw string literal out of web_server.cpp."""
+    src = (ROOT / "src" / "web_server.cpp").read_text(encoding="utf-8", errors="replace")
     m = re.search(r'INDEX_HTML\[\]\s*PROGMEM\s*=\s*R"rawliteral\((.*?)\)rawliteral"',
                   src, re.DOTALL)
     if not m:
-        return "<h1>Could not extract INDEX_HTML from web_server.h</h1>"
+        return "<h1>Could not extract INDEX_HTML from web_server.cpp</h1>"
     return m.group(1)
 
 

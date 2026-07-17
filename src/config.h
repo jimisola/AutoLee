@@ -36,12 +36,9 @@ struct SpeedProfile {
 };
 
 static constexpr uint8_t NUM_PROFILES = 3;
-static SpeedProfile profiles[NUM_PROFILES] = {
-  { "Slow",   15000, 350, 350 },
-  { "Normal", 35000, 15, 15 },
-  { "Fast",   45000, 1, 1 },
-};
-static uint8_t activeProfile = 1;  // default to Normal
+// Defined in main.cpp (mutable, shared across translation units).
+extern SpeedProfile profiles[NUM_PROFILES];
+extern uint8_t activeProfile;
 
 static constexpr uint32_t RUN_DECEL    = 800000;  // accel/decel rate for run moves (fast ramps, max SG coverage)
 
@@ -52,8 +49,8 @@ static constexpr uint32_t RUN_DECEL    = 800000;  // accel/decel rate for run mo
 // ==========================================================================
 //  ENDPOINT TUNING
 // ==========================================================================
-static int32_t upOffsetSteps   = 0;
-static int32_t downOffsetSteps = 0;
+extern int32_t upOffsetSteps;     // defined in main.cpp
+extern int32_t downOffsetSteps;   // defined in main.cpp
 static constexpr int32_t DOWN_OFFSET_DEFAULT = -500;
 static constexpr int32_t OFFSET_MIN     = -8000;
 static constexpr int32_t OFFSET_MAX     = +8000;
@@ -65,7 +62,7 @@ static constexpr int32_t CAL_PREMOVE_DOWN_STEPS = 5500;
 //  CALIBRATION CONSTANTS
 // ==========================================================================
 static constexpr int8_t   CAL_SGT          = -1;
-static uint16_t           RUN_CURRENT_MA   = 3500;
+extern uint16_t           RUN_CURRENT_MA;  // defined in main.cpp
 static constexpr uint16_t RUN_CURRENT_MIN  = 1000;
 static constexpr uint16_t RUN_CURRENT_MAX  = 4500;
 static constexpr uint16_t CAL_CURRENT_MA   = 3200;
@@ -105,7 +102,7 @@ static constexpr uint8_t  RUN_SG_HIGH_NEEDED = 2;    // need this many high read
 // does useful work (e.g. pushing primers). The resistance here is normal
 // and would false-trigger stall detection at low trip thresholds.
 // SG is still active for the rest of the travel and near the UP endpoint.
-static int32_t SG_WORK_ZONE_STEPS = 5500;  // skip SG this many steps before endpointDown
+extern int32_t SG_WORK_ZONE_STEPS;  // defined in main.cpp (default 5500)
 static constexpr int32_t SG_WORK_ZONE_MIN = 0;
 static constexpr int32_t SG_WORK_ZONE_MAX = 20000;
 static constexpr uint32_t CREEP_HOME_SPEED   = CAL_SPEED_HZ;

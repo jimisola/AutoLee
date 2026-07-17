@@ -1,7 +1,7 @@
 // ============================================================================
 //  autolee_logic/motor_fsm.h
 //  Typed run-state machine — pure, host-testable. Encodes the *valid*
-//  transitions of the firmware's RunState (AutoLee/globals.h) so the safety
+//  transitions of the firmware's RunState (src/globals.h) so the safety
 //  rules (e.g. you cannot Start from Stalled — you must home first) are
 //  explicit and tested rather than implied by scattered assignments.
 // ============================================================================

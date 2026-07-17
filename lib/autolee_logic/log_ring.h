@@ -1,7 +1,7 @@
 // ============================================================================
 //  autolee_logic/log_ring.h
 //  Fixed-capacity line ring buffer for the web log — pure, host-testable.
-//  Mirrors the logBuf/logHead/logSerial ring in AutoLee/AutoLee.ino:
+//  Mirrors the logBuf/logHead/logSerial ring in src/main.cpp:
 //   - lines are copied with truncation to LINELEN-1 chars (NUL-terminated)
 //   - head wraps modulo LINES; serial counts total lines ever pushed
 // ============================================================================

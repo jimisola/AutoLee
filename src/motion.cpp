@@ -2,20 +2,18 @@
 //  AutoLee – motion.h
 //  Motion control, stall detection, calibration, creep home
 // ============================================================================
-#pragma once
+#include "globals.h"
 
-// All globals and forward declarations are provided by AutoLee.ino
-// (single translation unit — Arduino IDE model)
-
-// Forward declarations (defined later in this file)
-bool move_until_stall(int dir, long &hit_pos);
+// Pure, host-tested logic shared with the native unit tests.
+#include "endpoint_math.h"
+#include "sg_filter.h"
+#include "sg_blanking.h"
+#include "batch.h"
+#include "calibration.h"
 
 // ==========================================================================
 //  UTILITY
 // ==========================================================================
-static inline int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi) {
-  return autolee::clamp_i32(v, lo, hi);  // canonical impl in lib/autolee_logic
-}
 static inline bool nearPos(long a, long b, long tol = 2) { return labs(a - b) <= tol; }
 static inline long flipTarget(long t) { return (t == endpointUp) ? endpointDown : endpointUp; }
 static inline uint16_t read_sg_raw() {
@@ -89,10 +87,6 @@ void requestGracefulStop() {
   stepper->setAcceleration(RUN_DECEL);  // use fast decel for stop too
   stepper->moveTo(endpointUp);
 }
-
-// Forward declarations for jam handling
-static void showJamScreen();
-static void onJamReturnHome(lv_event_t *e);
 
 void handleMotion() {
   if (!stepper || runState == CALIBRATING || runState == STALLED || runState == HOMING) return;

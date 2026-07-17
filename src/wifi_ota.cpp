@@ -2,11 +2,8 @@
 //  AutoLee – wifi_ota.h
 //  WiFi connection management, captive portal, ArduinoOTA
 // ============================================================================
-#pragma once
-
+#include "globals.h"
 #include <ArduinoOTA.h>
-// All globals and forward declarations are provided by AutoLee.ino
-// (single translation unit — Arduino IDE model)
 
 // ==========================================================================
 //  WiFi CREDENTIALS

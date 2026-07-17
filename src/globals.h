@@ -6,6 +6,7 @@
 
 #include <TMCStepper.h>
 #include <FastAccelStepper.h>
+#include <Arduino_GFX_Library.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
@@ -14,6 +15,12 @@
 #include <lvgl.h>
 
 #include "config.h"
+#include "endpoint_math.h"  // for the shared clamp_i32 below
+
+// Small clamp helper shared by motion/ui/web (canonical impl in autolee_logic).
+inline int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi) {
+  return autolee::clamp_i32(v, lo, hi);
+}
 
 // ==========================================================================
 //  HARDWARE OBJECTS
@@ -42,7 +49,7 @@ extern uint32_t stopEntryMs;
 extern uint32_t lastDirectionChangeMs;
 extern uint8_t  runSGHighCount;
 extern uint8_t  runSGLowCount;
-static constexpr uint8_t RUN_SG_HIGH_NEEDED = 2;  // need this many high readings to trigger jam
+// RUN_SG_HIGH_NEEDED is defined in config.h
 
 // ==========================================================================
 //  WIFI STATE
@@ -121,9 +128,10 @@ extern lv_obj_t *lbl_batch_val;
 extern lv_obj_t *lbl_batch_remain;
 
 // ==========================================================================
-//  UTILITY — webLog (used everywhere)
+//  UTILITY — used everywhere
 // ==========================================================================
 void webLog(const char *fmt, ...);
+void wdt_feed();  // defined in main.cpp; fed by the blocking motion loops
 
 // ==========================================================================
 //  FORWARD DECLARATIONS — motion.h
@@ -136,7 +144,6 @@ void recomputeEffectiveEndpoints();
 void handleMotion();
 bool move_until_stall(int dir, long &hit_pos);
 bool return_home_up_safe();
-uint16_t read_sg_raw();
 uint16_t read_sg();
 void fas_wait_for_stop();
 
@@ -155,6 +162,14 @@ void ui_update_wifi_label();
 void setRunButtonState(bool running);
 void setActiveProfile(uint8_t idx);
 void buildUI();
+// Screen navigation + display/touch driver callbacks (called from main.cpp
+// setup() and from motion.cpp) — external linkage across translation units.
+void go(lv_obj_t *scr);
+void showJamScreen();
+void onJamReturnHome(lv_event_t *e);
+void lcd_reg_init();
+void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p);
+void touchpad_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data);
 
 // ==========================================================================
 //  FORWARD DECLARATIONS — wifi_ota.h
