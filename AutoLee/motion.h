@@ -288,10 +288,8 @@ void safeCreepHome() {
 bool move_until_stall(int dir, long &hit_pos) {
   const int32_t target = (dir > 0) ? +CAL_SEARCH_STEPS : -CAL_SEARCH_STEPS;
   const int32_t start_pos = stepper->getCurrentPosition();
-  const uint32_t accel_ms = (uint32_t)((uint64_t)CAL_SPEED_HZ * 1000ULL / (uint64_t)CAL_ACCEL);
-  const int32_t  accel_dist = (int32_t)((uint64_t)CAL_SPEED_HZ * (uint64_t)CAL_SPEED_HZ / (2ULL * (uint64_t)CAL_ACCEL));
-  const uint32_t ignore_ms  = accel_ms + 100;
-  const int32_t  ignore_dst = (accel_dist * 8) / 10;
+  const uint32_t ignore_ms  = autolee::calIgnoreMs(CAL_SPEED_HZ, CAL_ACCEL);
+  const int32_t  ignore_dst = autolee::calIgnoreDist(CAL_SPEED_HZ, CAL_ACCEL);
 
   driver.en_pwm_mode(false);
   driver.TPWMTHRS(0);
@@ -328,21 +326,21 @@ bool move_until_stall(int dir, long &hit_pos) {
     }
 
     // Early trip
-    if (elapsed_ms <= EARLY_WINDOW_MS && dist <= EARLY_WINDOW_DST_MAX) {
-      if (elapsed_ms >= EARLY_MIN_TIME_MS && dist >= EARLY_MIN_MOVE_STEPS) {
-        if (sg <= EARLY_TRIP) {
-          if (++confirm_early >= CAL_HIT_CONFIRM) {
-            webLog("MUS: EARLY HIT sg=%u pos=%ld", sg, stepper->getCurrentPosition());
-            stepper->forceStop(); fas_wait_for_stop();
-            hit_pos = stepper->getCurrentPosition();
-            return true;
-          }
-        } else confirm_early = 0;
-      }
+    if (autolee::earlyArmed({EARLY_WINDOW_MS, EARLY_WINDOW_DST_MAX,
+                             EARLY_MIN_TIME_MS, EARLY_MIN_MOVE_STEPS},
+                            elapsed_ms, dist)) {
+      if (sg <= EARLY_TRIP) {
+        if (++confirm_early >= CAL_HIT_CONFIRM) {
+          webLog("MUS: EARLY HIT sg=%u pos=%ld", sg, stepper->getCurrentPosition());
+          stepper->forceStop(); fas_wait_for_stop();
+          hit_pos = stepper->getCurrentPosition();
+          return true;
+        }
+      } else confirm_early = 0;
     }
 
     // Baseline
-    if (!baseline_started && elapsed_ms > ignore_ms && dist > ignore_dst) {
+    if (!baseline_started && autolee::baselineReady(elapsed_ms, dist, ignore_ms, ignore_dst)) {
       baseline_started = true;
       base_start_ms = now;
       base_sum = 0; base_cnt = 0; confirm_dyn = 0;
@@ -351,7 +349,7 @@ bool move_until_stall(int dir, long &hit_pos) {
       base_sum += sg;
       if (base_cnt < 1000) base_cnt++;
       if ((now - base_start_ms) >= 200 && base_cnt > 0) {
-        uint16_t baseline = min((uint16_t)(base_sum / base_cnt), (uint16_t)1023);
+        uint16_t baseline = autolee::baselineAverage(base_sum, base_cnt);
         dyn_trip = autolee::dynamicTrip(baseline, CAL_REL_DROP_Q8, CAL_ABS_MIN);
         dyn_ready = true;
         webLog("MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);

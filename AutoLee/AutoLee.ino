@@ -34,6 +34,9 @@ static inline void wdt_feed() {
 #include "sg_filter.h"
 #include "sg_blanking.h"
 #include "batch.h"
+#include "calibration.h"
+#include "state_json.h"
+#include "motor_fsm.h"
 
 // ==========================================================================
 //  GLOBAL DEFINITIONS (storage for extern declarations in globals.h)

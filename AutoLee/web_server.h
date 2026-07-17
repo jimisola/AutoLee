@@ -12,36 +12,27 @@
 //  STATE JSON BUILDER
 // ==========================================================================
 static String buildStateJSON() {
-  char buf[900];
   const char *wfStat = wifiConnected ? "Connected" : (wifiAPMode ? "AP Mode" : "Disconnected");
   String wfSSID = wifiConnected ? WiFi.SSID() : (wifiAPMode ? String(DEFAULT_AP_SSID) : String("—"));
   String wfIP = wifiConnected ? WiFi.localIP().toString() : (wifiAPMode ? WiFi.softAPIP().toString() : String("—"));
-  snprintf(buf, sizeof(buf),
-    "{\"version\":\"%s\",\"state\":\"%s\",\"counter\":%ld,\"speed\":%lu,\"calibrated\":%s,"
-    "\"rawUp\":%ld,\"rawDown\":%ld,\"endpointUp\":%ld,\"endpointDown\":%ld,"
-    "\"upOffset\":%ld,\"downOffset\":%ld,\"position\":%ld,\"sgTrip\":%u,"
-    "\"workZone\":%ld,\"currentMa\":%u,"
-    "\"profileIdx\":%u,\"profileName\":\"%s\","
-    "\"profiles\":[{\"name\":\"Slow\",\"hz\":%lu,\"sg\":%u},"
-    "{\"name\":\"Normal\",\"hz\":%lu,\"sg\":%u},"
-    "{\"name\":\"Fast\",\"hz\":%lu,\"sg\":%u}],"
-    "\"wifiStatus\":\"%s\",\"wifiSSID\":\"%s\",\"wifiIP\":\"%s\","
-    "\"batchTarget\":%ld,\"batchCount\":%ld,\"batchActive\":%s}",
+
+  autolee::DeviceState st{
     FW_VERSION,
     runState==RUNNING?"RUNNING":runState==STOPPING?"STOPPING":runState==CALIBRATING?"CALIBRATING":runState==STALLED?"STALLED":runState==HOMING?"HOMING":"IDLE",
-    counter, (unsigned long)ui_speed_hz, endpointsCalibrated?"true":"false",
+    counter, ui_speed_hz, endpointsCalibrated,
     rawUp, rawDown, endpointUp, endpointDown,
-    (long)upOffsetSteps, (long)downOffsetSteps,
+    upOffsetSteps, downOffsetSteps,
     stepper ? stepper->getCurrentPosition() : 0L,
-    RUN_SG_TRIP,
-    (long)SG_WORK_ZONE_STEPS, RUN_CURRENT_MA,
+    RUN_SG_TRIP, SG_WORK_ZONE_STEPS, RUN_CURRENT_MA,
     activeProfile, profiles[activeProfile].name,
-    (unsigned long)profiles[0].speed_hz, profiles[0].sg_trip,
-    (unsigned long)profiles[1].speed_hz, profiles[1].sg_trip,
-    (unsigned long)profiles[2].speed_hz, profiles[2].sg_trip,
+    { { profiles[0].name, profiles[0].speed_hz, profiles[0].sg_trip },
+      { profiles[1].name, profiles[1].speed_hz, profiles[1].sg_trip },
+      { profiles[2].name, profiles[2].speed_hz, profiles[2].sg_trip } },
     wfStat, wfSSID.c_str(), wfIP.c_str(),
-    batchTarget, batchCount,
-    batchActive ? "true" : "false");
+    batchTarget, batchCount, batchActive
+  };
+  char buf[900];
+  autolee::buildStateJson(st, buf, sizeof(buf));
   return String(buf);
 }
 
