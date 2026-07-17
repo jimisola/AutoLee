@@ -9,14 +9,15 @@ Usage:
     python tools/mock_server.py         # http://localhost:8080
     python tools/mock_server.py 9000    # custom port
 """
+
 import json
 import re
 import sys
-import time
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_LOCK = threading.Lock()
@@ -25,8 +26,9 @@ STATE_LOCK = threading.Lock()
 def load_index_html() -> str:
     """Pull the INDEX_HTML raw string literal out of web_server.cpp."""
     src = (ROOT / "src" / "web_server.cpp").read_text(encoding="utf-8", errors="replace")
-    m = re.search(r'INDEX_HTML\[\]\s*PROGMEM\s*=\s*R"rawliteral\((.*?)\)rawliteral"',
-                  src, re.DOTALL)
+    m = re.search(
+        r'INDEX_HTML\[\]\s*PROGMEM\s*=\s*R"rawliteral\((.*?)\)rawliteral"', src, re.DOTALL
+    )
     if not m:
         return "<h1>Could not extract INDEX_HTML from web_server.cpp</h1>"
     return m.group(1)
