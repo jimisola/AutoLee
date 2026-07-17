@@ -31,3 +31,19 @@ jobs:
 
       - name: Build firmware (ESP32-C6)
         run: pio run -e esp32-c6
+
+  api-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install validators
+        run: pip install --upgrade check-jsonschema pyyaml
+      - name: Validate the state example against the shared schema
+        run: check-jsonschema --schemafile schemas/state.schema.json schemas/state.example.json
+      - name: Sanity-check the API spec files parse
+        run: |
+          python -c "import yaml,sys; yaml.safe_load(open('openapi.yaml')); print('openapi.yaml OK')"
+          python -c "import yaml,sys; yaml.safe_load(open('asyncapi.yaml')); print('asyncapi.yaml OK')"

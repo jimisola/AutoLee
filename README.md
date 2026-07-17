@@ -295,6 +295,17 @@ Key constants are in `config.h`:
 
 ## API Reference
 
+Machine-readable specs live in the repo and share one JSON Schema
+([`schemas/state.schema.json`](schemas/state.schema.json)):
+
+- **REST:** [`openapi.yaml`](openapi.yaml) — view rendered in
+  [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/openapi.yaml)
+  or [Redoc](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/openapi.yaml).
+- **SSE `/events`:** [`asyncapi.yaml`](asyncapi.yaml) — view rendered in
+  [AsyncAPI Studio](https://studio.asyncapi.com/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/asyncapi.yaml).
+
+*(Rendered links resolve once merged to `main`.)*
+
 All endpoints accept `POST` requests.
 
 | Endpoint | Parameters | Description |
