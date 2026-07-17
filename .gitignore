@@ -1,0 +1,12 @@
+# Arduino / arduino-cli build output
+AutoLee/build/
+build/
+*.bin
+*.elf
+*.map
+
+# Local arduino-cli sketchbook / config, if placed in-tree
+.arduino15/
+
+# OS cruft
+.DS_Store

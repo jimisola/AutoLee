@@ -21,17 +21,19 @@ permissions:
 
 env:
   # ---- Pinned toolchain versions (reproducible builds) --------------------
-  # esp32c6 requires the arduino-esp32 core >= 3.0.0.
-  # TODO: pin to the exact core version installed in the maintainer's Arduino IDE
-  #       (Boards Manager -> "esp32 by Espressif") so CI matches the hand build.
-  ESP32_CORE_VERSION: "3.1.3"
-  # Library-Manager dependencies. LVGL and GFX versions are the ones the project
-  # documents; the rest are left unpinned for now.
-  # TODO: pin TMCStepper / FastAccelStepper / ESPAsyncWebServer / AsyncTCP to the
-  #       exact versions from the maintainer's `arduino-cli lib list`. Note that
-  #       ESPAsyncWebServer / AsyncTCP have several incompatible forks.
+  # esp32c6 requires the arduino-esp32 core >= 3.0.0. This combination is
+  # verified to compile the sketch cleanly for esp32c6 / Minimal SPIFFS.
+  ESP32_CORE_VERSION: "3.3.10"
+  # Library-Manager dependencies, pinned to a verified-compiling set.
   LVGL_VERSION: "8.4.0"
-  GFX_VERSION: "1.5.9"
+  GFX_VERSION: "1.6.6"
+  TMCSTEPPER_VERSION: "0.7.3"
+  FASTACCELSTEPPER_VERSION: "1.2.7"
+  # Async stack: the ESP32Async forks (successors to the me-no-dev libraries).
+  # These specific Library-Manager names/authors matter — other forks with
+  # similar names are not compatible with a recent esp32 core.
+  ESPASYNCWEBSERVER_VERSION: "3.11.2"    # "ESP Async WebServer" by ESP32Async
+  ASYNCTCP_VERSION: "3.4.10"             # "Async TCP" by ESP32Async
   FQBN: "esp32:esp32:esp32c6:PartitionScheme=min_spiffs,FlashMode=dio,FlashSize=4M"
   BUILD_DIR: "AutoLee/build/esp32.esp32.esp32c6"
 
@@ -81,10 +83,10 @@ jobs:
           # Wire / Preferences / Update ship with the esp32 core -> do NOT install.
           arduino-cli lib install "lvgl@${LVGL_VERSION}"
           arduino-cli lib install "GFX Library for Arduino@${GFX_VERSION}"
-          arduino-cli lib install "TMCStepper"
-          arduino-cli lib install "FastAccelStepper"
-          arduino-cli lib install "ESPAsyncWebServer"
-          arduino-cli lib install "AsyncTCP"
+          arduino-cli lib install "TMCStepper@${TMCSTEPPER_VERSION}"
+          arduino-cli lib install "FastAccelStepper@${FASTACCELSTEPPER_VERSION}"
+          arduino-cli lib install "ESP Async WebServer@${ESPASYNCWEBSERVER_VERSION}"
+          arduino-cli lib install "Async TCP@${ASYNCTCP_VERSION}"
 
           # LVGL quirk: lv_conf.h must sit NEXT TO the lvgl folder (libraries root),
           # not inside it. (Copied after LVGL is installed.)

@@ -1,34 +1,35 @@
 # esp_lcd_touch_axs5106l (vendored)
 
-**⚠️ Placeholder — the actual driver source must be added here before CI can build.**
+The **AXS5106L** capacitive-touch driver for the WaveShare 1.47" ESP32-C6 Touch
+LCD. It is **not** available in the Arduino Library Manager, so it is vendored
+here and copied into the arduino-cli sketchbook by
+`.github/workflows/release.yml`. The sketch uses its `bsp_touch_init()` /
+`bsp_touch_read()` / `bsp_touch_get_coordinates()` API
+(`AutoLee/AutoLee.ino`, `AutoLee/ui_touch.h`).
 
-This directory vendors the **AXS5106L** touch-controller driver for the WaveShare
-1.47" ESP32-C6 Touch LCD. It is **not** available in the Arduino Library Manager, so
-it is committed into the repo and copied into the arduino-cli sketchbook by
-`.github/workflows/release.yml`.
+## Source
 
-## How to populate this folder
+These files are the **Arduino** variant of the driver, taken verbatim from
+WaveShare's official demo package for this board:
 
-1. Download the [WaveShare ESP32-C6-Touch-LCD-1.47 demo package](https://www.waveshare.com/wiki/ESP32-C6-Touch-LCD-1.47).
-2. Locate the `esp_lcd_touch_axs5106l` library folder inside the package (the one
-   containing `esp_lcd_touch_axs5106l.h` and its source, plus any `library.properties`
-   / `LICENSE`).
-3. Copy its **contents** into this directory (so that
-   `third_party/esp_lcd_touch_axs5106l/esp_lcd_touch_axs5106l.h` exists).
-4. **Preserve the upstream `LICENSE` and file headers verbatim** — see below.
-5. Replace this README with (or keep it alongside) the upstream one; keep the
-   attribution note in `NOTICE`.
+- Wiki: https://www.waveshare.com/wiki/ESP32-C6-Touch-LCD-1.47
+- Package: `ESP32-C6-Touch-LCD-1.47-Demo.zip` →
+  `Arduino/libraries/esp_lcd_touch_axs5106l/`
 
-The layout must be an Arduino-installable library folder — the workflow copies the
-whole folder to `~/Arduino/libraries/esp_lcd_touch_axs5106l` and expects the sketch's
-`#include "esp_lcd_touch_axs5106l.h"` to resolve.
+Files: `esp_lcd_touch_axs5106l.h`, `esp_lcd_touch_axs5106l.cpp`.
 
-## License / attribution
+## ⚠️ License
 
-The AutoLee project is licensed CC BY-NC 4.0, but **this vendored driver is
-third-party code that retains its own upstream license** (see `NOTICE` and the
-driver's own `LICENSE` once added). Do not relicense it or strip its headers.
+The upstream files ship with **no license header and no LICENSE file** — see
+`NOTICE`. WaveShare's demo code is published without an explicit open-source
+grant, so redistribution terms are unclear. They are included here only because
+the firmware cannot compile without them and they are not distributed via the
+Library Manager. If this is a concern, the alternative is to **fetch** the driver
+during the CI build instead of committing it (adjust the workflow's
+"Install ESP32 core and libraries" step). Do not add a license you don't have
+the right to grant.
 
-If the upstream license does **not** permit redistribution, do not commit the source
-here — instead fetch it during the CI run and adjust the workflow's
-"Install ESP32 core and libraries" step accordingly.
+## Updating
+
+Re-download the demo package and copy the two files from
+`Arduino/libraries/esp_lcd_touch_axs5106l/` over the ones here.

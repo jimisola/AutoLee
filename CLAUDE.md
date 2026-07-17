@@ -13,7 +13,7 @@ AutoLee is Arduino/C++ firmware for a **WaveShare 1.47" ESP32-C6** touchscreen m
 There is **no local build/lint/test tooling** — this compiles inside the Arduino IDE or PlatformIO, not from a shell here. There are no automated tests.
 
 - **Board:** ESP32-C6
-- **Partition scheme:** *Minimal SPIFFS (1.9 MB APP with OTA / 190 KB SPIFFS)* — required; firmware overflows the default layout.
+- **Partition scheme:** *Minimal SPIFFS (1.9 MB APP with OTA / 128 KB SPIFFS)* — required; firmware overflows the default layout.
 - **Libraries:** LVGL v8.4.0, GFX_Library_for_Arduino v1.5.9, TMCStepper, FastAccelStepper, ESPAsyncWebServer + AsyncTCP, ArduinoOTA, DNSServer (all via Library Manager), plus **`esp_lcd_touch_axs5106l`** which is *not* in Library Manager — install manually from the Waveshare ESP32-C6-Touch-LCD-1.47 demo package.
 - **LVGL setup:** copy this repo's `AutoLee/lv_conf.h` to sit **next to** (not inside) the `lvgl` library folder, and copy LVGL's `demos` folder into its `src`.
 - **Flashing a prebuilt binary:** download `AutoLee_vX.X_merged.bin` from the [latest GitHub Release](https://github.com/jimisola/AutoLee/releases/latest) and flash at offset `0x0` via the Espressif Web Flasher (Chrome/Edge, dio mode, 4 MB). The `_update.bin` (app-only) is for OTA, not initial USB flash.
@@ -58,6 +58,6 @@ Calibration finds raw UP/DOWN mechanical stops sensorlessly (`rawUp`/`rawDown`);
 
 ## Conventions
 
-- Version lives in `config.h` as `FW_VERSION`; the `AutoLee.ino` header comment and README version table should be kept consistent when bumping.
+- Version lives in `config.h` as `FW_VERSION` (single source of truth — read by the serial banner and the CI release guard). Keep the README version history consistent when bumping; don't hardcode the version anywhere else.
 - Constants are centralized in `config.h` — prefer adding a named `constexpr` there over hardcoding tuning values in module logic.
 - The web `/api/*` endpoints (all POST except `GET /api/state`) and the SSE `/events` stream are the documented external contract (see README's API Reference); keep `buildStateJSON` and the JS `upd()` handler in sync when adding state fields.

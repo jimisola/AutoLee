@@ -5,7 +5,13 @@ This directory contains a third-party component vendored into AutoLee:
              https://www.waveshare.com/wiki/ESP32-C6-Touch-LCD-1.47
   Copyright: (c) WaveShare / respective authors
 
-This component is NOT covered by AutoLee's CC BY-NC 4.0 license. It retains its
-own upstream license, which must be preserved in this directory (see LICENSE once
-the source is added). It is included here only because it is not distributed via
-the Arduino Library Manager and is required to compile the firmware.
+This component is NOT covered by AutoLee's CC BY-NC 4.0 license.
+
+The upstream files carry NO license header and the demo package contains NO
+LICENSE file for this driver — WaveShare publishes the demo code without an
+explicit open-source grant, so its redistribution terms are unspecified. The
+files are reproduced here verbatim, unmodified, solely because they are required
+to compile the firmware and are not available through the Arduino Library
+Manager. All rights remain with WaveShare / the original authors. If clearer
+licensing is required, fetch the driver at build time instead of vendoring it
+(see README.md).
