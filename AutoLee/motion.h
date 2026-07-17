@@ -14,7 +14,7 @@ bool move_until_stall(int dir, long &hit_pos);
 //  UTILITY
 // ==========================================================================
 static inline int32_t clamp_i32(int32_t v, int32_t lo, int32_t hi) {
-  return (v < lo) ? lo : (v > hi) ? hi : v;
+  return autolee::clamp_i32(v, lo, hi);  // canonical impl in lib/autolee_logic
 }
 static inline bool nearPos(long a, long b, long tol = 2) { return labs(a - b) <= tol; }
 static inline long flipTarget(long t) { return (t == endpointUp) ? endpointDown : endpointUp; }
@@ -30,34 +30,24 @@ static inline uint16_t read_sg_raw() {
 uint16_t read_sg() {
   uint16_t s[5];
   for (int i = 0; i < 5; i++) s[i] = read_sg_raw();
-  // Simple insertion sort for 5 elements
-  for (int i = 1; i < 5; i++) {
-    uint16_t key = s[i];
-    int j = i - 1;
-    while (j >= 0 && s[j] > key) { s[j + 1] = s[j]; j--; }
-    s[j + 1] = key;
-  }
-  return s[2];  // median
+  return autolee::median5(s);  // canonical impl in lib/autolee_logic
 }
 void fas_wait_for_stop() {
-  while (stepper && stepper->isRunning()) { lv_timer_handler(); delay(1); }
+  while (stepper && stepper->isRunning()) { lv_timer_handler(); wdt_feed(); delay(1); }
 }
 
 // ==========================================================================
 //  ENDPOINT MATH
 // ==========================================================================
 void recomputeEffectiveEndpoints() {
+  autolee::Endpoints e = autolee::computeEffectiveEndpoints(
+      endpointsCalibrated, rawUp, rawDown, upOffsetSteps, downOffsetSteps,
+      OFFSET_MIN, OFFSET_MAX, ENDPOINT_GUARD);
   if (!endpointsCalibrated) { endpointUp = 0; endpointDown = 0; return; }
-  upOffsetSteps   = clamp_i32(upOffsetSteps, OFFSET_MIN, OFFSET_MAX);
-  downOffsetSteps = clamp_i32(downOffsetSteps, OFFSET_MIN, OFFSET_MAX);
-  long upEff = rawUp + upOffsetSteps;
-  long dnEff = rawDown + downOffsetSteps;
-  if (dnEff <= (upEff + ENDPOINT_GUARD)) {
-    dnEff = upEff + ENDPOINT_GUARD;
-    downOffsetSteps = (int32_t)(dnEff - rawDown);
-  }
-  endpointUp = upEff;
-  endpointDown = dnEff;
+  upOffsetSteps   = e.upOffset;
+  downOffsetSteps = e.downOffset;
+  endpointUp      = e.endpointUp;
+  endpointDown    = e.endpointDown;
 }
 
 // ==========================================================================
@@ -115,7 +105,7 @@ void handleMotion() {
           counter++;
           if (batchActive) {
             batchCount++;
-            if (batchCount >= batchTarget) {
+            if (autolee::batchComplete(batchCount, batchTarget)) {
               webLog("Batch complete: %ld/%ld", batchCount, batchTarget);
               batchActive = false;
               requestGracefulStop();
@@ -138,27 +128,24 @@ void handleMotion() {
 
       uint32_t sinceChange = millis() - lastDirectionChangeMs;
 
-      // Accel blank: v/a at RUN_DECEL + margin
-      uint32_t accelWindowMs = (uint32_t)((uint64_t)ui_speed_hz * 1000ULL / (uint64_t)RUN_DECEL) + 80;
+      // Accel blank: v/a at RUN_DECEL + margin (autolee::accelBlankMs)
+      uint32_t accelWindowMs = autolee::accelBlankMs(ui_speed_hz, RUN_DECEL);
       if (sinceChange < accelWindowMs) break;
 
       // Work zone: skip SG near the DOWN endpoint where the tool does work
       // (primer push etc.) — normal resistance here would false-trigger.
       // Only applies when heading toward DOWN, not toward UP.
-      if (currentTarget == endpointDown) {
-        int32_t distToDown = labs(pos - endpointDown);
-        if (distToDown < SG_WORK_ZONE_STEPS) {
-          runSGHighCount = 0; runSGLowCount = 0;
-          break;
-        }
+      if (currentTarget == endpointDown &&
+          autolee::inWorkZone(pos, endpointDown, SG_WORK_ZONE_STEPS)) {
+        runSGHighCount = 0; runSGLowCount = 0;
+        break;
       }
 
       // Decel blank: position-based, using actual decel distance + margin.
       // Skip UNLESS we already have jam evidence (carry-through).
       {
         int32_t distToTarget = labs(pos - currentTarget);
-        int32_t decelDist = (int32_t)((uint64_t)ui_speed_hz * ui_speed_hz / (2ULL * (uint64_t)RUN_DECEL));
-        int32_t decelBlank = decelDist + 500;  // margin for planner timing
+        int32_t decelBlank = autolee::decelBlankSteps(ui_speed_hz, RUN_DECEL);
         if (distToTarget < decelBlank && runSGHighCount < RUN_SG_HIGH_NEEDED) {
           runSGHighCount = 0; runSGLowCount = 0;
           break;
@@ -365,8 +352,7 @@ bool move_until_stall(int dir, long &hit_pos) {
       if (base_cnt < 1000) base_cnt++;
       if ((now - base_start_ms) >= 200 && base_cnt > 0) {
         uint16_t baseline = min((uint16_t)(base_sum / base_cnt), (uint16_t)1023);
-        uint16_t rel_trip = (uint16_t)((baseline * (uint32_t)CAL_REL_DROP_Q8) >> 8);
-        dyn_trip = max(rel_trip, CAL_ABS_MIN);
+        dyn_trip = autolee::dynamicTrip(baseline, CAL_REL_DROP_Q8, CAL_ABS_MIN);
         dyn_ready = true;
         webLog("MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);
       }
@@ -385,6 +371,7 @@ bool move_until_stall(int dir, long &hit_pos) {
     }
 
     lv_timer_handler();
+    wdt_feed();
     delay(1);
   }
   hit_pos = stepper->getCurrentPosition();
@@ -450,6 +437,7 @@ bool return_home_up_safe() {
     }
 
     lv_timer_handler();
+    wdt_feed();
     delay(1);
   }
 

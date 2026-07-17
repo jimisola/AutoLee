@@ -221,39 +221,19 @@ The Arduino IDE compiles everything as a single translation unit. Include order 
 
 ---
 
-## Software Setup
+## Building from source
 
-### Dependencies (Arduino / PlatformIO)
+Developer documentation — building with PlatformIO (recommended), the Arduino IDE,
+or arduino-cli, plus running the unit tests and cutting releases — lives in
+**[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-These are the versions CI builds with (see `.github/workflows/release.yml`); other versions may work but are unverified.
+Quick start with PlatformIO:
 
-| Library | Version | Install | Purpose |
-|---|---|---|---|
-| `LVGL` | v8.4.0 | Library Manager | Touchscreen UI framework |
-| `GFX Library for Arduino` | v1.6.6 | Library Manager | ST7789 display driver |
-| `TMCStepper` | v0.7.3 | Library Manager | TMC5160 SPI communication |
-| `FastAccelStepper` | v1.2.7 | Library Manager | Step pulse generation with acceleration |
-| `ESP Async WebServer` (by ESP32Async) | v3.11.2 | Library Manager | Web server & SSE |
-| `Async TCP` (by ESP32Async) | v3.4.10 | Library Manager | Async networking (dependency of the web server) |
-| `ArduinoOTA`, `DNSServer` | — | Bundled with esp32 core | OTA + captive portal |
-| `esp_lcd_touch_axs5106l` | — | **Vendored** (`third_party/`) | AXS5106L touch controller driver |
-
-> **Notes:**
-> - Use the **ESP32Async** forks of the async libraries — several incompatible forks share similar names.
-> - The `esp_lcd_touch_axs5106l` driver is **not** in the Library Manager. It is vendored in [`third_party/esp_lcd_touch_axs5106l/`](third_party/esp_lcd_touch_axs5106l/); copy that folder into your Arduino `libraries` directory (see its README for licensing).
-
-### Build & Flash
-
-For a full local setup (including the exact `arduino-cli` commands CI uses), see [CONTRIBUTING.md](CONTRIBUTING.md). In short:
-
-1. Clone this repo
-2. Install the Library-Manager libraries above (at the pinned versions)
-3. Install the touch driver: copy [`third_party/esp_lcd_touch_axs5106l/`](third_party/esp_lcd_touch_axs5106l/) into your Arduino `libraries` directory
-4. Set up LVGL: copy `AutoLee/lv_conf.h` to sit **next to** your `lvgl` library folder (not inside it). *(The LVGL `demos` folder is not needed — the sketch doesn't use it.)*
-5. Open `AutoLee/AutoLee.ino` in Arduino IDE or PlatformIO — all `.h` files must be in the same folder as the `.ino`
-6. Select board: **ESP32-C6**
-7. Set partition scheme: **Minimal SPIFFS (1.9 MB APP with OTA/128 KB SPIFFS)** — the firmware is too large for the default partition layout
-8. Compile and flash
+```bash
+pio run  -e esp32-c6      # build the firmware
+pio test -e native        # run the host unit tests
+pio run  -e esp32-c6 -t upload   # flash over USB
+```
 
 ## Flash Pre-Compiled Binary (No Arduino IDE Required)
  

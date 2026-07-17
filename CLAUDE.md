@@ -10,17 +10,20 @@ AutoLee is Arduino/C++ firmware for a **WaveShare 1.47" ESP32-C6** touchscreen m
 
 ## Build, flash, test
 
-There is **no local build/lint/test tooling** — this compiles inside the Arduino IDE or PlatformIO, not from a shell here. There are no automated tests.
+Build & test with **PlatformIO** (see `platformio.ini` and CONTRIBUTING.md):
+`pio run -e esp32-c6` (firmware), `pio test -e native` (host unit tests, no hardware). The Arduino IDE still works (the sketch stays in `AutoLee/`). CI (`.github/workflows/ci.yml`) runs both on every PR.
 
-- **Board:** ESP32-C6
+- **Board:** ESP32-C6. Platform: pioarduino `55.03.39` (arduino-esp32 3.3.x).
 - **Partition scheme:** *Minimal SPIFFS (1.9 MB APP with OTA / 128 KB SPIFFS)* — required; firmware overflows the default layout.
-- **Libraries:** LVGL v8.4.0, GFX_Library_for_Arduino v1.5.9, TMCStepper, FastAccelStepper, ESPAsyncWebServer + AsyncTCP, ArduinoOTA, DNSServer (all via Library Manager), plus **`esp_lcd_touch_axs5106l`** which is *not* in Library Manager — install manually from the Waveshare ESP32-C6-Touch-LCD-1.47 demo package.
-- **LVGL setup:** copy this repo's `AutoLee/lv_conf.h` to sit **next to** (not inside) the `lvgl` library folder, and copy LVGL's `demos` folder into its `src`.
+- **Libraries (pinned, verified):** LVGL 8.4.0, GFX Library for Arduino 1.6.6, TMCStepper 0.7.3, FastAccelStepper 1.2.7, **ESP32Async** forks of ESP Async WebServer 3.11.2 + Async TCP 3.4.10, plus the vendored **`esp_lcd_touch_axs5106l`** driver in `third_party/` (not in the Library Manager). PlatformIO wires the driver and `lv_conf.h` automatically.
+- **LVGL setup (Arduino IDE only):** copy `AutoLee/lv_conf.h` next to (not inside) the `lvgl` library folder. The LVGL `demos` folder is **not** needed.
+- **Pure logic + tests:** hardware-independent algorithms live in `lib/autolee_logic/` and are covered by Unity suites in `test/`; the firmware includes the same headers, so tested code == shipped code.
+- **Task watchdog:** `ENABLE_TASK_WDT` in `config.h`; blocking calibration/homing loops feed it via `wdt_feed()`.
 - **Flashing a prebuilt binary:** download `AutoLee_vX.X_merged.bin` from the [latest GitHub Release](https://github.com/jimisola/AutoLee/releases/latest) and flash at offset `0x0` via the Espressif Web Flasher (Chrome/Edge, dio mode, 4 MB). The `_update.bin` (app-only) is for OTA, not initial USB flash.
 - **CI release:** `.github/workflows/release.yml` builds both `.bin`s with `arduino-cli` and attaches them when a Release is published. The release tag must be `vX.Y` and match `FW_VERSION` in `config.h`, or the build fails the version guard. The Waveshare touch driver is vendored under `third_party/esp_lcd_touch_axs5106l/` because it is not in the Library Manager.
 - **OTA:** web UI Firmware page (drag-drop app-only `.bin`), or ArduinoOTA (hostname `autolee`, password `autolee`).
 
-To verify a change, you must compile in the Arduino IDE/PlatformIO and flash to hardware — behavior cannot be exercised in this environment.
+Pure-logic changes can be verified with `pio test -e native`; full hardware behavior still requires flashing to the board.
 
 ## Architecture
 

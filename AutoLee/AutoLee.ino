@@ -16,8 +16,24 @@
 #include <Preferences.h>
 #include <Update.h>
 #include <DNSServer.h>
+#include <esp_task_wdt.h>
 
 #include "config.h"
+
+// Feed the task watchdog. Called from loop() and from the blocking
+// calibration/homing loops so long moves don't trip the watchdog.
+static inline void wdt_feed() {
+#if ENABLE_TASK_WDT
+  esp_task_wdt_reset();
+#endif
+}
+
+// Pure, host-testable logic modules (lib/autolee_logic/) — shared with the
+// native unit tests so the tested code and the shipped code are the same.
+#include "endpoint_math.h"
+#include "sg_filter.h"
+#include "sg_blanking.h"
+#include "batch.h"
 
 // ==========================================================================
 //  GLOBAL DEFINITIONS (storage for extern declarations in globals.h)
@@ -216,6 +232,21 @@ void setup() {
   setupWebServer();
   setupArduinoOTA();
 
+#if ENABLE_TASK_WDT
+  // Guard the main loop. Arduino already inits a TWDT, so reconfigure it if
+  // esp_task_wdt_init reports it is already running, then subscribe loopTask.
+  esp_task_wdt_config_t twdt_cfg = {
+    .timeout_ms     = TASK_WDT_TIMEOUT_MS,
+    .idle_core_mask = 0,
+    .trigger_panic  = true,
+  };
+  if (esp_task_wdt_init(&twdt_cfg) == ESP_ERR_INVALID_STATE) {
+    esp_task_wdt_reconfigure(&twdt_cfg);
+  }
+  esp_task_wdt_add(NULL);  // watch the Arduino loopTask
+  Serial.printf("Task watchdog armed: %u ms\n", TASK_WDT_TIMEOUT_MS);
+#endif
+
   Serial.println("Setup complete!");
 }
 
@@ -223,6 +254,7 @@ void setup() {
 //  LOOP
 // ==========================================================================
 void loop() {
+  wdt_feed();
   lv_timer_handler();
   handleMotion();
   handleWebCalibration();

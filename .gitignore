@@ -5,6 +5,9 @@ build/
 *.elf
 *.map
 
+# PlatformIO
+.pio/
+
 # Local arduino-cli sketchbook / config, if placed in-tree
 .arduino15/
 

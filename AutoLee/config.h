@@ -135,3 +135,14 @@ static constexpr uint32_t SSE_INTERVAL_MS = 250;
 //  STOP TIMEOUT
 // ==========================================================================
 static constexpr uint32_t STOP_TIMEOUT_MS = 8000;
+
+// ==========================================================================
+//  TASK WATCHDOG (safety)
+//  If the main loop stalls (hung SPI, stuck WiFi stack, etc.) the hardware
+//  watchdog resets the board rather than leaving a powered stepper in an
+//  undefined state. The blocking calibration/homing loops feed it explicitly
+//  (see wdt_feed()), so the timeout only needs to exceed a single feed gap.
+//  Set ENABLE_TASK_WDT to 0 to disable (e.g. while bring-up debugging).
+// ==========================================================================
+#define ENABLE_TASK_WDT 1
+static constexpr uint32_t TASK_WDT_TIMEOUT_MS = 8000;
