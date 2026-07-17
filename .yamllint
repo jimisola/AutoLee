@@ -1,0 +1,10 @@
+# Relaxed yamllint — style only, no hard line-length limit (workflows/specs
+# have long lines). Focuses on real mistakes (syntax, duplicate keys, tabs).
+extends: relaxed
+rules:
+  line-length: disable
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+ignore: |
+  .pio/

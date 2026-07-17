@@ -1,0 +1,34 @@
+name: Bug report
+description: Something isn't working
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: FW_VERSION / release tag (e.g. v1.9)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Motion / calibration / jam
+        - Touch UI
+        - Web UI / API
+        - WiFi / OTA
+        - Build / tooling
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Serial / web log output
+      render: shell
