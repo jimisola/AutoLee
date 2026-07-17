@@ -11,24 +11,42 @@
 // ==========================================================================
 static String buildStateJSON() {
   const char *wfStat = wifiConnected ? "Connected" : (wifiAPMode ? "AP Mode" : "Disconnected");
-  String wfSSID = wifiConnected ? WiFi.SSID() : (wifiAPMode ? String(DEFAULT_AP_SSID) : String("—"));
-  String wfIP = wifiConnected ? WiFi.localIP().toString() : (wifiAPMode ? WiFi.softAPIP().toString() : String("—"));
+  String wfSSID =
+      wifiConnected ? WiFi.SSID() : (wifiAPMode ? String(DEFAULT_AP_SSID) : String("—"));
+  String wfIP = wifiConnected ? WiFi.localIP().toString()
+                              : (wifiAPMode ? WiFi.softAPIP().toString() : String("—"));
 
-  autolee::DeviceState st{
-    FW_VERSION,
-    runState==RUNNING?"RUNNING":runState==STOPPING?"STOPPING":runState==CALIBRATING?"CALIBRATING":runState==STALLED?"STALLED":runState==HOMING?"HOMING":"IDLE",
-    counter, ui_speed_hz, endpointsCalibrated,
-    rawUp, rawDown, endpointUp, endpointDown,
-    upOffsetSteps, downOffsetSteps,
-    stepper ? stepper->getCurrentPosition() : 0L,
-    RUN_SG_TRIP, SG_WORK_ZONE_STEPS, RUN_CURRENT_MA,
-    activeProfile, profiles[activeProfile].name,
-    { { profiles[0].name, profiles[0].speed_hz, profiles[0].sg_trip },
-      { profiles[1].name, profiles[1].speed_hz, profiles[1].sg_trip },
-      { profiles[2].name, profiles[2].speed_hz, profiles[2].sg_trip } },
-    wfStat, wfSSID.c_str(), wfIP.c_str(),
-    batchTarget, batchCount, batchActive
-  };
+  autolee::DeviceState st{FW_VERSION,
+                          runState == RUNNING       ? "RUNNING"
+                          : runState == STOPPING    ? "STOPPING"
+                          : runState == CALIBRATING ? "CALIBRATING"
+                          : runState == STALLED     ? "STALLED"
+                          : runState == HOMING      ? "HOMING"
+                                                    : "IDLE",
+                          counter,
+                          ui_speed_hz,
+                          endpointsCalibrated,
+                          rawUp,
+                          rawDown,
+                          endpointUp,
+                          endpointDown,
+                          upOffsetSteps,
+                          downOffsetSteps,
+                          stepper ? stepper->getCurrentPosition() : 0L,
+                          RUN_SG_TRIP,
+                          SG_WORK_ZONE_STEPS,
+                          RUN_CURRENT_MA,
+                          activeProfile,
+                          profiles[activeProfile].name,
+                          {{profiles[0].name, profiles[0].speed_hz, profiles[0].sg_trip},
+                           {profiles[1].name, profiles[1].speed_hz, profiles[1].sg_trip},
+                           {profiles[2].name, profiles[2].speed_hz, profiles[2].sg_trip}},
+                          wfStat,
+                          wfSSID.c_str(),
+                          wfIP.c_str(),
+                          batchTarget,
+                          batchCount,
+                          batchActive};
   char buf[900];
   autolee::buildStateJson(st, buf, sizeof(buf));
   return String(buf);
@@ -450,42 +468,52 @@ fetch('/api/state').then(r=>r.json()).then(upd).catch(()=>{});
 //  WiFi Setup Page (captive portal)
 // ==========================================================================
 static const char WIFI_CSS[] PROGMEM =
-  "body{font-family:-apple-system,sans-serif;background:#111;color:#eee;padding:20px;}"
-  "h2{color:#7cf;}"
-  "input,select{width:100%;padding:12px;margin:6px 0;border-radius:8px;"
-  "border:1px solid #444;background:#222;color:#fff;box-sizing:border-box;}"
-  "button{width:100%;padding:12px;margin-top:10px;border:none;border-radius:8px;"
-  "color:#fff;font-size:16px;cursor:pointer;}"
-  ".btnSave{background:#28a745;}.btnClear{background:#c0392b;}"
-  ".box{max-width:420px;margin:auto;background:#1b1b1b;padding:20px;border-radius:12px;}"
-  "label{display:block;margin-top:10px;font-size:14px;color:#aaa;}";
+    "body{font-family:-apple-system,sans-serif;background:#111;color:#eee;padding:20px;}"
+    "h2{color:#7cf;}"
+    "input,select{width:100%;padding:12px;margin:6px 0;border-radius:8px;"
+    "border:1px solid #444;background:#222;color:#fff;box-sizing:border-box;}"
+    "button{width:100%;padding:12px;margin-top:10px;border:none;border-radius:8px;"
+    "color:#fff;font-size:16px;cursor:pointer;}"
+    ".btnSave{background:#28a745;}.btnClear{background:#c0392b;}"
+    ".box{max-width:420px;margin:auto;background:#1b1b1b;padding:20px;border-radius:12px;}"
+    "label{display:block;margin-top:10px;font-size:14px;color:#aaa;}";
 
 static String wifiConfigPage() {
   String html;
   html.reserve(3000);
-  html += "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html +=
+      "<!DOCTYPE html><html><head><meta name='viewport' "
+      "content='width=device-width,initial-scale=1'>";
   html += "<title>AutoLee WiFi Setup</title><style>";
   html += FPSTR(WIFI_CSS);
   html += "</style></head><body><div class='box'>";
   html += "<h2>AutoLee WiFi Setup</h2>";
   html += "<p style='color:#aaa;font-size:13px;'>by K.L Design</p>";
   html += "<form method='POST' action='/save'>";
-  html += "<label>Select Network</label><select name='ssid_select'>" + scannedOptionsHTML + "</select>";
-  html += "<label>Or type SSID manually</label><input name='ssid_manual' placeholder='SSID (optional)'>";
+  html +=
+      "<label>Select Network</label><select name='ssid_select'>" + scannedOptionsHTML + "</select>";
+  html +=
+      "<label>Or type SSID manually</label><input name='ssid_manual' placeholder='SSID "
+      "(optional)'>";
   html += "<label>Password</label><input name='pass' type='password' placeholder='WiFi password'>";
   html += "<button class='btnSave' type='submit'>Save &amp; Reboot</button></form>";
-  html += "<form method='POST' action='/clear'><button class='btnClear' type='submit'>Clear Saved WiFi</button></form>";
+  html +=
+      "<form method='POST' action='/clear'><button class='btnClear' type='submit'>Clear Saved "
+      "WiFi</button></form>";
   html += "</div></body></html>";
   return html;
 }
 
 static void setupCaptiveProbeEndpoints() {
-  const char* probes[] = {
-    "/generate_204", "/gen_204", "/hotspot-detect.html",
-    "/library/test/success.html", "/ncsi.txt", "/connecttest.txt", "/fwlink"
-  };
+  const char *probes[] = {"/generate_204",
+                          "/gen_204",
+                          "/hotspot-detect.html",
+                          "/library/test/success.html",
+                          "/ncsi.txt",
+                          "/connecttest.txt",
+                          "/fwlink"};
   for (auto &p : probes)
-    webServer.on(p, HTTP_GET, [](AsyncWebServerRequest *r){ r->redirect("/"); });
+    webServer.on(p, HTTP_GET, [](AsyncWebServerRequest *r) { r->redirect("/"); });
 }
 
 void setupWebServer() {
@@ -503,19 +531,25 @@ void setupWebServer() {
     String ss, sm, pw;
     if (req->hasParam("ssid_select", true)) ss = req->getParam("ssid_select", true)->value();
     if (req->hasParam("ssid_manual", true)) sm = req->getParam("ssid_manual", true)->value();
-    if (req->hasParam("pass", true))        pw = req->getParam("pass", true)->value();
-    sm.trim(); ss.trim();
+    if (req->hasParam("pass", true)) pw = req->getParam("pass", true)->value();
+    sm.trim();
+    ss.trim();
     String finalSSID = sm.length() ? sm : ss;
     if (finalSSID.length() == 0) {
-      req->send(400, "text/html",
-        "<html><body style='font-family:sans-serif;text-align:center;padding:40px;background:#111;color:#eee;'>"
-        "<h2>Missing SSID</h2><p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      req->send(
+          400, "text/html",
+          "<html><body "
+          "style='font-family:sans-serif;text-align:center;padding:40px;background:#111;color:#eee;"
+          "'>"
+          "<h2>Missing SSID</h2><p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
       return;
     }
     saveWiFiCredentials(finalSSID, pw);
-    req->send(200, "text/html",
-      "<html><body style='font-family:sans-serif;text-align:center;padding:40px;background:#111;color:#eee;'>"
-      "<h2 style='color:#28a745;'>Saved!</h2><p>Rebooting...</p></body></html>");
+    req->send(
+        200, "text/html",
+        "<html><body "
+        "style='font-family:sans-serif;text-align:center;padding:40px;background:#111;color:#eee;'>"
+        "<h2 style='color:#28a745;'>Saved!</h2><p>Rebooting...</p></body></html>");
     rebootRequested = true;
     rebootRequestMs = millis();
   });
@@ -523,9 +557,11 @@ void setupWebServer() {
   // WiFi clear
   webServer.on("/clear", HTTP_POST, [](AsyncWebServerRequest *req) {
     clearWiFiCredentials();
-    req->send(200, "text/html",
-      "<html><body style='font-family:sans-serif;text-align:center;padding:40px;background:#111;color:#eee;'>"
-      "<h2>WiFi Cleared</h2><p>Rebooting...</p></body></html>");
+    req->send(
+        200, "text/html",
+        "<html><body "
+        "style='font-family:sans-serif;text-align:center;padding:40px;background:#111;color:#eee;'>"
+        "<h2>WiFi Cleared</h2><p>Rebooting...</p></body></html>");
     rebootRequested = true;
     rebootRequestMs = millis();
   });
@@ -574,8 +610,10 @@ void setupWebServer() {
     if (req->hasParam("which") && req->hasParam("delta") && endpointsCalibrated) {
       String w = req->getParam("which")->value();
       int32_t d = req->getParam("delta")->value().toInt();
-      if (w == "up") upOffsetSteps = clamp_i32(upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
-      else downOffsetSteps = clamp_i32(downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
+      if (w == "up")
+        upOffsetSteps = clamp_i32(upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
+      else
+        downOffsetSteps = clamp_i32(downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
       recomputeEffectiveEndpoints();
       ui_update_endpoint_edit_values();
       ui_update_tuning_numbers();
@@ -592,14 +630,16 @@ void setupWebServer() {
     if (req->hasParam("value")) {
       // Absolute value (from web text input)
       int32_t v = req->getParam("value")->value().toInt();
-      profiles[tgt].sg_trip = (uint16_t)constrain(v, (int32_t)RUN_SG_TRIP_MIN, (int32_t)RUN_SG_TRIP_MAX);
+      profiles[tgt].sg_trip =
+          (uint16_t)constrain(v, (int32_t)RUN_SG_TRIP_MIN, (int32_t)RUN_SG_TRIP_MAX);
       ui_update_sg_val();
       ui_update_profile_screen();
     } else if (req->hasParam("delta")) {
       // Relative delta (from touch UI)
       int32_t d = req->getParam("delta")->value().toInt();
       int32_t v = (int32_t)profiles[tgt].sg_trip + d;
-      profiles[tgt].sg_trip = (uint16_t)constrain(v, (int32_t)RUN_SG_TRIP_MIN, (int32_t)RUN_SG_TRIP_MAX);
+      profiles[tgt].sg_trip =
+          (uint16_t)constrain(v, (int32_t)RUN_SG_TRIP_MIN, (int32_t)RUN_SG_TRIP_MAX);
       ui_update_sg_val();
       ui_update_profile_screen();
     }
@@ -690,42 +730,42 @@ void setupWebServer() {
   }
 
   // OTA firmware upload
-  webServer.on("/api/ota", HTTP_POST,
-    [](AsyncWebServerRequest *req) {
-      bool ok = !Update.hasError();
-      if (ok) {
-        req->send(200, "text/plain", "OK");
-        rebootRequested = true;
-        rebootRequestMs = millis();
-      } else {
-        req->send(500, "text/plain", String("Update failed: ") + Update.errorString());
-      }
-    },
-    [](AsyncWebServerRequest *req, const String &filename, size_t index,
-       uint8_t *data, size_t len, bool final) {
-      if (index == 0) {
-        Serial.printf("OTA: upload '%s'\n", filename.c_str());
-        // Stop motor if running
-        if (runState == RUNNING) requestGracefulStop();
-        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-          Update.printError(Serial);
-          return;
+  webServer.on(
+      "/api/ota", HTTP_POST,
+      [](AsyncWebServerRequest *req) {
+        bool ok = !Update.hasError();
+        if (ok) {
+          req->send(200, "text/plain", "OK");
+          rebootRequested = true;
+          rebootRequestMs = millis();
+        } else {
+          req->send(500, "text/plain", String("Update failed: ") + Update.errorString());
         }
-      }
-      if (Update.isRunning()) {
-        if (Update.write(data, len) != len) {
-          Update.printError(Serial);
-          return;
+      },
+      [](AsyncWebServerRequest *req, const String &filename, size_t index, uint8_t *data,
+         size_t len, bool final) {
+        if (index == 0) {
+          Serial.printf("OTA: upload '%s'\n", filename.c_str());
+          // Stop motor if running
+          if (runState == RUNNING) requestGracefulStop();
+          if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+            Update.printError(Serial);
+            return;
+          }
         }
-      }
-      if (final) {
-        if (Update.end(true))
-          Serial.printf("OTA: success, %u bytes\n", index + len);
-        else
-          Update.printError(Serial);
-      }
-    }
-  );
+        if (Update.isRunning()) {
+          if (Update.write(data, len) != len) {
+            Update.printError(Serial);
+            return;
+          }
+        }
+        if (final) {
+          if (Update.end(true))
+            Serial.printf("OTA: success, %u bytes\n", index + len);
+          else
+            Update.printError(Serial);
+        }
+      });
 
   webServer.begin();
   Serial.println("Web server started on port 80");
@@ -776,9 +816,12 @@ void broadcastState() {
       if (i > 0) logJson += ',';
       logJson += '"';
       for (const char *p = logBuf[idx]; *p; p++) {
-        if (*p == '"') logJson += "\\\"";
-        else if (*p == '\\') logJson += "\\\\";
-        else logJson += *p;
+        if (*p == '"')
+          logJson += "\\\"";
+        else if (*p == '\\')
+          logJson += "\\\\";
+        else
+          logJson += *p;
       }
       logJson += '"';
     }

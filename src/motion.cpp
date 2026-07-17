@@ -14,8 +14,12 @@
 // ==========================================================================
 //  UTILITY
 // ==========================================================================
-static inline bool nearPos(long a, long b, long tol = 2) { return labs(a - b) <= tol; }
-static inline long flipTarget(long t) { return (t == endpointUp) ? endpointDown : endpointUp; }
+static inline bool nearPos(long a, long b, long tol = 2) {
+  return labs(a - b) <= tol;
+}
+static inline long flipTarget(long t) {
+  return (t == endpointUp) ? endpointDown : endpointUp;
+}
 static inline uint16_t read_sg_raw() {
   // Ensure display CS is not active (shared SPI bus)
   digitalWrite(14, HIGH);
@@ -31,21 +35,29 @@ uint16_t read_sg() {
   return autolee::median5(s);  // canonical impl in lib/autolee_logic
 }
 void fas_wait_for_stop() {
-  while (stepper && stepper->isRunning()) { lv_timer_handler(); wdt_feed(); delay(1); }
+  while (stepper && stepper->isRunning()) {
+    lv_timer_handler();
+    wdt_feed();
+    delay(1);
+  }
 }
 
 // ==========================================================================
 //  ENDPOINT MATH
 // ==========================================================================
 void recomputeEffectiveEndpoints() {
-  autolee::Endpoints e = autolee::computeEffectiveEndpoints(
-      endpointsCalibrated, rawUp, rawDown, upOffsetSteps, downOffsetSteps,
-      OFFSET_MIN, OFFSET_MAX, ENDPOINT_GUARD);
-  if (!endpointsCalibrated) { endpointUp = 0; endpointDown = 0; return; }
-  upOffsetSteps   = e.upOffset;
+  autolee::Endpoints e =
+      autolee::computeEffectiveEndpoints(endpointsCalibrated, rawUp, rawDown, upOffsetSteps,
+                                         downOffsetSteps, OFFSET_MIN, OFFSET_MAX, ENDPOINT_GUARD);
+  if (!endpointsCalibrated) {
+    endpointUp = 0;
+    endpointDown = 0;
+    return;
+  }
+  upOffsetSteps = e.upOffset;
   downOffsetSteps = e.downOffset;
-  endpointUp      = e.endpointUp;
-  endpointDown    = e.endpointDown;
+  endpointUp = e.endpointUp;
+  endpointDown = e.endpointDown;
 }
 
 // ==========================================================================
@@ -57,19 +69,23 @@ void recomputeEffectiveEndpoints() {
 void startRunBetweenEndpoints() {
   if (!endpointsCalibrated || !stepper) return;
   runState = RUNNING;
-  runSGHighCount = 0; runSGLowCount = 0;
+  runSGHighCount = 0;
+  runSGLowCount = 0;
   lastDirectionChangeMs = millis();
 
   driver.rms_current(RUN_CURRENT_MA);
   driver.en_pwm_mode(false);
   driver.TPWMTHRS(0);
   driver.TCOOLTHRS(0xFFFFF);
-  driver.semin(0); driver.semax(0);
+  driver.semin(0);
+  driver.semax(0);
   driver.sgt(constrain((int8_t)CAL_SGT, (int8_t)-64, (int8_t)63));
 
   long pos = stepper->getCurrentPosition();
-  if (nearPos(pos, endpointUp))        currentTarget = endpointDown;
-  else if (nearPos(pos, endpointDown)) currentTarget = endpointUp;
+  if (nearPos(pos, endpointUp))
+    currentTarget = endpointDown;
+  else if (nearPos(pos, endpointDown))
+    currentTarget = endpointUp;
   else {
     currentTarget = (labs(pos - endpointUp) < labs(pos - endpointDown)) ? endpointUp : endpointDown;
   }
@@ -110,7 +126,8 @@ void handleMotion() {
         }
         currentTarget = flipTarget(currentTarget);
         lastDirectionChangeMs = millis();
-        runSGHighCount = 0; runSGLowCount = 0;
+        runSGHighCount = 0;
+        runSGLowCount = 0;
         stepper->setSpeedInHz(ui_speed_hz);
         stepper->setAcceleration(RUN_DECEL);
         stepper->moveTo(currentTarget);
@@ -131,7 +148,8 @@ void handleMotion() {
       // Only applies when heading toward DOWN, not toward UP.
       if (currentTarget == endpointDown &&
           autolee::inWorkZone(pos, endpointDown, SG_WORK_ZONE_STEPS)) {
-        runSGHighCount = 0; runSGLowCount = 0;
+        runSGHighCount = 0;
+        runSGLowCount = 0;
         break;
       }
 
@@ -141,7 +159,8 @@ void handleMotion() {
         int32_t distToTarget = labs(pos - currentTarget);
         int32_t decelBlank = autolee::decelBlankSteps(ui_speed_hz, RUN_DECEL);
         if (distToTarget < decelBlank && runSGHighCount < RUN_SG_HIGH_NEEDED) {
-          runSGHighCount = 0; runSGLowCount = 0;
+          runSGHighCount = 0;
+          runSGLowCount = 0;
           break;
         }
       }
@@ -153,9 +172,8 @@ void handleMotion() {
       static uint32_t lastSGPrintMs = 0;
       if ((millis() - lastSGPrintMs) > 500) {
         int32_t distToTarget = labs(pos - currentTarget);
-        webLog("RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u",
-               sg, RUN_SG_TRIP, pos, distToTarget, sinceChange,
-               runSGHighCount, RUN_SG_HIGH_NEEDED);
+        webLog("RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u", sg, RUN_SG_TRIP, pos,
+               distToTarget, sinceChange, runSGHighCount, RUN_SG_HIGH_NEEDED);
         lastSGPrintMs = millis();
       }
 
@@ -163,13 +181,13 @@ void handleMotion() {
         if (runSGHighCount < RUN_SG_HIGH_NEEDED + 4) runSGHighCount++;
         runSGLowCount = 0;
 
-        webLog("SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu",
-               sg, RUN_SG_TRIP, runSGHighCount, pos, sinceChange);
+        webLog("SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, RUN_SG_TRIP, runSGHighCount, pos,
+               sinceChange);
 
         if (runSGHighCount >= RUN_SG_HIGH_NEEDED) {
           // JAM — trigger immediately, no sustain timer
-          webLog("JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u",
-                        sg, RUN_SG_TRIP, pos, currentTarget, runSGHighCount);
+          webLog("JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg, RUN_SG_TRIP, pos, currentTarget,
+                 runSGHighCount);
 
           stepper->forceStop();
           fas_wait_for_stop();
@@ -177,12 +195,14 @@ void handleMotion() {
           stepper->setSpeedInHz(CREEP_HOME_SPEED);
           stepper->setAcceleration(CREEP_HOME_ACCEL);
 
-          int32_t backoff = (currentTarget == endpointDown) ? -RUN_BACKOFF_STEPS : +RUN_BACKOFF_STEPS;
+          int32_t backoff =
+              (currentTarget == endpointDown) ? -RUN_BACKOFF_STEPS : +RUN_BACKOFF_STEPS;
           stepper->move(backoff);
           fas_wait_for_stop();
 
           runState = STALLED;
-          runSGHighCount = 0; runSGLowCount = 0;
+          runSGHighCount = 0;
+          runSGLowCount = 0;
           showJamScreen();
         }
       } else {
@@ -209,7 +229,8 @@ void handleMotion() {
       break;
     }
 
-    default: break;
+    default:
+      break;
   }
 }
 
@@ -282,8 +303,8 @@ void safeCreepHome() {
 bool move_until_stall(int dir, long &hit_pos) {
   const int32_t target = (dir > 0) ? +CAL_SEARCH_STEPS : -CAL_SEARCH_STEPS;
   const int32_t start_pos = stepper->getCurrentPosition();
-  const uint32_t ignore_ms  = autolee::calIgnoreMs(CAL_SPEED_HZ, CAL_ACCEL);
-  const int32_t  ignore_dst = autolee::calIgnoreDist(CAL_SPEED_HZ, CAL_ACCEL);
+  const uint32_t ignore_ms = autolee::calIgnoreMs(CAL_SPEED_HZ, CAL_ACCEL);
+  const int32_t ignore_dst = autolee::calIgnoreDist(CAL_SPEED_HZ, CAL_ACCEL);
 
   driver.en_pwm_mode(false);
   driver.TPWMTHRS(0);
@@ -291,8 +312,8 @@ bool move_until_stall(int dir, long &hit_pos) {
   int8_t sgt = constrain((int8_t)CAL_SGT, (int8_t)-64, (int8_t)63);
   driver.sgt(sgt);
 
-  webLog("MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d",
-         dir, start_pos, ignore_ms, ignore_dst, sgt);
+  webLog("MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d", dir, start_pos, ignore_ms, ignore_dst,
+         sgt);
 
   stepper->move(target);
   const uint32_t start_ms = millis();
@@ -314,30 +335,34 @@ bool move_until_stall(int dir, long &hit_pos) {
     // Periodic debug during search
     static uint32_t lastMUSPrint = 0;
     if ((now - lastMUSPrint) > 400) {
-      webLog("MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u",
-             sg, dist, elapsed_ms, baseline_started, dyn_ready, dyn_trip);
+      webLog("MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u", sg, dist, elapsed_ms,
+             baseline_started, dyn_ready, dyn_trip);
       lastMUSPrint = now;
     }
 
     // Early trip
-    if (autolee::earlyArmed({EARLY_WINDOW_MS, EARLY_WINDOW_DST_MAX,
-                             EARLY_MIN_TIME_MS, EARLY_MIN_MOVE_STEPS},
-                            elapsed_ms, dist)) {
+    if (autolee::earlyArmed(
+            {EARLY_WINDOW_MS, EARLY_WINDOW_DST_MAX, EARLY_MIN_TIME_MS, EARLY_MIN_MOVE_STEPS},
+            elapsed_ms, dist)) {
       if (sg <= EARLY_TRIP) {
         if (++confirm_early >= CAL_HIT_CONFIRM) {
           webLog("MUS: EARLY HIT sg=%u pos=%ld", sg, stepper->getCurrentPosition());
-          stepper->forceStop(); fas_wait_for_stop();
+          stepper->forceStop();
+          fas_wait_for_stop();
           hit_pos = stepper->getCurrentPosition();
           return true;
         }
-      } else confirm_early = 0;
+      } else
+        confirm_early = 0;
     }
 
     // Baseline
     if (!baseline_started && autolee::baselineReady(elapsed_ms, dist, ignore_ms, ignore_dst)) {
       baseline_started = true;
       base_start_ms = now;
-      base_sum = 0; base_cnt = 0; confirm_dyn = 0;
+      base_sum = 0;
+      base_cnt = 0;
+      confirm_dyn = 0;
     }
     if (baseline_started && !dyn_ready) {
       base_sum += sg;
@@ -355,11 +380,13 @@ bool move_until_stall(int dir, long &hit_pos) {
       if (sg <= dyn_trip) {
         if (++confirm_dyn >= CAL_HIT_CONFIRM) {
           webLog("MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip, stepper->getCurrentPosition());
-          stepper->forceStop(); fas_wait_for_stop();
+          stepper->forceStop();
+          fas_wait_for_stop();
           hit_pos = stepper->getCurrentPosition();
           return true;
         }
-      } else confirm_dyn = 0;
+      } else
+        confirm_dyn = 0;
     }
 
     lv_timer_handler();
@@ -397,7 +424,8 @@ bool return_home_up_safe() {
 
     if ((now - start_ms) > HOME_TIMEOUT_MS) {
       webLog("Home: TIMEOUT");
-      stepper->forceStop(); fas_wait_for_stop();
+      stepper->forceStop();
+      fas_wait_for_stop();
       return false;
     }
 
@@ -411,7 +439,8 @@ bool return_home_up_safe() {
       if (sg <= HOME_SG_TRIP) {
         if (++confirm_count >= HOME_CONFIRM) {
           webLog("Home: stall @%ld retry %d", pos, retries);
-          stepper->forceStop(); fas_wait_for_stop();
+          stepper->forceStop();
+          fas_wait_for_stop();
           stepper->move(+HOME_RELEASE_STEPS);
           fas_wait_for_stop();
 
@@ -425,7 +454,8 @@ bool return_home_up_safe() {
           move_start_ms = millis();
           stepper->moveTo(endpointUp);
         }
-      } else confirm_count = 0;
+      } else
+        confirm_count = 0;
     }
 
     lv_timer_handler();
@@ -443,7 +473,10 @@ bool calibrateEndpointsSensorless() {
   if (!stepper) return false;
   runState = CALIBRATING;
   endpointsCalibrated = false;
-  if (stepper->isRunning()) { stepper->forceStop(); fas_wait_for_stop(); }
+  if (stepper->isRunning()) {
+    stepper->forceStop();
+    fas_wait_for_stop();
+  }
 
   const uint32_t saved_speed = ui_speed_hz;
   stepper->setSpeedInHz(CAL_SPEED_HZ);
@@ -464,7 +497,8 @@ bool calibrateEndpointsSensorless() {
     return false;
   }
 
-  stepper->move(+300); fas_wait_for_stop();
+  stepper->move(+300);
+  fas_wait_for_stop();
   stepper->setCurrentPosition(0);
   rawUp = 0;
 
@@ -478,12 +512,13 @@ bool calibrateEndpointsSensorless() {
     return false;
   }
 
-  stepper->move(-300); fas_wait_for_stop();
+  stepper->move(-300);
+  fas_wait_for_stop();
   rawDown = stepper->getCurrentPosition();
 
   webLog("CAL: up=%ld dn=%ld travel=%ld", rawUp, rawDown, rawDown - rawUp);
   endpointsCalibrated = true;
-  upOffsetSteps   = 0;
+  upOffsetSteps = 0;
   downOffsetSteps = DOWN_OFFSET_DEFAULT;
   recomputeEffectiveEndpoints();
   driver.rms_current(RUN_CURRENT_MA);

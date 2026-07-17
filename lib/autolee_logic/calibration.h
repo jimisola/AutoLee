@@ -28,19 +28,18 @@ inline int32_t calIgnoreDist(uint32_t speedHz, uint32_t accel) {
 
 // Early-trip window: catch a stall very close to the start (short move + low SG).
 struct EarlyWindow {
-  uint32_t windowMs;      // EARLY_WINDOW_MS
-  int32_t  windowDstMax;  // EARLY_WINDOW_DST_MAX
-  uint32_t minTimeMs;     // EARLY_MIN_TIME_MS
-  int32_t  minMoveSteps;  // EARLY_MIN_MOVE_STEPS
+  uint32_t windowMs;     // EARLY_WINDOW_MS
+  int32_t windowDstMax;  // EARLY_WINDOW_DST_MAX
+  uint32_t minTimeMs;    // EARLY_MIN_TIME_MS
+  int32_t minMoveSteps;  // EARLY_MIN_MOVE_STEPS
 };
-inline bool earlyArmed(const EarlyWindow& w, uint32_t elapsedMs, int32_t dist) {
-  return elapsedMs <= w.windowMs && dist <= w.windowDstMax &&
-         elapsedMs >= w.minTimeMs && dist >= w.minMoveSteps;
+inline bool earlyArmed(const EarlyWindow &w, uint32_t elapsedMs, int32_t dist) {
+  return elapsedMs <= w.windowMs && dist <= w.windowDstMax && elapsedMs >= w.minTimeMs &&
+         dist >= w.minMoveSteps;
 }
 
 // Baseline sampling starts once past the ignore windows.
-inline bool baselineReady(uint32_t elapsedMs, int32_t dist,
-                          uint32_t ignoreMs, int32_t ignoreDist) {
+inline bool baselineReady(uint32_t elapsedMs, int32_t dist, uint32_t ignoreMs, int32_t ignoreDist) {
   return elapsedMs > ignoreMs && dist > ignoreDist;
 }
 

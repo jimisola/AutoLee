@@ -40,28 +40,28 @@ FastAccelStepper *stepper = nullptr;
 
 // Mutable config state (declared extern in config.h)
 SpeedProfile profiles[NUM_PROFILES] = {
-  { "Slow",   15000, 350, 350 },
-  { "Normal", 35000, 15, 15 },
-  { "Fast",   45000, 1, 1 },
+    {"Slow", 15000, 350, 350},
+    {"Normal", 35000, 15, 15},
+    {"Fast", 45000, 1, 1},
 };
-uint8_t  activeProfile = 1;          // default to Normal
-int32_t  upOffsetSteps = 0;
-int32_t  downOffsetSteps = 0;
+uint8_t activeProfile = 1;  // default to Normal
+int32_t upOffsetSteps = 0;
+int32_t downOffsetSteps = 0;
 uint16_t RUN_CURRENT_MA = 3500;
-int32_t  SG_WORK_ZONE_STEPS = 5500;
+int32_t SG_WORK_ZONE_STEPS = 5500;
 
 long rawUp = 0, rawDown = 0;
 long endpointUp = 0, endpointDown = 0;
 bool endpointsCalibrated = false;
 long counter = 0;
 
-volatile RunState runState = IDLE;   // RunState enum is defined in globals.h
-long     currentTarget = 0;
-uint32_t stopEntryMs   = 0;
+volatile RunState runState = IDLE;  // RunState enum is defined in globals.h
+long currentTarget = 0;
+uint32_t stopEntryMs = 0;
 
 uint32_t lastDirectionChangeMs = 0;
-uint8_t  runSGHighCount = 0;
-uint8_t  runSGLowCount = 0;
+uint8_t runSGHighCount = 0;
+uint8_t runSGLowCount = 0;
 
 bool wifiConnected = false;
 bool wifiAPMode = false;
@@ -78,11 +78,11 @@ uint32_t lastSSEMs = 0;
 volatile bool webCalRequested = false;
 volatile bool webHomeRequested = false;
 volatile bool rebootRequested = false;
-uint32_t     rebootRequestMs = 0;
+uint32_t rebootRequestMs = 0;
 
-int32_t  batchTarget  = 0;
-int32_t  batchCount   = 0;
-bool     batchActive  = false;
+int32_t batchTarget = 0;
+int32_t batchCount = 0;
+bool batchActive = false;
 
 char logBuf[LOG_LINES][LOG_LINE_LEN];
 uint16_t logHead = 0;
@@ -98,7 +98,8 @@ lv_disp_draw_buf_t draw_buf;
 lv_color_t *disp_draw_buf = nullptr;
 lv_disp_drv_t disp_drv;
 
-lv_obj_t *main_scr = nullptr, *settings_scr = nullptr, *config_scr = nullptr, *profile_scr = nullptr;
+lv_obj_t *main_scr = nullptr, *settings_scr = nullptr, *config_scr = nullptr,
+         *profile_scr = nullptr;
 lv_obj_t *tuning_scr = nullptr, *ep_up_scr = nullptr, *ep_dn_scr = nullptr;
 lv_obj_t *wifi_scr = nullptr;
 lv_obj_t *counter_label = nullptr, *main_warn = nullptr, *main_warn_lbl = nullptr;
@@ -144,8 +145,10 @@ void setup() {
   Serial.printf("=== AutoLee v%s ===\n", FW_VERSION);
 
   SPI.begin(1, 3, 2, TMC_CS);
-  pinMode(14, OUTPUT); digitalWrite(14, HIGH);
-  pinMode(TMC_CS, OUTPUT); digitalWrite(TMC_CS, HIGH);
+  pinMode(14, OUTPUT);
+  digitalWrite(14, HIGH);
+  pinMode(TMC_CS, OUTPUT);
+  digitalWrite(TMC_CS, HIGH);
 
   if (!gfx->begin()) Serial.println("gfx->begin() failed!");
   lcd_reg_init();
@@ -163,9 +166,14 @@ void setup() {
 #endif
 
   bufSize = (uint32_t)gfx->width() * 40;
-  disp_draw_buf = (lv_color_t *)heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (!disp_draw_buf) disp_draw_buf = (lv_color_t *)heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_8BIT);
-  if (!disp_draw_buf) { Serial.println("LVGL buf alloc failed!"); for(;;) delay(1000); }
+  disp_draw_buf = (lv_color_t *)heap_caps_malloc(bufSize * sizeof(lv_color_t),
+                                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (!disp_draw_buf)
+    disp_draw_buf = (lv_color_t *)heap_caps_malloc(bufSize * sizeof(lv_color_t), MALLOC_CAP_8BIT);
+  if (!disp_draw_buf) {
+    Serial.println("LVGL buf alloc failed!");
+    for (;;) delay(1000);
+  }
 
   lv_disp_draw_buf_init(&draw_buf, disp_draw_buf, nullptr, bufSize);
   lv_disp_drv_init(&disp_drv);
@@ -190,7 +198,10 @@ void setup() {
   driver.en_pwm_mode(false);
   driver.TPWMTHRS(0);
   driver.TCOOLTHRS(0xFFFFF);
-  driver.semin(0); driver.semax(0); driver.seup(0); driver.sedn(0);
+  driver.semin(0);
+  driver.semax(0);
+  driver.seup(0);
+  driver.sedn(0);
   int8_t sgt = constrain((int8_t)CAL_SGT, (int8_t)-64, (int8_t)63);
   driver.sgt(sgt);
   driver.diag1_stall(true);
@@ -202,7 +213,10 @@ void setup() {
 
   engine.init();
   stepper = engine.stepperConnectToPin(STEP_PIN);
-  if (!stepper) { Serial.println("Stepper fail!"); while(true) delay(1000); }
+  if (!stepper) {
+    Serial.println("Stepper fail!");
+    while (true) delay(1000);
+  }
   stepper->setDirectionPin(DIR_PIN, false);
   stepper->setEnablePin(ENABLE_PIN);
   stepper->setAutoEnable(true);
@@ -221,9 +235,9 @@ void setup() {
   // Guard the main loop. Arduino already inits a TWDT, so reconfigure it if
   // esp_task_wdt_init reports it is already running, then subscribe loopTask.
   esp_task_wdt_config_t twdt_cfg = {
-    .timeout_ms     = TASK_WDT_TIMEOUT_MS,
-    .idle_core_mask = 0,
-    .trigger_panic  = true,
+      .timeout_ms = TASK_WDT_TIMEOUT_MS,
+      .idle_core_mask = 0,
+      .trigger_panic = true,
   };
   if (esp_task_wdt_init(&twdt_cfg) == ESP_ERR_INVALID_STATE) {
     esp_task_wdt_reconfigure(&twdt_cfg);

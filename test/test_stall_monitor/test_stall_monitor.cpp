@@ -33,15 +33,15 @@ void test_high_count_is_capped() {
 
 void test_low_decay_every_three() {
   StallCounter sc(NEEDED);
-  sc.update(100, TRIP);        // high -> 1 (below needed after reset chain)
+  sc.update(100, TRIP);  // high -> 1 (below needed after reset chain)
   // push high up to 3 to observe decay clearly
-  sc.update(100, TRIP);        // -> jam true but keep going; high=2
-  sc.update(100, TRIP);        // high=3
+  sc.update(100, TRIP);  // -> jam true but keep going; high=2
+  sc.update(100, TRIP);  // high=3
   TEST_ASSERT_EQUAL_UINT8(3, sc.highCount());
-  sc.update(0, TRIP);          // low 1
-  sc.update(0, TRIP);          // low 2
+  sc.update(0, TRIP);                          // low 1
+  sc.update(0, TRIP);                          // low 2
   TEST_ASSERT_EQUAL_UINT8(3, sc.highCount());  // not yet
-  sc.update(0, TRIP);          // low 3 -> decay
+  sc.update(0, TRIP);                          // low 3 -> decay
   TEST_ASSERT_EQUAL_UINT8(2, sc.highCount());
   TEST_ASSERT_EQUAL_UINT8(0, sc.lowCount());
 }
@@ -54,7 +54,7 @@ void test_reset() {
   TEST_ASSERT_EQUAL_UINT8(0, sc.lowCount());
 }
 
-int main(int, char**) {
+int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_two_consecutive_highs_trigger_jam);
   RUN_TEST(test_single_high_then_lows_no_jam);

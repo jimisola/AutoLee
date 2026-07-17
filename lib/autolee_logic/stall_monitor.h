@@ -15,7 +15,10 @@ class StallCounter {
  public:
   explicit StallCounter(uint8_t needed) : needed_(needed) {}
 
-  void reset() { highCount_ = 0; lowCount_ = 0; }
+  void reset() {
+    highCount_ = 0;
+    lowCount_ = 0;
+  }
 
   // Feed one filtered SG reading. Returns true when a jam is detected.
   bool update(uint16_t sg, uint16_t trip) {

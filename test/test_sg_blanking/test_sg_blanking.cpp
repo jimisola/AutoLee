@@ -5,8 +5,8 @@ using namespace autolee;
 
 // Constants mirrored from AutoLee/config.h
 static constexpr uint32_t RUN_DECEL = 800000;
-static constexpr int32_t  WORK_ZONE = 5500;
-static constexpr uint8_t  CAL_REL_DROP_Q8 = 235;
+static constexpr int32_t WORK_ZONE = 5500;
+static constexpr uint8_t CAL_REL_DROP_Q8 = 235;
 static constexpr uint16_t CAL_ABS_MIN = 12;
 
 void setUp() {}
@@ -28,10 +28,10 @@ void test_decel_blank_steps() {
 
 void test_work_zone_predicate() {
   long down = 9500;
-  TEST_ASSERT_TRUE(inWorkZone(down, down, WORK_ZONE));            // at endpoint
-  TEST_ASSERT_TRUE(inWorkZone(down - 5499, down, WORK_ZONE));     // just inside
-  TEST_ASSERT_FALSE(inWorkZone(down - WORK_ZONE, down, WORK_ZONE)); // exactly = -> false
-  TEST_ASSERT_FALSE(inWorkZone(down - 9000, down, WORK_ZONE));    // far away
+  TEST_ASSERT_TRUE(inWorkZone(down, down, WORK_ZONE));               // at endpoint
+  TEST_ASSERT_TRUE(inWorkZone(down - 5499, down, WORK_ZONE));        // just inside
+  TEST_ASSERT_FALSE(inWorkZone(down - WORK_ZONE, down, WORK_ZONE));  // exactly = -> false
+  TEST_ASSERT_FALSE(inWorkZone(down - 9000, down, WORK_ZONE));       // far away
 }
 
 void test_dynamic_trip() {
@@ -41,7 +41,7 @@ void test_dynamic_trip() {
   TEST_ASSERT_EQUAL_UINT16(12, dynamicTrip(10, CAL_REL_DROP_Q8, CAL_ABS_MIN));
 }
 
-int main(int, char**) {
+int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_accel_blank_ms);
   RUN_TEST(test_decel_blank_steps);

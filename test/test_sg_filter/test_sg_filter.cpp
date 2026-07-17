@@ -34,7 +34,7 @@ void test_does_not_mutate_input() {
   TEST_ASSERT_EQUAL_UINT16(4, s[4]);
 }
 
-int main(int, char**) {
+int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_median_of_shuffled);
   RUN_TEST(test_median_with_duplicates);

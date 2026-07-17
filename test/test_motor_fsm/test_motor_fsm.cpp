@@ -6,8 +6,12 @@ using namespace autolee;
 void setUp() {}
 void tearDown() {}
 
-static MotorState next(MotorState s, MotorEvent e) { return motorTransition(s, e).next; }
-static bool valid(MotorState s, MotorEvent e) { return motorTransition(s, e).valid; }
+static MotorState next(MotorState s, MotorEvent e) {
+  return motorTransition(s, e).next;
+}
+static bool valid(MotorState s, MotorEvent e) {
+  return motorTransition(s, e).valid;
+}
 
 void test_start_and_stop_cycle() {
   TEST_ASSERT_TRUE(valid(MotorState::Idle, MotorEvent::Start));
@@ -42,7 +46,7 @@ void test_invalid_events_are_ignored() {
   TEST_ASSERT_FALSE(valid(MotorState::Homing, MotorEvent::Start));
 }
 
-int main(int, char**) {
+int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_start_and_stop_cycle);
   RUN_TEST(test_jam_then_home);

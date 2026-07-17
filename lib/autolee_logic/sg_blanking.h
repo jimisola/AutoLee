@@ -18,8 +18,7 @@ inline uint32_t accelBlankMs(uint32_t speedHz, uint32_t decel) {
 // Position-based decel blanking distance (steps): v^2/(2a) + 500 margin.
 // From handleMotion(): decelDist + 500.
 inline int32_t decelBlankSteps(uint32_t speedHz, uint32_t decel) {
-  int32_t decelDist =
-      (int32_t)((uint64_t)speedHz * (uint64_t)speedHz / (2ULL * (uint64_t)decel));
+  int32_t decelDist = (int32_t)((uint64_t)speedHz * (uint64_t)speedHz / (2ULL * (uint64_t)decel));
   return decelDist + 500;
 }
 

@@ -10,9 +10,7 @@
 
 namespace autolee {
 
-enum class MotorState : uint8_t {
-  Idle, Running, Stopping, Calibrating, Stalled, Homing
-};
+enum class MotorState : uint8_t { Idle, Running, Stopping, Calibrating, Stalled, Homing };
 
 enum class MotorEvent : uint8_t {
   Start,            // begin running between endpoints
@@ -27,7 +25,7 @@ enum class MotorEvent : uint8_t {
 };
 
 struct Transition {
-  bool       valid;  // false => event ignored, state unchanged
+  bool valid;  // false => event ignored, state unchanged
   MotorState next;
 };
 
@@ -36,31 +34,33 @@ struct Transition {
 inline Transition motorTransition(MotorState s, MotorEvent e) {
   switch (s) {
     case MotorState::Idle:
-      if (e == MotorEvent::Start)     return { true, MotorState::Running };
-      if (e == MotorEvent::Calibrate) return { true, MotorState::Calibrating };
+      if (e == MotorEvent::Start) return {true, MotorState::Running};
+      if (e == MotorEvent::Calibrate) return {true, MotorState::Calibrating};
       break;
     case MotorState::Running:
-      if (e == MotorEvent::GracefulStop) return { true, MotorState::Stopping };
-      if (e == MotorEvent::Jam)          return { true, MotorState::Stalled };
+      if (e == MotorEvent::GracefulStop) return {true, MotorState::Stopping};
+      if (e == MotorEvent::Jam) return {true, MotorState::Stalled};
       break;
     case MotorState::Stopping:
       if (e == MotorEvent::ReachedHome || e == MotorEvent::StopTimeout)
-        return { true, MotorState::Idle };
+        return {true, MotorState::Idle};
       break;
     case MotorState::Calibrating:
-      if (e == MotorEvent::CalibrationDone) return { true, MotorState::Idle };
+      if (e == MotorEvent::CalibrationDone) return {true, MotorState::Idle};
       break;
     case MotorState::Stalled:
-      if (e == MotorEvent::ReturnHome) return { true, MotorState::Homing };
+      if (e == MotorEvent::ReturnHome) return {true, MotorState::Homing};
       break;
     case MotorState::Homing:
-      if (e == MotorEvent::HomeDone) return { true, MotorState::Idle };
+      if (e == MotorEvent::HomeDone) return {true, MotorState::Idle};
       break;
   }
-  return { false, s };
+  return {false, s};
 }
 
 // Is the motor allowed to be commanded to move between endpoints right now?
-inline bool canStart(MotorState s) { return s == MotorState::Idle; }
+inline bool canStart(MotorState s) {
+  return s == MotorState::Idle;
+}
 
 }  // namespace autolee

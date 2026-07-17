@@ -14,7 +14,7 @@ namespace autolee {
 template <uint16_t LINES, uint16_t LINELEN>
 class LogRing {
  public:
-  void push(const char* line) {
+  void push(const char *line) {
     std::strncpy(buf_[head_], line, LINELEN - 1);
     buf_[head_][LINELEN - 1] = '\0';
     head_ = (head_ + 1) % LINES;
@@ -29,7 +29,7 @@ class LogRing {
   uint16_t size() const { return serial_ < LINES ? (uint16_t)serial_ : LINES; }
 
   // Access retained lines oldest->newest by index [0, size()).
-  const char* at(uint16_t i) const {
+  const char *at(uint16_t i) const {
     uint16_t start = (serial_ < LINES) ? 0 : head_;  // oldest slot
     return buf_[(start + i) % LINES];
   }

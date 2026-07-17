@@ -42,13 +42,13 @@ extern long counter;
 
 enum RunState : uint8_t { IDLE, RUNNING, STOPPING, CALIBRATING, STALLED, HOMING };
 extern volatile RunState runState;
-extern long     currentTarget;
+extern long currentTarget;
 extern uint32_t stopEntryMs;
 
 // Runtime stall detection
 extern uint32_t lastDirectionChangeMs;
-extern uint8_t  runSGHighCount;
-extern uint8_t  runSGLowCount;
+extern uint8_t runSGHighCount;
+extern uint8_t runSGLowCount;
 // RUN_SG_HIGH_NEEDED is defined in config.h
 
 // ==========================================================================
@@ -75,14 +75,14 @@ extern uint32_t lastSSEMs;
 extern volatile bool webCalRequested;
 extern volatile bool webHomeRequested;
 extern volatile bool rebootRequested;
-extern uint32_t     rebootRequestMs;
+extern uint32_t rebootRequestMs;
 
 // ==========================================================================
 //  BATCH RUN
 // ==========================================================================
-extern int32_t  batchTarget;
-extern int32_t  batchCount;
-extern bool     batchActive;
+extern int32_t batchTarget;
+extern int32_t batchCount;
+extern bool batchActive;
 
 // ==========================================================================
 //  LOG RING BUFFER

@@ -28,7 +28,7 @@ void test_batch_remaining_clamps() {
   TEST_ASSERT_EQUAL_INT32(0, batchRemaining(9, 5));
 }
 
-int main(int, char**) {
+int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_counter_increments);
   RUN_TEST(test_counter_caps_at_9999);
