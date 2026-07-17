@@ -32,6 +32,23 @@ jobs:
       - name: Build firmware (ESP32-C6)
         run: pio run -e esp32-c6
 
+      - name: Static analysis (cppcheck via pio check)
+        run: pio check -e esp32-c6 --skip-packages --fail-on-defect=high
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PlatformIO + gcovr
+        run: pip install --upgrade platformio gcovr
+      - name: Coverage (host logic)
+        run: |
+          pio test -e native-coverage
+          gcovr --root . --filter 'lib/autolee_logic/' --fail-under-line 80 --txt
+
   api-contract:
     runs-on: ubuntu-latest
     steps:
