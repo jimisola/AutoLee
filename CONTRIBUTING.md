@@ -63,6 +63,27 @@ Pure logic goes in `lib/autolee_logic/` and is covered by a Unity suite in
 `test/test_<module>/`. Keep new algorithmic logic in that library (not inline in
 the sketch) so it can be tested on the host and reused by the firmware.
 
+### Web UI without hardware
+
+Preview and develop the embedded web UI on your desktop — it serves the real HTML
+(extracted from `AutoLee/web_server.h`) and fakes the API + SSE with schema-valid
+state:
+
+```bash
+python tools/mock_server.py    # http://localhost:8080
+```
+
+### API specs & contract
+
+The HTTP/SSE API is described by [`openapi.yaml`](openapi.yaml) (REST) and
+[`asyncapi.yaml`](asyncapi.yaml) (the `/events` SSE stream). Both reference one
+JSON Schema, [`schemas/state.schema.json`](schemas/state.schema.json), which is
+the single source of truth for the state payload. The `state_json` module emits
+exactly that shape; the `test_state_json` golden test and the CI contract check
+(`schemas/state.example.json` vs the schema) keep firmware and spec in sync — so
+**if you change the state payload, update the module, the example, and the schema
+together.**
+
 ## Build with the Arduino IDE (alternative)
 
 The sketch stays a normal Arduino sketch, so the IDE still works:
