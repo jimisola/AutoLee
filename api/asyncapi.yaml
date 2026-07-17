@@ -1,4 +1,4 @@
-asyncapi: 3.0.0
+asyncapi: 3.1.0
 info:
   title: AutoLee event stream (SSE)
   version: "1.0"
@@ -31,11 +31,11 @@ operations:
   receiveEvents:
     action: receive
     channel:
-      $ref: "#/channels/api/v1/events"
+      $ref: "#/channels/events"
     summary: Subscribe to device state + log events.
     messages:
-      - $ref: "#/channels/api/v1/events/messages/state"
-      - $ref: "#/channels/api/v1/events/messages/log"
+      - $ref: "#/channels/events/messages/state"
+      - $ref: "#/channels/events/messages/log"
 
 components:
   messages:
