@@ -3,9 +3,9 @@ info:
   title: AutoLee event stream (SSE)
   version: "1.0"
   description: >
-    Server-Sent Events pushed by the AutoLee firmware on `GET /events`. Two event
+    Server-Sent Events pushed by the AutoLee firmware on `GET /api/v1/events`. Two event
     types share the channel: the default `message` event carries the full device
-    state (same schema as `GET /api/state`, see openapi.yaml) roughly every
+    state (same schema as `GET /api/v1/state`, see openapi.yaml) roughly every
     250 ms; the named `log` event carries newly appended log lines.
   license:
     name: CC BY-NC 4.0
@@ -15,11 +15,11 @@ servers:
   device:
     host: autolee.local
     protocol: http
-    description: Device on the local network; open an EventSource on /events.
+    description: Device on the local network; open an EventSource on /api/v1/events.
 
 channels:
   events:
-    address: /events
+    address: /api/v1/events
     description: The Server-Sent Events stream.
     messages:
       state:
@@ -31,11 +31,11 @@ operations:
   receiveEvents:
     action: receive
     channel:
-      $ref: "#/channels/events"
+      $ref: "#/channels/api/v1/events"
     summary: Subscribe to device state + log events.
     messages:
-      - $ref: "#/channels/events/messages/state"
-      - $ref: "#/channels/events/messages/log"
+      - $ref: "#/channels/api/v1/events/messages/state"
+      - $ref: "#/channels/api/v1/events/messages/log"
 
 components:
   messages:

@@ -297,13 +297,13 @@ Key constants are in `config.h`:
 ## API Reference
 
 Machine-readable specs live in the repo and share one JSON Schema
-([`schemas/state.schema.json`](schemas/state.schema.json)):
+([`api/schemas/state.schema.json`](api/schemas/state.schema.json)):
 
-- **REST:** [`openapi.yaml`](openapi.yaml) — view rendered in
-  [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/openapi.yaml)
-  or [Redoc](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/openapi.yaml).
-- **SSE `/events`:** [`asyncapi.yaml`](asyncapi.yaml) — view rendered in
-  [AsyncAPI Studio](https://studio.asyncapi.com/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/asyncapi.yaml).
+- **REST:** [`api/openapi.yaml`](api/openapi.yaml) — view rendered in
+  [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/openapi.yaml)
+  or [Redoc](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/openapi.yaml).
+- **SSE `/api/v1/events`:** [`api/asyncapi.yaml`](api/asyncapi.yaml) — view rendered in
+  [AsyncAPI Studio](https://studio.asyncapi.com/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/asyncapi.yaml).
 
 *(Rendered links resolve once merged to `main`.)*
 
@@ -311,21 +311,21 @@ All endpoints accept `POST` requests.
 
 | Endpoint | Parameters | Description |
 |---|---|---|
-| `GET /api/state` | — | Returns full JSON state |
-| `/api/toggle_run` | — | Start or stop running |
-| `/api/profile` | `idx=0\|1\|2` | Switch speed profile |
-| `/api/sg_trip` | `value=N` or `delta=N`, `&profile=N` (optional) | Set or adjust SG threshold; targets active profile by default |
-| `/api/current` | `ma=N` | Set motor run current (1,000–4,500 mA) |
-| `/api/work_zone` | `delta=N` | Adjust work zone blanking steps |
-| `/api/endpoint` | `which=up\|down` `&delta=N` | Adjust endpoint offset |
-| `/api/batch` | `delta=N` or `action=start\|clear` | Adjust batch target or start/clear |
-| `/api/action` | `do=calibrate\|return_home\|reset_counter` | Trigger actions |
-| `/api/wifi` | `ssid=...` `&pass=...` | Save WiFi credentials and reboot |
-| `/api/wifi_reset` | — | Clear saved WiFi, reboot to AP mode |
-| `/api/ota` | multipart `.bin` upload | Firmware update |
-| `/api/log_clear` | — | Clear the log buffer |
+| `GET /api/v1/state` | — | Returns full JSON state |
+| `/api/v1/toggle_run` | — | Start or stop running |
+| `/api/v1/profile` | `idx=0\|1\|2` | Switch speed profile |
+| `/api/v1/sg_trip` | `value=N` or `delta=N`, `&profile=N` (optional) | Set or adjust SG threshold; targets active profile by default |
+| `/api/v1/current` | `ma=N` | Set motor run current (1,000–4,500 mA) |
+| `/api/v1/work_zone` | `delta=N` | Adjust work zone blanking steps |
+| `/api/v1/endpoint` | `which=up\|down` `&delta=N` | Adjust endpoint offset |
+| `/api/v1/batch` | `delta=N` or `action=start\|clear` | Adjust batch target or start/clear |
+| `/api/v1/action` | `do=calibrate\|return_home\|reset_counter` | Trigger actions |
+| `/api/v1/wifi` | `ssid=...` `&pass=...` | Save WiFi credentials and reboot |
+| `/api/v1/wifi_reset` | — | Clear saved WiFi, reboot to AP mode |
+| `/api/v1/ota` | multipart `.bin` upload | Firmware update |
+| `/api/v1/log_clear` | — | Clear the log buffer |
 
-SSE stream available at `/events` — pushes JSON state every 250 ms and log lines as `log` events.
+SSE stream available at `/api/v1/events` — pushes JSON state every 250 ms and log lines as `log` events.
 
 ---
 

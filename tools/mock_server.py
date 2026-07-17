@@ -2,8 +2,8 @@
 """Mock AutoLee web server — develop/preview the web UI without hardware.
 
 Serves the real embedded UI (extracted from src/web_server.cpp) and fakes the
-/api/* endpoints and the /events SSE stream with schema-valid state
-(seeded from schemas/state.example.json). Stdlib only.
+/api/v1/* endpoints and the /events SSE stream with schema-valid state
+(seeded from api/schemas/state.example.json). Stdlib only.
 
 Usage:
     python tools/mock_server.py         # http://localhost:8080
@@ -35,7 +35,7 @@ def load_index_html() -> str:
 
 
 def load_state() -> dict:
-    return json.loads((ROOT / "schemas" / "state.example.json").read_text())
+    return json.loads((ROOT / "api" / "schemas" / "state.example.json").read_text())
 
 
 INDEX_HTML = load_index_html()
@@ -46,17 +46,17 @@ LOG = ["mock server started"]
 def apply_action(path: str, q: dict) -> None:
     """Mutate the mock state just enough to see the UI react."""
     with STATE_LOCK:
-        if path == "/api/toggle_run":
+        if path == "/api/v1/toggle_run":
             STATE["state"] = "IDLE" if STATE["state"] == "RUNNING" else "RUNNING"
-        elif path == "/api/profile" and "idx" in q:
+        elif path == "/api/v1/profile" and "idx" in q:
             idx = int(q["idx"][0])
             STATE["profileIdx"] = idx
             STATE["profileName"] = STATE["profiles"][idx]["name"]
             STATE["speed"] = STATE["profiles"][idx]["hz"]
             STATE["sgTrip"] = STATE["profiles"][idx]["sg"]
-        elif path == "/api/current" and "ma" in q:
+        elif path == "/api/v1/current" and "ma" in q:
             STATE["currentMa"] = int(q["ma"][0])
-        elif path == "/api/batch":
+        elif path == "/api/v1/batch":
             if q.get("action", [""])[0] == "start":
                 STATE["batchActive"] = True
                 STATE["batchCount"] = 0
@@ -64,7 +64,7 @@ def apply_action(path: str, q: dict) -> None:
                 STATE["batchActive"] = False
             elif "delta" in q:
                 STATE["batchTarget"] = max(0, STATE["batchTarget"] + int(q["delta"][0]))
-        elif path == "/api/action" and q.get("do", [""])[0] == "reset_counter":
+        elif path == "/api/v1/action" and q.get("do", [""])[0] == "reset_counter":
             STATE["counter"] = 0
         LOG.append(f"POST {path} {dict((k, v[0]) for k, v in q.items())}")
 
@@ -85,10 +85,10 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
             self._send(200, INDEX_HTML, "text/html; charset=utf-8")
-        elif u.path == "/api/state":
+        elif u.path == "/api/v1/state":
             with STATE_LOCK:
                 self._send(200, json.dumps(STATE), "application/json")
-        elif u.path == "/events":
+        elif u.path == "/api/v1/events":
             self._sse()
         else:
             self._send(404, "not found")

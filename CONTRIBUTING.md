@@ -11,7 +11,7 @@ to build, test, and release the firmware.
 | `include/lv_conf.h` | LVGL config (found via `-D LV_CONF_INCLUDE_SIMPLE`). |
 | `lib/autolee_logic/` | Pure, hardware-independent logic (endpoint math, SG filter/blanking, stall FSM, batch, log ring, calibration, state JSON, motor FSM). Shared by the firmware **and** the host tests, so tested code == shipped code. |
 | `test/` | Host (native) unit tests — one folder per module, run with `pio test -e native`. |
-| `schemas/`, `openapi.yaml`, `asyncapi.yaml` | API contract (shared JSON Schema + REST/SSE specs). |
+| `api/` (`openapi.yaml`, `asyncapi.yaml`, `schemas/`) | API contract (shared JSON Schema + REST/SSE specs). |
 | `third_party/esp_lcd_touch_axs5106l/` | Vendored WaveShare touch driver (not in the Library Manager). See its README for licensing. |
 | `tools/mock_server.py` | Run the web UI on your desktop without hardware. |
 | `platformio.ini` | Build config: `esp32-c6` firmware env + `native` test env. |
@@ -78,12 +78,12 @@ python tools/mock_server.py    # http://localhost:8080
 
 ### API specs & contract
 
-The HTTP/SSE API is described by [`openapi.yaml`](openapi.yaml) (REST) and
-[`asyncapi.yaml`](asyncapi.yaml) (the `/events` SSE stream). Both reference one
-JSON Schema, [`schemas/state.schema.json`](schemas/state.schema.json), which is
+The HTTP/SSE API is described by [`api/openapi.yaml`](api/openapi.yaml) (REST) and
+[`api/asyncapi.yaml`](api/asyncapi.yaml) (the `/events` SSE stream). Both reference one
+JSON Schema, [`api/schemas/state.schema.json`](api/schemas/state.schema.json), which is
 the single source of truth for the state payload. The `state_json` module emits
 exactly that shape; the `test_state_json` golden test and the CI contract check
-(`schemas/state.example.json` vs the schema) keep firmware and spec in sync — so
+(`api/schemas/state.example.json` vs the schema) keep firmware and spec in sync — so
 **if you change the state payload, update the module, the example, and the schema
 together.**
 
@@ -110,6 +110,19 @@ together.**
   with a tag of the form `vX.Y` **matching** `FW_VERSION`. CI validates the match
   and fails the build otherwise, then attaches `AutoLee_vX.Y_merged.bin` and
   `AutoLee_vX.Y_update.bin`.
+
+## Local hooks (optional)
+
+Run the same formatters/linters CI uses (clang-format, ruff, yamllint, basic
+checks) automatically before each commit:
+
+```bash
+pip install pre-commit
+pre-commit install          # one-time, per clone
+pre-commit run --all-files  # run against everything on demand
+```
+
+Optional — CI enforces the same checks — but it catches issues before you push.
 
 ## Conventions
 

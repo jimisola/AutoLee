@@ -10,7 +10,7 @@ follow [Semantic Versioning](https://semver.org/).
 - PlatformIO build (`esp32-c6`) and a host unit-test env (`native`, Unity) with
   the pure logic extracted into `lib/autolee_logic/` and shared with the firmware.
 - Task watchdog (`ENABLE_TASK_WDT`) that resets the board on a stalled main loop.
-- OpenAPI + AsyncAPI specs sharing one JSON Schema (`schemas/state.schema.json`),
+- OpenAPI + AsyncAPI specs sharing one JSON Schema (`api/schemas/state.schema.json`),
   with a CI contract check and a `state_json` golden test.
 - Hardware-free web-UI mock server (`tools/mock_server.py`).
 - GitHub Releases pipeline (CI-built firmware binaries) and the vendored WaveShare

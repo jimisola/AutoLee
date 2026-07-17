@@ -48,9 +48,9 @@ jobs:
         with:
           node-version: '20'
       - name: Spectral (OpenAPI)
-        run: npx --yes @stoplight/spectral-cli lint openapi.yaml
+        run: npx --yes @stoplight/spectral-cli lint api/openapi.yaml
       - name: AsyncAPI validate
-        run: npx --yes @asyncapi/cli@latest validate asyncapi.yaml
+        run: npx --yes @asyncapi/cli@latest validate api/asyncapi.yaml
 
   commitlint:
     runs-on: ubuntu-latest

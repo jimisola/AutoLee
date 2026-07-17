@@ -5,7 +5,7 @@ info:
   description: >
     REST control surface served by the AutoLee firmware's on-device web server.
     All mutating endpoints are POST; the canonical device state is returned by
-    `GET /api/state` and pushed continuously over Server-Sent Events at `/events`
+    `GET /api/v1/state` and pushed continuously over Server-Sent Events at `/api/v1/events`
     (see asyncapi.yaml). Parameters are passed as query parameters.
   license:
     name: CC BY-NC 4.0
@@ -18,7 +18,7 @@ servers:
       deviceIp: { default: "192.168.4.1" }
 
 paths:
-  /api/state:
+  /api/v1/state:
     get:
       summary: Full device state
       operationId: getState
@@ -30,13 +30,13 @@ paths:
               schema:
                 $ref: "./schemas/state.schema.json"
 
-  /api/toggle_run:
+  /api/v1/toggle_run:
     post:
       summary: Start or stop the run
       operationId: toggleRun
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/profile:
+  /api/v1/profile:
     post:
       summary: Select the active speed profile
       operationId: setProfile
@@ -47,7 +47,7 @@ paths:
           schema: { type: integer, enum: [0, 1, 2] }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/sg_trip:
+  /api/v1/sg_trip:
     post:
       summary: Set or adjust the StallGuard trip for a profile
       operationId: setSgTrip
@@ -57,7 +57,7 @@ paths:
         - { name: profile, in: query, required: false, description: "Target profile (defaults to active)", schema: { type: integer, enum: [0, 1, 2] } }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/current:
+  /api/v1/current:
     post:
       summary: Set motor run current (mA)
       operationId: setCurrent
@@ -68,7 +68,7 @@ paths:
           schema: { type: integer, minimum: 1000, maximum: 4500 }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/work_zone:
+  /api/v1/work_zone:
     post:
       summary: Adjust the SG work-zone blanking distance
       operationId: setWorkZone
@@ -76,7 +76,7 @@ paths:
         - { name: delta, in: query, required: true, schema: { type: integer } }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/endpoint:
+  /api/v1/endpoint:
     post:
       summary: Adjust an endpoint offset
       operationId: adjustEndpoint
@@ -85,7 +85,7 @@ paths:
         - { name: delta, in: query, required: true, schema: { type: integer } }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/batch:
+  /api/v1/batch:
     post:
       summary: Adjust batch target or start/clear a batch
       operationId: batch
@@ -94,7 +94,7 @@ paths:
         - { name: action, in: query, required: false, schema: { type: string, enum: [start, clear] } }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/action:
+  /api/v1/action:
     post:
       summary: Trigger a device action
       operationId: action
@@ -105,7 +105,7 @@ paths:
           schema: { type: string, enum: [calibrate, return_home, reset_counter] }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/wifi:
+  /api/v1/wifi:
     post:
       summary: Save WiFi credentials and reboot
       operationId: setWifi
@@ -114,19 +114,19 @@ paths:
         - { name: pass, in: query, required: false, schema: { type: string } }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/wifi_reset:
+  /api/v1/wifi_reset:
     post:
       summary: Clear saved WiFi and reboot into AP mode
       operationId: resetWifi
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/log_clear:
+  /api/v1/log_clear:
     post:
       summary: Clear the log ring buffer
       operationId: clearLog
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
-  /api/ota:
+  /api/v1/ota:
     post:
       summary: Upload firmware (OTA)
       operationId: otaUpload
@@ -148,5 +148,5 @@ components:
   responses:
     Ok:
       description: >
-        Accepted. The updated state is pushed to all clients over `/events`
-        (and is readable via `GET /api/state`).
+        Accepted. The updated state is pushed to all clients over `/api/v1/events`
+        (and is readable via `GET /api/v1/state`).

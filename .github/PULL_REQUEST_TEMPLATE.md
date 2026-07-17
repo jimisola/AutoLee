@@ -10,7 +10,7 @@
 - [ ] `pio test -e native` passes
 - [ ] Lint/format clean (`clang-format`, `ruff`) — or `pre-commit run --all-files`
 - [ ] Docs updated if behavior/paths changed (README / CONTRIBUTING)
-- [ ] If the API state payload changed: updated `state_json`, `schemas/state.example.json`, and `schemas/state.schema.json` together
+- [ ] If the API state payload changed: updated `state_json`, `api/schemas/state.example.json`, and `api/schemas/state.schema.json` together
 
 ## Hardware validation
 

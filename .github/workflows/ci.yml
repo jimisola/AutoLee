@@ -59,8 +59,8 @@ jobs:
       - name: Install validators
         run: pip install --upgrade check-jsonschema pyyaml
       - name: Validate the state example against the shared schema
-        run: check-jsonschema --schemafile schemas/state.schema.json schemas/state.example.json
+        run: check-jsonschema --schemafile api/schemas/state.schema.json api/schemas/state.example.json
       - name: Sanity-check the API spec files parse
         run: |
-          python -c "import yaml,sys; yaml.safe_load(open('openapi.yaml')); print('openapi.yaml OK')"
-          python -c "import yaml,sys; yaml.safe_load(open('asyncapi.yaml')); print('asyncapi.yaml OK')"
+          python -c "import yaml,sys; yaml.safe_load(open('api/openapi.yaml')); print('api/openapi.yaml OK')"
+          python -c "import yaml,sys; yaml.safe_load(open('api/asyncapi.yaml')); print('api/asyncapi.yaml OK')"

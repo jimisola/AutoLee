@@ -237,7 +237,7 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <div class="sec">
 <h2>Log</h2>
 <div class="log" id="logBox"></div>
-<button class="btn btn-dark btn-sm" onclick="document.getElementById('logBox').textContent='';fetch('/api/log_clear',{method:'POST'})" style="margin-top:8px;width:100%">Clear Log</button>
+<button class="btn btn-dark btn-sm" onclick="document.getElementById('logBox').textContent='';fetch('/api/v1/log_clear',{method:'POST'})" style="margin-top:8px;width:100%">Clear Log</button>
 </div>
 
 <!-- NAV FOOTER -->
@@ -308,7 +308,7 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <script>
 let es;
-function sse(){es=new EventSource('/events');es.onmessage=e=>{try{upd(JSON.parse(e.data))}catch(x){}};
+function sse(){es=new EventSource('/api/v1/events');es.onmessage=e=>{try{upd(JSON.parse(e.data))}catch(x){}};
 es.addEventListener('log',e=>{try{const d=JSON.parse(e.data);const lb=document.getElementById('logBox');lb.textContent+=d.log.join('\n')+'\n';lb.scrollTop=lb.scrollHeight}catch(x){}});
 es.onerror=()=>{es.close();setTimeout(sse,3000)}}
 sse();
@@ -425,23 +425,23 @@ function upd(d){
   }else{['ru','rd','rt','eu','ed'].forEach(i=>document.getElementById(i).textContent='-')}
 }
 
-function toggleRun(){fetch('/api/toggle_run',{method:'POST'})}
-function setSg(p){const v=parseInt(document.getElementById('sgIn'+p).value)||0;fetch('/api/sg_trip?profile='+p+'&value='+v,{method:'POST'})}
-function setWz(d){fetch('/api/work_zone?delta='+d,{method:'POST'})}
-function setBatch(d){fetch('/api/batch?delta='+d,{method:'POST'})}
-function doBatch(a){fetch('/api/batch?action='+a,{method:'POST'})}
-function setProfile(i){fetch('/api/profile?idx='+i,{method:'POST'})}
-function setCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none';fetch('/api/current?ma='+v,{method:'POST'})}
-function adj(w,d){fetch('/api/endpoint?which='+w+'&delta='+d,{method:'POST'})}
-function doAct(a){fetch('/api/action?do='+a,{method:'POST'})}
+function toggleRun(){fetch('/api/v1/toggle_run',{method:'POST'})}
+function setSg(p){const v=parseInt(document.getElementById('sgIn'+p).value)||0;fetch('/api/v1/sg_trip?profile='+p+'&value='+v,{method:'POST'})}
+function setWz(d){fetch('/api/v1/work_zone?delta='+d,{method:'POST'})}
+function setBatch(d){fetch('/api/v1/batch?delta='+d,{method:'POST'})}
+function doBatch(a){fetch('/api/v1/batch?action='+a,{method:'POST'})}
+function setProfile(i){fetch('/api/v1/profile?idx='+i,{method:'POST'})}
+function setCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none';fetch('/api/v1/current?ma='+v,{method:'POST'})}
+function adj(w,d){fetch('/api/v1/endpoint?which='+w+'&delta='+d,{method:'POST'})}
+function doAct(a){fetch('/api/v1/action?do='+a,{method:'POST'})}
 function saveWifi(){
   const s=document.getElementById('ns').value,p=document.getElementById('np').value;
   if(!s){alert('SSID required');return}
-  fetch('/api/wifi?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p),{method:'POST'})
+  fetch('/api/v1/wifi?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p),{method:'POST'})
   .then(()=>{alert('Saved! Rebooting...');setTimeout(()=>location.reload(),5000)})}
 function resetWifi(){
   if(!confirm('Clear saved WiFi credentials and reboot into setup mode?'))return;
-  fetch('/api/wifi_reset',{method:'POST'})
+  fetch('/api/v1/wifi_reset',{method:'POST'})
   .then(()=>{alert('WiFi cleared! Rebooting into setup mode...');setTimeout(()=>location.reload(),5000)})}
 
 function upFW(f){
@@ -449,7 +449,7 @@ function upFW(f){
   const ua=document.getElementById('ua'),pb=document.getElementById('pb'),pf=document.getElementById('pf'),st=document.getElementById('otaS');
   ua.classList.add('on');ua.textContent=f.name;pb.style.display='block';pf.style.width='0%';
   st.textContent='Uploading...';st.style.color='#888';
-  const x=new XMLHttpRequest();x.open('POST','/api/ota');
+  const x=new XMLHttpRequest();x.open('POST','/api/v1/ota');
   x.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);pf.style.width=p+'%';st.textContent='Uploading... '+p+'%'}};
   x.onload=()=>{if(x.status===200){pf.style.width='100%';st.textContent='Success! Rebooting...';st.style.color='#00FF00';setTimeout(()=>location.reload(),5000)}
   else{st.textContent='Error: '+x.responseText;st.style.color='#FF4444'}};
@@ -460,7 +460,7 @@ const uae=document.getElementById('ua');
 uae.addEventListener('dragover',e=>{e.preventDefault();uae.classList.add('on')});
 uae.addEventListener('dragleave',()=>uae.classList.remove('on'));
 uae.addEventListener('drop',e=>{e.preventDefault();upFW(e.dataTransfer.files[0])});
-fetch('/api/state').then(r=>r.json()).then(upd).catch(()=>{});
+fetch('/api/v1/state').then(r=>r.json()).then(upd).catch(()=>{});
 </script></body></html>
 )rawliteral";
 
@@ -571,11 +571,11 @@ void setupWebServer() {
   });
   webServer.addHandler(&events);
 
-  webServer.on("/api/state", HTTP_GET, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/state", HTTP_GET, [](AsyncWebServerRequest *req) {
     req->send(200, "application/json", buildStateJSON());
   });
 
-  webServer.on("/api/toggle_run", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/toggle_run", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (runState == IDLE) {
       startRunBetweenEndpoints();
       setRunButtonState(runState == RUNNING);
@@ -586,7 +586,7 @@ void setupWebServer() {
     req->send(200, "text/plain", "ok");
   });
 
-  webServer.on("/api/profile", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/profile", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (req->hasParam("idx")) {
       uint8_t idx = (uint8_t)req->getParam("idx")->value().toInt();
       if (idx < NUM_PROFILES) {
@@ -596,7 +596,7 @@ void setupWebServer() {
     req->send(200, "text/plain", "ok");
   });
 
-  webServer.on("/api/current", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/current", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (req->hasParam("ma")) {
       uint16_t ma = (uint16_t)req->getParam("ma")->value().toInt();
       RUN_CURRENT_MA = constrain(ma, RUN_CURRENT_MIN, RUN_CURRENT_MAX);
@@ -606,7 +606,7 @@ void setupWebServer() {
     req->send(200, "text/plain", "ok");
   });
 
-  webServer.on("/api/endpoint", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/endpoint", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (req->hasParam("which") && req->hasParam("delta") && endpointsCalibrated) {
       String w = req->getParam("which")->value();
       int32_t d = req->getParam("delta")->value().toInt();
@@ -621,7 +621,7 @@ void setupWebServer() {
     req->send(200, "text/plain", "ok");
   });
 
-  webServer.on("/api/sg_trip", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/sg_trip", HTTP_POST, [](AsyncWebServerRequest *req) {
     uint8_t tgt = activeProfile;
     if (req->hasParam("profile")) {
       uint8_t p = (uint8_t)req->getParam("profile")->value().toInt();
@@ -646,7 +646,7 @@ void setupWebServer() {
     req->send(200, "text/plain", "ok");
   });
 
-  webServer.on("/api/work_zone", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/work_zone", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (req->hasParam("delta")) {
       int32_t d = req->getParam("delta")->value().toInt();
       int32_t v = SG_WORK_ZONE_STEPS + d;
@@ -655,7 +655,7 @@ void setupWebServer() {
     req->send(200, "text/plain", "ok");
   });
 
-  webServer.on("/api/batch", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/batch", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (req->hasParam("delta")) {
       int32_t d = req->getParam("delta")->value().toInt();
       int32_t v = batchTarget + d;
@@ -680,7 +680,7 @@ void setupWebServer() {
     req->send(200, "text/plain", "ok");
   });
 
-  webServer.on("/api/action", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/action", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (req->hasParam("do")) {
       String action = req->getParam("do")->value();
       if (action == "calibrate" && runState == IDLE) {
@@ -695,7 +695,7 @@ void setupWebServer() {
     req->send(200, "text/plain", "ok");
   });
 
-  webServer.on("/api/wifi", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/wifi", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (req->hasParam("ssid")) {
       String ssid = req->getParam("ssid")->value();
       String pass = req->hasParam("pass") ? req->getParam("pass")->value() : "";
@@ -708,14 +708,14 @@ void setupWebServer() {
     }
   });
 
-  webServer.on("/api/wifi_reset", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/wifi_reset", HTTP_POST, [](AsyncWebServerRequest *req) {
     clearWiFiCredentials();
     req->send(200, "text/plain", "cleared");
     rebootRequested = true;
     rebootRequestMs = millis();
   });
 
-  webServer.on("/api/log_clear", HTTP_POST, [](AsyncWebServerRequest *req) {
+  webServer.on("/api/v1/log_clear", HTTP_POST, [](AsyncWebServerRequest *req) {
     logHead = 0;
     logSerial = 0;
     logSentSerial = 0;
@@ -731,7 +731,7 @@ void setupWebServer() {
 
   // OTA firmware upload
   webServer.on(
-      "/api/ota", HTTP_POST,
+      "/api/v1/ota", HTTP_POST,
       [](AsyncWebServerRequest *req) {
         bool ok = !Update.hasError();
         if (ok) {

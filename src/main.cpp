@@ -72,7 +72,7 @@ bool captivePortalRunning = false;
 
 Preferences prefs;
 AsyncWebServer webServer(80);
-AsyncEventSource events("/events");
+AsyncEventSource events("/api/v1/events");
 uint32_t lastSSEMs = 0;
 
 volatile bool webCalRequested = false;

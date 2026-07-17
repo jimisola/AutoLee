@@ -4,8 +4,8 @@
 
 using namespace autolee;
 
-// Must byte-for-byte equal schemas/state.example.json (the shared contract that
-// CI validates against schemas/state.schema.json).
+// Must byte-for-byte equal api/schemas/state.example.json (the shared contract that
+// CI validates against api/schemas/state.schema.json).
 static const char *EXPECTED =
     "{\"version\":\"1.8\",\"state\":\"IDLE\",\"counter\":42,\"speed\":35000,\"calibrated\":true,"
     "\"rawUp\":0,\"rawDown\":10000,\"endpointUp\":0,\"endpointDown\":9500,"
