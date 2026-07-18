@@ -52,6 +52,31 @@ dumps), no Arduino/pioarduino in the critical path, and a well‑maintained offi
 extension. Because `lib/autolee_logic` is framework‑agnostic, an ESP‑IDF move is a **HAL
 rewrite, not from‑scratch**.
 
+### What `sdkconfig` control concretely gives
+
+Mostly hidden/hardcoded in the precompiled Arduino/PlatformIO setup; ESP-IDF exposes them:
+
+- **OTA auto-rollback** — if an over-the-air update fails to boot or fails a post-boot
+  self-check, the device reverts to the last known-good firmware automatically, so a bad
+  update can't brick the machine or leave it running broken firmware. *(Genuinely unlocked
+  by ESP-IDF — needs bootloader/`sdkconfig` options the precompiled Arduino libs lack.)*
+- **Core dump** — on a crash, a snapshot (stack/registers/task states) is saved to flash and
+  decoded later to see exactly where/why it faulted, instead of a silent reboot. Makes rare
+  field failures diagnosable. *(Genuinely unlocked.)*
+- **Watchdog (fuller)** — a hung loop/ISR forces a reset rather than leaving a powered stepper
+  frozen mid-stroke. *(We already ship a basic task watchdog on Arduino; ESP-IDF adds fuller,
+  configurable coverage incl. the interrupt watchdog — more control, not a hard unlock.)*
+- **Brownout (finer control)** — a clean reset when the 5 V rail dips (e.g. the stepper draws
+  a current spike) rather than the MCU glitching mid-operation, which on a press could mean a
+  mis-step or a missed jam detection. *(Available on Arduino too; ESP-IDF tunes the
+  threshold/behaviour — control, not unlock.)*
+- **Memory/fault checks** — stack-overflow + heap-corruption detection and configurable panic
+  behaviour, catching memory bugs early.
+
+Honest calibration: **OTA rollback and core dump** are genuinely *unlocked* by ESP-IDF;
+**watchdog and brownout** partly exist on Arduino already — there the win is *fuller /
+configurable* control, not "impossible today."
+
 Two steps, taken only when there's a concrete driver (safety features, or wanting off
 pioarduino/Arduino):
 
