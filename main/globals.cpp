@@ -1,3 +1,7 @@
+#include <cstdarg>
+#include <cstdio>
+#include "esp_log.h"
+
 #include "config.h"
 #include "globals.h"
 
@@ -30,3 +34,21 @@ uint8_t runSGLowCount = 0;
 bool batchActive = false;
 int32_t batchCount = 0;
 int32_t batchTarget = 0;
+
+volatile bool webCalRequested = false;
+volatile bool webHomeRequested = false;
+volatile bool rebootRequested = false;
+uint32_t rebootRequestMs = 0;
+
+autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
+uint32_t logSentSerial = 0;
+
+void webLog(const char *fmt, ...) {
+    char line[LOG_LINE_LEN];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(line, sizeof(line), fmt, args);
+    va_end(args);
+    g_log.push(line);
+    ESP_LOGI("weblog", "%s", line);
+}

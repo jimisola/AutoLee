@@ -15,3 +15,4 @@ void safeCreepHome();
 bool return_home_up_safe();
 void recomputeEffectiveEndpoints();
 uint16_t read_sg();
+void setActiveProfile(uint8_t idx);

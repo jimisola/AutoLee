@@ -30,7 +30,14 @@
 static const char *TAG = "motion";
 
 static inline uint32_t millis() { return (uint32_t)(esp_timer_get_time() / 1000); }
-static inline void delay(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
+// pdMS_TO_TICKS(1) rounds down to 0 ticks at the default 100 Hz tick rate,
+// which doesn't actually yield - found via the task WDT tripping during
+// bring-up (see app_main.cpp's pump_task). Guarantee at least 1 tick so the
+// tight calibration/homing polling loops below don't starve other tasks.
+static inline void delay(uint32_t ms) {
+    TickType_t ticks = pdMS_TO_TICKS(ms);
+    vTaskDelay(ticks < 1 ? 1 : ticks);
+}
 static inline void wdt_feed() { esp_task_wdt_reset(); }
 
 // --- UI hooks: not yet ported (Phase 3's screens aren't built out yet) ---
@@ -467,6 +474,12 @@ bool return_home_up_safe() {
     long finalPos = stepper::getCurrentPosition();
     ESP_LOGI(TAG, "Home: pos=%ld tgt=%ld diff=%ld", finalPos, endpointUp, finalPos - endpointUp);
     return nearPos(finalPos, endpointUp, 50);
+}
+
+void setActiveProfile(uint8_t idx) {
+    if (idx >= NUM_PROFILES) return;
+    activeProfile = idx;
+    stepper::setSpeedInHz(ui_speed_hz);
 }
 
 bool calibrateEndpointsSensorless() {

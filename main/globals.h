@@ -24,3 +24,17 @@ extern uint8_t runSGLowCount;
 extern bool batchActive;
 extern int32_t batchCount;
 extern int32_t batchTarget;
+
+// Web request flags (set from the HTTP server's task, serviced from the main
+// loop) - mirrors the original's "async callbacks must not touch motion"
+// rule (see CLAUDE.md).
+extern volatile bool webCalRequested;
+extern volatile bool webHomeRequested;
+extern volatile bool rebootRequested;
+extern uint32_t rebootRequestMs;
+
+// Log ring for the web UI's log panel + SSE "log" events.
+#include "log_ring.h"
+extern autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
+extern uint32_t logSentSerial; // last serial# broadcast over SSE
+void webLog(const char *fmt, ...);

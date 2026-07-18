@@ -11,6 +11,11 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Size optimization (small OTA app slots)
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
+# lib/psychic_http (PsychicHttp) compiles its WebSocket support unconditionally
+# even though AutoLee only uses SSE/REST - esp_http_server needs this Kconfig
+# option enabled for httpd_ws_frame_t etc. to be declared.
+CONFIG_HTTPD_WS_SUPPORT=y
+
 # --- Phase 6 safety features ---
 
 # OTA rollback: an update that doesn't self-validate reverts to the last-good app
