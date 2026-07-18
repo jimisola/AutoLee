@@ -34,11 +34,13 @@ jobs:
         working-directory: test_apps
         # install-esp-idf-action prepends the RISC-V cross-toolchain to PATH.
         # test_apps/ is a native host build (only needs IDF_PATH, for the
-        # vendored Unity source) - force the system compiler explicitly so
-        # cmake doesn't pick up the cross `as` instead of the host one.
+        # vendored Unity source): pinning CC/CXX alone isn't enough because
+        # gcc still resolves its `as` via PATH, picking up the cross
+        # assembler ("as: unrecognized option '--64'") - reset PATH to a
+        # clean host-only value instead. IDF_PATH is a separate env var and
+        # stays set.
         env:
-          CC: /usr/bin/cc
-          CXX: /usr/bin/c++
+          PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         run: |
           cmake -B build -DAUTOLEE_COVERAGE=ON
           cmake --build build -j
