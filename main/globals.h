@@ -36,5 +36,5 @@ extern uint32_t rebootRequestMs;
 // Log ring for the web UI's log panel + SSE "log" events.
 #include "log_ring.h"
 extern autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
-extern uint32_t logSentSerial; // last serial# broadcast over SSE
+extern uint32_t logSentSerial;  // last serial# broadcast over SSE
 void webLog(const char *fmt, ...);

@@ -1,5 +1,11 @@
 # Optional local hooks. Enable with:  pre-commit install
 # CI enforces the same checks with `pre-commit run --all-files`.
+
+# Vendored third-party code (TMC-API, PsychicHttp, ESP-IDF's dns_server and
+# rmt/stepper_motor examples) - kept verbatim from upstream, not ours to
+# reformat.
+exclude: ^lib/(tmc_api|psychic_http|dns_server)/|^main/stepper_motor_encoder\.[ch]$
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

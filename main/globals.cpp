@@ -11,7 +11,7 @@ SpeedProfile profiles[NUM_PROFILES] = {
     {"Normal", 35000, 15, 15},
     {"Fast", 45000, 1, 1},
 };
-uint8_t activeProfile = 1; // default to Normal
+uint8_t activeProfile = 1;  // default to Normal
 int32_t upOffsetSteps = 0;
 int32_t downOffsetSteps = 0;
 uint16_t RUN_CURRENT_MA = 3500;
@@ -44,11 +44,11 @@ autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
 uint32_t logSentSerial = 0;
 
 void webLog(const char *fmt, ...) {
-    char line[LOG_LINE_LEN];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(line, sizeof(line), fmt, args);
-    va_end(args);
-    g_log.push(line);
-    ESP_LOGI("weblog", "%s", line);
+  char line[LOG_LINE_LEN];
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(line, sizeof(line), fmt, args);
+  va_end(args);
+  g_log.push(line);
+  ESP_LOGI("weblog", "%s", line);
 }

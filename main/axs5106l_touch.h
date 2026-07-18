@@ -12,20 +12,19 @@
 #define AXS5106L_MAX_TOUCH_POINTS 5
 
 struct axs5106l_coords_t {
-    uint16_t x;
-    uint16_t y;
+  uint16_t x;
+  uint16_t y;
 };
 
 struct axs5106l_touch_data_t {
-    axs5106l_coords_t coords[AXS5106L_MAX_TOUCH_POINTS];
-    uint8_t touch_num;
+  axs5106l_coords_t coords[AXS5106L_MAX_TOUCH_POINTS];
+  uint8_t touch_num;
 };
 
 // rotation: 0-3, matches Arduino_GFX's setRotation(); width/height are the
 // *panel's* (post-rotation) resolution, i.e. config.h's SCR_W / SCR_H.
-void axs5106l_touch_init(i2c_master_bus_handle_t i2c_bus, gpio_num_t rst_gpio,
-                          gpio_num_t int_gpio, uint16_t rotation, uint16_t width,
-                          uint16_t height);
+void axs5106l_touch_init(i2c_master_bus_handle_t i2c_bus, gpio_num_t rst_gpio, gpio_num_t int_gpio,
+                         uint16_t rotation, uint16_t width, uint16_t height);
 
 // Poll for a new touch frame (only does I2C work if the INT line fired since
 // the last call - call this every LVGL indev read tick).

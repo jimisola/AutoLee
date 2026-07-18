@@ -10,18 +10,18 @@
 #include "esp_lvgl_port.h"
 #include "axs5106l_touch.h"
 
-#include "config.h" // SCR_W, SCR_H, ROTATION, GFX_BL, Touch_* pins
+#include "config.h"  // SCR_W, SCR_H, ROTATION, GFX_BL, Touch_* pins
 
 static void touchpad_read_cb(lv_indev_drv_t *, lv_indev_data_t *data) {
-    axs5106l_touch_data_t t;
-    axs5106l_touch_read();
-    if (axs5106l_touch_get_coordinates(&t)) {
-        data->point.x = t.coords[0].x;
-        data->point.y = t.coords[0].y;
-        data->state = LV_INDEV_STATE_PRESSED;
-    } else {
-        data->state = LV_INDEV_STATE_RELEASED;
-    }
+  axs5106l_touch_data_t t;
+  axs5106l_touch_read();
+  if (axs5106l_touch_get_coordinates(&t)) {
+    data->point.x = t.coords[0].x;
+    data->point.y = t.coords[0].y;
+    data->state = LV_INDEV_STATE_PRESSED;
+  } else {
+    data->state = LV_INDEV_STATE_RELEASED;
+  }
 }
 
 static const char *TAG = "display_touch";
@@ -29,7 +29,7 @@ static const char *TAG = "display_touch";
 // Shared SPI bus (ST7789 + TMC5160, see CLAUDE.md "Shared SPI bus"): SCK=1, MOSI=2.
 #define LCD_SCK_GPIO 1
 #define LCD_MOSI_GPIO 2
-#define LCD_MISO_GPIO 3 // unused by the display (write-only); read back by the TMC5160 in Phase 4
+#define LCD_MISO_GPIO 3  // unused by the display (write-only); read back by the TMC5160 in Phase 4
 #define LCD_DC_GPIO 15
 #define LCD_CS_GPIO 14
 #define LCD_RST_GPIO 22
@@ -108,109 +108,109 @@ static void jd9853_send_init_sequence(esp_lcd_panel_io_handle_t io) {
 //   Arduino_ST7789(bus, /*rst=*/22, /*rotation=*/0, /*ips=*/false,
 //                  /*w=*/172, /*h=*/320, /*colOffset=*/34, /*rowOffset=*/0, 34, 0)
 static esp_lcd_panel_handle_t init_display_panel(esp_lcd_panel_io_handle_t *out_io) {
-    spi_bus_config_t buscfg = {};
-    buscfg.sclk_io_num = LCD_SCK_GPIO;
-    buscfg.mosi_io_num = LCD_MOSI_GPIO;
-    buscfg.miso_io_num = LCD_MISO_GPIO;
-    buscfg.quadwp_io_num = -1;
-    buscfg.quadhd_io_num = -1;
-    buscfg.max_transfer_sz = SCR_W * 40 * sizeof(uint16_t);
-    ESP_ERROR_CHECK(spi_bus_initialize(LCD_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
+  spi_bus_config_t buscfg = {};
+  buscfg.sclk_io_num = LCD_SCK_GPIO;
+  buscfg.mosi_io_num = LCD_MOSI_GPIO;
+  buscfg.miso_io_num = LCD_MISO_GPIO;
+  buscfg.quadwp_io_num = -1;
+  buscfg.quadhd_io_num = -1;
+  buscfg.max_transfer_sz = SCR_W * 40 * sizeof(uint16_t);
+  ESP_ERROR_CHECK(spi_bus_initialize(LCD_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-    esp_lcd_panel_io_spi_config_t io_config = {};
-    io_config.cs_gpio_num = LCD_CS_GPIO;
-    io_config.dc_gpio_num = LCD_DC_GPIO;
-    io_config.spi_mode = 0;
-    io_config.pclk_hz = LCD_PIXEL_CLOCK_HZ;
-    io_config.trans_queue_depth = 10;
-    io_config.lcd_cmd_bits = 8;
-    io_config.lcd_param_bits = 8;
+  esp_lcd_panel_io_spi_config_t io_config = {};
+  io_config.cs_gpio_num = LCD_CS_GPIO;
+  io_config.dc_gpio_num = LCD_DC_GPIO;
+  io_config.spi_mode = 0;
+  io_config.pclk_hz = LCD_PIXEL_CLOCK_HZ;
+  io_config.trans_queue_depth = 10;
+  io_config.lcd_cmd_bits = 8;
+  io_config.lcd_param_bits = 8;
 
-    esp_lcd_panel_io_handle_t io_handle = nullptr;
-    ESP_ERROR_CHECK(
-        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST, &io_config, &io_handle));
+  esp_lcd_panel_io_handle_t io_handle = nullptr;
+  ESP_ERROR_CHECK(
+      esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST, &io_config, &io_handle));
 
-    esp_lcd_panel_dev_config_t panel_config = {};
-    panel_config.reset_gpio_num = LCD_RST_GPIO;
-    panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB; // MADCTL=0x00 in the vendor init below
-    panel_config.data_endian = LCD_RGB_DATA_ENDIAN_BIG; // pairs with lv_conf.h's LV_COLOR_16_SWAP=1
-    panel_config.bits_per_pixel = 16;
+  esp_lcd_panel_dev_config_t panel_config = {};
+  panel_config.reset_gpio_num = LCD_RST_GPIO;
+  panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;  // MADCTL=0x00 in the vendor init below
+  panel_config.data_endian = LCD_RGB_DATA_ENDIAN_BIG;  // pairs with lv_conf.h's LV_COLOR_16_SWAP=1
+  panel_config.bits_per_pixel = 16;
 
-    esp_lcd_panel_handle_t panel_handle = nullptr;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_handle));
+  esp_lcd_panel_handle_t panel_handle = nullptr;
+  ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_handle));
 
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
-    // Deliberately not calling esp_lcd_panel_init(): this panel is a JD9853
-    // (ST7789-command-compatible but needs its own vendor init), and
-    // jd9853_send_init_sequence() below - a byte-for-byte port of
-    // src/ui_touch.cpp's `init_operations` - already does SLPOUT, all vendor
-    // registers, COLMOD, MADCTL (rotation 0), INVON, and DISPON. Calling the
-    // generic ST7789 init first would be redundant at best.
-    jd9853_send_init_sequence(io_handle);
-    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle, 34, 0));
+  ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
+  // Deliberately not calling esp_lcd_panel_init(): this panel is a JD9853
+  // (ST7789-command-compatible but needs its own vendor init), and
+  // jd9853_send_init_sequence() below - a byte-for-byte port of
+  // src/ui_touch.cpp's `init_operations` - already does SLPOUT, all vendor
+  // registers, COLMOD, MADCTL (rotation 0), INVON, and DISPON. Calling the
+  // generic ST7789 init first would be redundant at best.
+  jd9853_send_init_sequence(io_handle);
+  ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle, 34, 0));
 
-    *out_io = io_handle;
-    return panel_handle;
+  *out_io = io_handle;
+  return panel_handle;
 }
 
 static i2c_master_bus_handle_t init_touch_i2c_bus(void) {
-    i2c_master_bus_config_t bus_config = {};
-    bus_config.i2c_port = I2C_NUM_0;
-    bus_config.sda_io_num = (gpio_num_t)Touch_I2C_SDA;
-    bus_config.scl_io_num = (gpio_num_t)Touch_I2C_SCL;
-    bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
-    bus_config.glitch_ignore_cnt = 7;
-    bus_config.flags.enable_internal_pullup = true;
+  i2c_master_bus_config_t bus_config = {};
+  bus_config.i2c_port = I2C_NUM_0;
+  bus_config.sda_io_num = (gpio_num_t)Touch_I2C_SDA;
+  bus_config.scl_io_num = (gpio_num_t)Touch_I2C_SCL;
+  bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
+  bus_config.glitch_ignore_cnt = 7;
+  bus_config.flags.enable_internal_pullup = true;
 
-    i2c_master_bus_handle_t bus_handle = nullptr;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &bus_handle));
-    return bus_handle;
+  i2c_master_bus_handle_t bus_handle = nullptr;
+  ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &bus_handle));
+  return bus_handle;
 }
 
 lv_display_t *display_touch_init(void) {
-    gpio_config_t bl_cfg = {};
-    bl_cfg.pin_bit_mask = 1ULL << GFX_BL;
-    bl_cfg.mode = GPIO_MODE_OUTPUT;
-    ESP_ERROR_CHECK(gpio_config(&bl_cfg));
-    gpio_set_level((gpio_num_t)GFX_BL, 0); // keep off until content is drawn
+  gpio_config_t bl_cfg = {};
+  bl_cfg.pin_bit_mask = 1ULL << GFX_BL;
+  bl_cfg.mode = GPIO_MODE_OUTPUT;
+  ESP_ERROR_CHECK(gpio_config(&bl_cfg));
+  gpio_set_level((gpio_num_t)GFX_BL, 0);  // keep off until content is drawn
 
-    esp_lcd_panel_io_handle_t io_handle = nullptr;
-    esp_lcd_panel_handle_t panel_handle = init_display_panel(&io_handle);
+  esp_lcd_panel_io_handle_t io_handle = nullptr;
+  esp_lcd_panel_handle_t panel_handle = init_display_panel(&io_handle);
 
-    const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    ESP_ERROR_CHECK(lvgl_port_init(&lvgl_cfg));
+  const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+  ESP_ERROR_CHECK(lvgl_port_init(&lvgl_cfg));
 
-    lvgl_port_display_cfg_t disp_cfg = {};
-    disp_cfg.io_handle = io_handle;
-    disp_cfg.panel_handle = panel_handle;
-    disp_cfg.buffer_size = SCR_W * 40;
-    disp_cfg.double_buffer = true;
-    disp_cfg.hres = SCR_W;
-    disp_cfg.vres = SCR_H;
-    disp_cfg.monochrome = false;
-    disp_cfg.rotation.swap_xy = false;
-    disp_cfg.rotation.mirror_x = false;
-    disp_cfg.rotation.mirror_y = false;
-    disp_cfg.flags.buff_dma = true;
+  lvgl_port_display_cfg_t disp_cfg = {};
+  disp_cfg.io_handle = io_handle;
+  disp_cfg.panel_handle = panel_handle;
+  disp_cfg.buffer_size = SCR_W * 40;
+  disp_cfg.double_buffer = true;
+  disp_cfg.hres = SCR_W;
+  disp_cfg.vres = SCR_H;
+  disp_cfg.monochrome = false;
+  disp_cfg.rotation.swap_xy = false;
+  disp_cfg.rotation.mirror_x = false;
+  disp_cfg.rotation.mirror_y = false;
+  disp_cfg.flags.buff_dma = true;
 
-    lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);
-    if (!disp) {
-        ESP_LOGE(TAG, "lvgl_port_add_disp failed");
-        return nullptr;
-    }
+  lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);
+  if (!disp) {
+    ESP_LOGE(TAG, "lvgl_port_add_disp failed");
+    return nullptr;
+  }
 
-    i2c_master_bus_handle_t i2c_bus = init_touch_i2c_bus();
-    axs5106l_touch_init(i2c_bus, (gpio_num_t)Touch_RST, (gpio_num_t)Touch_INT, ROTATION, SCR_W,
-                         SCR_H);
+  i2c_master_bus_handle_t i2c_bus = init_touch_i2c_bus();
+  axs5106l_touch_init(i2c_bus, (gpio_num_t)Touch_RST, (gpio_num_t)Touch_INT, ROTATION, SCR_W,
+                      SCR_H);
 
-    static lv_indev_drv_t indev_drv; // static: LVGL keeps a pointer to this past return
-    lv_indev_drv_init(&indev_drv);
-    indev_drv.type = LV_INDEV_TYPE_POINTER;
-    indev_drv.read_cb = touchpad_read_cb;
-    indev_drv.disp = disp;
-    lv_indev_drv_register(&indev_drv);
-    ESP_LOGI(TAG, "AXS5106L touch ready");
+  static lv_indev_drv_t indev_drv;  // static: LVGL keeps a pointer to this past return
+  lv_indev_drv_init(&indev_drv);
+  indev_drv.type = LV_INDEV_TYPE_POINTER;
+  indev_drv.read_cb = touchpad_read_cb;
+  indev_drv.disp = disp;
+  lv_indev_drv_register(&indev_drv);
+  ESP_LOGI(TAG, "AXS5106L touch ready");
 
-    gpio_set_level((gpio_num_t)GFX_BL, 1);
-    return disp;
+  gpio_set_level((gpio_num_t)GFX_BL, 1);
+  return disp;
 }

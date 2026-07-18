@@ -7,7 +7,7 @@
 // jam-detection/stop/backoff code; bench-verify before trusting on the press. ***
 void motion_init();
 
-void handleMotion(); // pump, call every loop iteration
+void handleMotion();  // pump, call every loop iteration
 void startRunBetweenEndpoints();
 void requestGracefulStop();
 bool calibrateEndpointsSensorless();

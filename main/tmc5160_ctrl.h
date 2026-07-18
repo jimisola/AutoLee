@@ -27,4 +27,4 @@ uint32_t DRV_STATUS();
 // Bits 0-9 of DRV_STATUS: the raw, unfiltered StallGuard2 result.
 uint16_t SG_RESULT();
 
-} // namespace tmc5160
+}  // namespace tmc5160

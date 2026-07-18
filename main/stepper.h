@@ -33,4 +33,4 @@ void setCurrentPosition(int32_t position);
 // (see kCruiseChunkMs) - not instantaneous, but bounded and small.
 void forceStop();
 
-} // namespace stepper
+}  // namespace stepper
