@@ -62,11 +62,11 @@ first for the *why* and the per‑subsystem analysis.
 - **Bug found + fixed during bring-up:** the pump task's `vTaskDelay(pdMS_TO_TICKS(1))` rounds down to 0 ticks at the default 100 Hz tick rate, starving the IDLE task and tripping the task watchdog (reproduced: boot to reboot in ~6.5s). Fixed by using 10ms in `app_main.cpp`'s pump loop and guaranteeing a minimum 1-tick delay in `motion.cpp`'s `delay()` helper (used by the calibration/homing polling loops - same failure mode, not yet triggered but same root cause).
 
 ## Phase 6 — Safety features (the `sdkconfig` payoff)
-- [ ] **OTA rollback:** enable bootloader rollback; call `esp_ota_mark_app_valid_cancel_rollback()` after a healthy boot (self‑check).
-- [ ] **Watchdog:** task + **interrupt** WDT with panic; feed in the blocking calibration/homing loops (as today's `wdt_feed()`).
-- [ ] **Core dump** to flash + document how to pull/decode it.
-- [ ] **Brownout** threshold tuned for the 24 V→5 V + stepper setup.
-- **DoD:** ⚙️ a deliberately‑bad OTA image rolls back; a forced crash yields a decodable core dump.
+- [x] **OTA rollback:** `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` (Phase 1). Added the missing `esp_ota_mark_app_valid_cancel_rollback()` self-check call in `app_main.cpp`, gated on `esp_ota_get_state_partition()` returning `ESP_OTA_IMG_PENDING_VERIFY`. Not yet exercised end-to-end - the log line correctly doesn't fire when flashed directly via `idf.py flash` (only an actual OTA update leaves the image in `PENDING_VERIFY`), so the full "bad OTA image rolls back" path still needs a real OTA cycle to test.
+- [x] **Watchdog:** task + interrupt WDT with panic (Phase 1); `main/motion.cpp`'s `wdt_feed()` in the calibration/homing loops, `app_main.cpp`'s `pump_task` subscribes + resets every iteration. **Genuinely exercised during Phase 5 bring-up**: a real bug (0-tick `vTaskDelay` starving the idle task) tripped this exact watchdog and force-rebooted the device - confirming it isn't just configured but actually catches hangs.
+- [x] **Core dump** to flash - **fully verified end-to-end**: deliberately crashed the device (null-pointer write), confirmed via serial log it panics ("Guru Meditation Error... Store access fault"), saves to the `coredump` partition, and survives reboot; then decoded it with `idf.py coredump-info`, which pinpointed the exact crash line (`app_main.cpp:64`) with a full backtrace and thread dump. Reproduced across 6+ crash/save/reboot cycles.
+- [ ] **Brownout** threshold: `CONFIG_ESP_BROWNOUT_DET=y` (Phase 1, default threshold). Tuning it against the actual 24V→5V + stepper draw needs the physical press - not done.
+- **DoD:** ⚙️ **core dump fully verified** (see above). OTA rollback and brownout tuning still need real hardware (an actual OTA cycle; the press's power supply under load) - not done.
 
 ## Phase 7 — CI, release, docs, v1.9
 - [ ] **CI:** `idf.py build` (Espressif `esp-idf-ci-action` or the IDF Docker image) + host tests + coverage; port the lint/quality gates.

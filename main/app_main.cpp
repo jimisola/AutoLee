@@ -4,6 +4,7 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -81,6 +82,19 @@ extern "C" void app_main(void) {
         ESP_LOGI(TAG, "LVGL display+touch bring-up complete");
     } else {
         ESP_LOGE(TAG, "display_touch_init() failed");
+    }
+
+    // Reaching this point (display, motion, WiFi, and the web server all
+    // initialized without crashing) is the self-check: mark this OTA image
+    // valid so the bootloader's rollback won't revert it on the next boot.
+    // Must run every boot, not just after an OTA - the currently-running
+    // image starts "pending verify" until this is called at least once.
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(running, &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        ESP_LOGI(TAG, "OTA: image marked valid (rollback canceled)");
     }
 
     xTaskCreate(pump_task, "pump", 8192, nullptr, 5, nullptr);
