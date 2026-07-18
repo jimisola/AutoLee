@@ -96,20 +96,16 @@ The stall detection and jam protection features are designed to detect brass get
 
 ## File Structure
 
-As of v1.8, the firmware is split into modular files for maintainability. All files must be in the same sketch folder.
+The firmware is a native **ESP-IDF** project (`idf.py`, not the Arduino IDE/PlatformIO).
 
-| File | Purpose |
+| Path | Purpose |
 |---|---|
-| `AutoLee.ino` | Main entry point — globals, `setup()`, `loop()`, include order |
-| `config.h` | All tuning constants, pin definitions, speed profiles |
-| `motion.h` | Motion control, stall detection, calibration, creep home |
-| `ui_touch.h` | LVGL touch UI — screen builders, helpers, event handlers |
-| `web_server.h` | Web server, API endpoints, SSE broadcast, HTML, OTA upload |
-| `wifi_ota.h` | WiFi connection, captive portal, ArduinoOTA |
-| `globals.h` | Reference document — lists all shared variables and forward declarations (not included in the build) |
-| `lv_conf.h` | LVGL configuration — display size, enabled features, font selections |
-
-The Arduino IDE compiles everything as a single translation unit. Include order in `AutoLee.ino` resolves all dependencies: `config.h` → globals → `motion.h` → `ui_touch.h` → `wifi_ota.h` → `web_server.h`.
+| `main/` | The firmware: `app_main.cpp` (entry point), `config.h` (pins, speed profiles, tuning constants), and the hardware modules (display/touch, motion, web, WiFi — see CLAUDE.md for the current set) |
+| `lib/autolee_logic/` | Pure, hardware-independent logic (endpoint math, SG filter/blanking, stall FSM, batch, log ring, calibration, state JSON, motor FSM). Shared by the firmware **and** the host tests, so tested code == shipped code |
+| `test/` | Host unit tests (one folder per pure-logic module), run via `test_apps/` (plain CMake + CTest) |
+| `api/` | API contract: `openapi.yaml` (REST), `asyncapi.yaml` (SSE), `schemas/` (shared JSON Schema) |
+| `include/lv_conf.h` | LVGL configuration — display size, enabled features, font selections |
+| `CMakeLists.txt`, `partitions.csv`, `sdkconfig.defaults` | ESP-IDF build config (see CONTRIBUTING.md) |
 
 ---
 
@@ -223,36 +219,25 @@ The Arduino IDE compiles everything as a single translation unit. Include order 
 
 ## Software Setup
 
-### Dependencies (Arduino / PlatformIO)
+### Dependencies
 
-| Library | Version | Install | Purpose |
-|---|---|---|---|
-| `LVGL` | v8.4.0 | Online | Touchscreen UI framework |
-| `GFX_Library_for_Arduino` | v1.5.9 | Online | ST7789 display driver |
-| `TMCStepper` | — | Online | TMC5160 SPI communication |
-| `FastAccelStepper` | — | Online | Step pulse generation with acceleration |
-| `ESPAsyncWebServer` + `AsyncTCP` | — | Online | Web server & SSE |
-| `ArduinoOTA` | — | Online | Over-the-air firmware updates |
-| `DNSServer` | — | Online | Captive portal redirect |
-| `esp_lcd_touch_axs5106l` | — | **Offline** | AXS5106L touch controller driver |
-
-> **Note:** The `esp_lcd_touch_axs5106l` library is **not available** in the Arduino Library Manager. You must install it manually from Waveshare's demo package — see step 3 below.
+Built with **ESP-IDF** (native `idf.py`, no Arduino IDE or PlatformIO). LVGL and
+`esp_lvgl_port` are fetched automatically by the ESP-IDF Component Manager
+(pinned in `main/idf_component.yml`); the TMC5160 and AXS5106L touch drivers
+are implemented directly in `main/` against ESP-IDF's SPI/I2C APIs — no
+offline/manually-installed libraries needed.
 
 ### Build & Flash
 
-1. Clone this repo
-2. Install all "Online" libraries above via the Arduino Library Manager
-3. Install the touch driver **offline**:
-   - Download the [Waveshare ESP32-C6-Touch-LCD-1.47 demo package](https://www.waveshare.com/wiki/ESP32-C6-Touch-LCD-1.47)
-   - Find the `esp_lcd_touch_axs5106l` library folder inside the package
-   - Copy it to your Arduino `libraries` directory
-4. Set up LVGL:
-   - Copy `lv_conf.h` from this repo to sit **next to** your `lvgl` library folder (not inside it)
-   - Copy the `demos` folder from inside the LVGL library into its `src` folder
-5. Open `AutoLee.ino` in Arduino IDE or PlatformIO — all `.h` files must be in the same folder as the `.ino`
-6. Select board: **ESP32-C6**
-7. Set partition scheme: **Minimal SPIFFS (1.9 MB APP with OTA/190 KB SPIFFS)** — the firmware is too large for the default partition layout
-8. Compile and flash
+```bash
+# Install ESP-IDF >= 5.3: https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/get-started/
+idf.py set-target esp32c6
+idf.py build
+idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full toolchain setup, host-test
+instructions, and repo layout.
 
 ## Flash Pre-Compiled Binary (No Arduino IDE Required)
  

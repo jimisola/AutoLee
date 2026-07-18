@@ -1,0 +1,15 @@
+# ESP-IDF (native idf.py build) - sdkconfig is generated from sdkconfig.defaults
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+*.bin
+*.elf
+*.map
+
+# test_apps/ host tests (plain CMake, out-of-tree build dirs)
+test_apps/build/
+test_apps/build-coverage/
+
+# OS cruft
+.DS_Store

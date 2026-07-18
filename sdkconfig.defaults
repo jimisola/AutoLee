@@ -1,0 +1,30 @@
+# AutoLee - ESP-IDF defaults (see docs/PLAN.md Phase 1 / Phase 6)
+
+CONFIG_IDF_TARGET="esp32c6"
+
+# Flash: 4 MB, matches the WaveShare board (mirrors platformio.ini's min_spiffs layout)
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Size optimization (small OTA app slots)
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# --- Phase 6 safety features ---
+
+# OTA rollback: an update that doesn't self-validate reverts to the last-good app
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Task + interrupt watchdog, panic on trip (mirrors today's ENABLE_TASK_WDT, made fuller)
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_PANIC=y
+
+# Core dump to flash for post-crash diagnosis
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# Brownout detector (tune threshold once bench-verified against the 24V->5V + stepper draw)
+CONFIG_ESP_BROWNOUT_DET=y

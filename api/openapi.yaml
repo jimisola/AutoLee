@@ -1,0 +1,152 @@
+openapi: 3.1.0
+info:
+  title: AutoLee HTTP API
+  version: "1.0"
+  description: >
+    REST control surface served by the AutoLee firmware's on-device web server.
+    All mutating endpoints are POST; the canonical device state is returned by
+    `GET /api/v1/state` and pushed continuously over Server-Sent Events at `/api/v1/events`
+    (see asyncapi.yaml). Parameters are passed as query parameters.
+  license:
+    name: CC BY-NC 4.0
+    url: https://creativecommons.org/licenses/by-nc/4.0/
+servers:
+  - url: http://autolee.local
+    description: Device on the local network (mDNS)
+  - url: http://{deviceIp}
+    variables:
+      deviceIp: { default: "192.168.4.1" }
+
+paths:
+  /api/v1/state:
+    get:
+      summary: Full device state
+      operationId: getState
+      responses:
+        "200":
+          description: Current device state
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/state.schema.json"
+
+  /api/v1/toggle_run:
+    post:
+      summary: Start or stop the run
+      operationId: toggleRun
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/profile:
+    post:
+      summary: Select the active speed profile
+      operationId: setProfile
+      parameters:
+        - name: idx
+          in: query
+          required: true
+          schema: { type: integer, enum: [0, 1, 2] }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/sg_trip:
+    post:
+      summary: Set or adjust the StallGuard trip for a profile
+      operationId: setSgTrip
+      parameters:
+        - { name: value, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1023 } }
+        - { name: delta, in: query, required: false, schema: { type: integer } }
+        - { name: profile, in: query, required: false, description: "Target profile (defaults to active)", schema: { type: integer, enum: [0, 1, 2] } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/current:
+    post:
+      summary: Set motor run current (mA)
+      operationId: setCurrent
+      parameters:
+        - name: ma
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1000, maximum: 4500 }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/work_zone:
+    post:
+      summary: Adjust the SG work-zone blanking distance
+      operationId: setWorkZone
+      parameters:
+        - { name: delta, in: query, required: true, schema: { type: integer } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/endpoint:
+    post:
+      summary: Adjust an endpoint offset
+      operationId: adjustEndpoint
+      parameters:
+        - { name: which, in: query, required: true, schema: { type: string, enum: [up, down] } }
+        - { name: delta, in: query, required: true, schema: { type: integer } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/batch:
+    post:
+      summary: Adjust batch target or start/clear a batch
+      operationId: batch
+      parameters:
+        - { name: delta, in: query, required: false, schema: { type: integer } }
+        - { name: action, in: query, required: false, schema: { type: string, enum: [start, clear] } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/action:
+    post:
+      summary: Trigger a device action
+      operationId: action
+      parameters:
+        - name: do
+          in: query
+          required: true
+          schema: { type: string, enum: [calibrate, return_home, reset_counter] }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/wifi:
+    post:
+      summary: Save WiFi credentials and reboot
+      operationId: setWifi
+      parameters:
+        - { name: ssid, in: query, required: true, schema: { type: string } }
+        - { name: pass, in: query, required: false, schema: { type: string } }
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/wifi_reset:
+    post:
+      summary: Clear saved WiFi and reboot into AP mode
+      operationId: resetWifi
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/log_clear:
+    post:
+      summary: Clear the log ring buffer
+      operationId: clearLog
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+
+  /api/v1/ota:
+    post:
+      summary: Upload firmware (OTA)
+      operationId: otaUpload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: App-only .bin image
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+
+components:
+  responses:
+    Ok:
+      description: >
+        Accepted. The updated state is pushed to all clients over `/api/v1/events`
+        (and is readable via `GET /api/v1/state`).

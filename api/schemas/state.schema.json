@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jimisola/AutoLee/schemas/state.schema.json",
+  "title": "AutoLee device state",
+  "description": "Payload of GET /api/state and of the default (state) SSE event on /events.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "state", "counter", "speed", "calibrated",
+    "rawUp", "rawDown", "endpointUp", "endpointDown",
+    "upOffset", "downOffset", "position", "sgTrip", "workZone", "currentMa",
+    "profileIdx", "profileName", "profiles",
+    "wifiStatus", "wifiSSID", "wifiIP",
+    "batchTarget", "batchCount", "batchActive"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": ["IDLE", "RUNNING", "STOPPING", "CALIBRATING", "STALLED", "HOMING"]
+    },
+    "counter": { "type": "integer", "minimum": 0, "maximum": 9999 },
+    "speed": { "type": "integer", "minimum": 0 },
+    "calibrated": { "type": "boolean" },
+    "rawUp": { "type": "integer" },
+    "rawDown": { "type": "integer" },
+    "endpointUp": { "type": "integer" },
+    "endpointDown": { "type": "integer" },
+    "upOffset": { "type": "integer" },
+    "downOffset": { "type": "integer" },
+    "position": { "type": "integer" },
+    "sgTrip": { "type": "integer", "minimum": 0, "maximum": 1023 },
+    "workZone": { "type": "integer" },
+    "currentMa": { "type": "integer", "minimum": 0 },
+    "profileIdx": { "type": "integer", "minimum": 0, "maximum": 2 },
+    "profileName": { "type": "string" },
+    "profiles": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "hz", "sg"],
+        "properties": {
+          "name": { "type": "string" },
+          "hz": { "type": "integer", "minimum": 0 },
+          "sg": { "type": "integer", "minimum": 0, "maximum": 1023 }
+        }
+      }
+    },
+    "wifiStatus": { "type": "string" },
+    "wifiSSID": { "type": "string" },
+    "wifiIP": { "type": "string" },
+    "batchTarget": { "type": "integer", "minimum": 0 },
+    "batchCount": { "type": "integer", "minimum": 0 },
+    "batchActive": { "type": "boolean" }
+  }
+}
