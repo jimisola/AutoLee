@@ -30,25 +30,18 @@ jobs:
       - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
         with:
           version: "v5.3.2"
-      - name: Diagnose toolchain (temporary)
-        run: |
-          uname -m
-          which as gcc cc
-          as --version || true
-          /usr/bin/as --version || true
-          gcc -print-prog-name=as
-
       - name: Configure, build, and run
         working-directory: test_apps
-        # install-esp-idf-action prepends the RISC-V cross-toolchain to PATH.
-        # test_apps/ is a native host build (only needs IDF_PATH, for the
-        # vendored Unity source): pinning CC/CXX alone isn't enough because
-        # gcc still resolves its `as` via PATH, picking up the cross
-        # assembler ("as: unrecognized option '--64'") - reset PATH to a
-        # clean host-only value instead. IDF_PATH is a separate env var and
-        # stays set.
+        # install-esp-idf-action's env additions leak the Xtensa/RISC-V
+        # cross-toolchain into this native host build (only needs IDF_PATH,
+        # for the vendored Unity source). Resetting PATH alone didn't fix it
+        # ("as: unrecognized option '--64'" persisted, confirmed via
+        # `which as` resolving to .../xtensa-esp-elf/.../bin/as even under
+        # the reset PATH) - gcc also consults COMPILER_PATH to find `as`/
+        # `ld`, which the action sets independently of PATH. Clear both.
         env:
           PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          COMPILER_PATH: ""
         run: |
           cmake -B build -DAUTOLEE_COVERAGE=ON
           cmake --build build -j
