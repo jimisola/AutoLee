@@ -148,48 +148,11 @@ pre-commit run --all-files  # run against everything on demand
 
 Optional — CI enforces the same checks — but it catches issues before you push.
 
-## Platform & build-tool choice (and future direction)
+## Design decisions
 
-**Today: PlatformIO + the pioarduino platform (Arduino framework).** PlatformIO was
-chosen mainly for its **native host-test harness** (`pio test -e native`, which
-underpins the `lib/autolee_logic` unit tests + coverage) and its one-file dependency
-pinning / DX. The cost is the **pioarduino** dependency: PlatformIO's *official*
-Espressif platform doesn't support the Arduino framework on the ESP32-C6 — the result
-of a PlatformIO Labs ↔ Espressif **governance standoff**, not a technical gap (see the
-[summary in platform-espressif32#1225](https://github.com/platformio/platform-espressif32/issues/1225#issuecomment-4216264938)).
-pioarduino is a community fork (primarily one maintainer) that fills the gap. It's the
-right call today, but it's a real — currently low — supply-chain risk.
-
-**Exit ramps (the project isn't locked in):**
-- **arduino-cli** — builds against the *official* Espressif arduino-esp32 core, which
-  supports the C6 with **no fork**. Trade-offs: no built-in host-test runner (you'd build
-  the `lib/autolee_logic` tests with CMake/CTest yourself), and the `src/` layout is now a
-  PlatformIO project (not an Arduino sketch), so it isn't drop-in anymore.
-- **ESP-IDF** — Espressif-maintained end to end (see below).
-
-### Future direction — ESP-IDF
-
-ESP-IDF is the strongest long-term foundation: fully Espressif-maintained, first-class
-C6+ support, full `sdkconfig` control (which unlocks the safety features — OTA
-auto-rollback, watchdog panic mode, core dumps), no Arduino/pioarduino in the critical
-path, and a well-maintained official VS Code extension. Because `lib/autolee_logic` is
-framework-agnostic, an ESP-IDF move is a **HAL rewrite, not from-scratch**.
-
-Two steps, taken only when there's a concrete driver (safety features, or wanting off
-pioarduino/Arduino):
-1. **Arduino-as-ESP-IDF-component** (smallest): ESP-IDF build + `sdkconfig` while keeping
-   all Arduino libraries/code. Unlocks the safety features with minimal rewrite.
-2. **Pure ESP-IDF** (largest): rewrite the HAL — display (`esp_lcd`), web
-   (`esp_http_server` + hand-rolled SSE), WiFi/OTA/NVS on native APIs. Motion carries over
-   (FastAccelStepper supports ESP-IDF; TMCStepper → native `esp-tmc5160`). Build with
-   **native `idf.py` + CMake** (drop PlatformIO — its main value is the Arduino glue), and
-   use ESP-IDF's host/"linux-target" testing in place of `pio test`.
-
-**Opinion:** ESP-IDF is where AutoLee should eventually live, but a full port *now* would
-be a large rewrite of working, safety-critical firmware for benefits mostly reachable via
-step 1. So: ship the current PlatformIO setup; take step 1 if/when the safety features are
-wanted; go pure ESP-IDF only to fully shed Arduino/pioarduino — and if you do, prefer
-native `idf.py` over PlatformIO's espidf framework.
+Why PlatformIO + the pioarduino platform (and the ESP‑IDF future direction, exit ramps,
+and library‑support analysis) are recorded in
+[`docs/adr/0001-build-tooling-and-platform.md`](docs/adr/0001-build-tooling-and-platform.md).
 
 ## Conventions
 
