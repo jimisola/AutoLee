@@ -7,6 +7,7 @@
 #include "web_server.h"
 #include "globals.h"
 #include "motion.h"
+#include "stepper.h"
 #include "tmc5160_ctrl.h"
 #include "wifi_mgr.h"
 #include "index_html.h"
@@ -60,7 +61,7 @@ static std::string buildStateJSON() {
   st.endpointDown = endpointDown;
   st.upOffset = upOffsetSteps;
   st.downOffset = downOffsetSteps;
-  st.position = 0;  // filled by stepper::getCurrentPosition() below once linked in main loop
+  st.position = stepper::getCurrentPosition();
   st.sgTrip = RUN_SG_TRIP;
   st.workZone = SG_WORK_ZONE_STEPS;
   st.currentMa = RUN_CURRENT_MA;
@@ -132,23 +133,39 @@ static esp_err_t redirectToRoot(PsychicRequest *req, PsychicResponse *res) {
 // ==========================================================================
 //  OTA (esp_ota_ops, replacing Arduino's Update class)
 // ==========================================================================
+// Set for the duration of an upload; broadcastState() checks this to skip
+// SSE sends. Found via hardware testing + core dump: pump_task's SSE send
+// can block on the socket for the full 5s send-timeout while a large OTA
+// POST is also in flight on the same HTTP server, which is long enough to
+// starve the IDLE task and trip the task watchdog - crashing mid-upload
+// every time. pump_task also drives handleMotion()'s jam/homing dispatch,
+// so this isn't just an OTA nuisance; skipping SSE during OTA is the
+// narrow fix for the reproduced failure, not a general fix for SSE send
+// blocking pump_task under other slow/lossy-network conditions - see
+// docs/PLAN.md Phase 5 for the broader architectural note.
+static volatile bool s_ota_in_progress = false;
+
 static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_t index,
                                  uint8_t *data, size_t len, bool final) {
   if (index == 0) {
     ESP_LOGI(TAG, "OTA: upload '%s'", filename);
+    s_ota_in_progress = true;
     if (runState == RUNNING) requestGracefulStop();
     s_ota_partition = esp_ota_get_next_update_partition(nullptr);
     if (!s_ota_partition ||
         esp_ota_begin(s_ota_partition, OTA_SIZE_UNKNOWN, &s_ota_handle) != ESP_OK) {
       ESP_LOGE(TAG, "OTA: begin failed");
+      s_ota_in_progress = false;
       return ESP_FAIL;
     }
   }
   if (s_ota_handle && esp_ota_write(s_ota_handle, data, len) != ESP_OK) {
     ESP_LOGE(TAG, "OTA: write failed");
+    s_ota_in_progress = false;
     return ESP_FAIL;
   }
   if (final) {
+    s_ota_in_progress = false;
     if (esp_ota_end(s_ota_handle) == ESP_OK &&
         esp_ota_set_boot_partition(s_ota_partition) == ESP_OK) {
       ESP_LOGI(TAG, "OTA: success, %llu bytes", index + len);
@@ -409,6 +426,7 @@ void handleWebHome() {
 static uint32_t s_lastSSEMs = 0;
 
 void broadcastState() {
+  if (s_ota_in_progress) return;
   uint32_t now = millis();
   if ((now - s_lastSSEMs) < SSE_INTERVAL_MS) return;
   s_lastSSEMs = now;
