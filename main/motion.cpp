@@ -14,7 +14,6 @@
 #include "tmc5160_ctrl.h"
 #include "ui_touch.h"
 
-#include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
@@ -27,8 +26,6 @@
 #include "sg_blanking.h"
 #include "batch.h"
 #include "calibration.h"
-
-static const char *TAG = "motion";
 
 static inline uint32_t millis() {
   return (uint32_t)(esp_timer_get_time() / 1000);
@@ -148,7 +145,7 @@ void handleMotion() {
           if (batchActive) {
             batchCount++;
             if (autolee::batchComplete(batchCount, batchTarget)) {
-              ESP_LOGI(TAG, "Batch complete: %ld/%ld", (long)batchCount, (long)batchTarget);
+              webLog("Batch complete: %ld/%ld", (long)batchCount, (long)batchTarget);
               batchActive = false;
               requestGracefulStop();
               setRunButtonState(false);
@@ -198,9 +195,9 @@ void handleMotion() {
       static uint32_t lastSGPrintMs = 0;
       if ((millis() - lastSGPrintMs) > 500) {
         int32_t distToTarget = labs(pos - currentTarget);
-        ESP_LOGI(TAG, "RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u", sg, RUN_SG_TRIP, pos,
-                 (long)distToTarget, (unsigned long)sinceChange, runSGHighCount,
-                 RUN_SG_HIGH_NEEDED);
+        webLog("RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u", sg, RUN_SG_TRIP, pos,
+               (long)distToTarget, (unsigned long)sinceChange, runSGHighCount,
+               RUN_SG_HIGH_NEEDED);
         lastSGPrintMs = millis();
       }
 
@@ -208,12 +205,12 @@ void handleMotion() {
         if (runSGHighCount < RUN_SG_HIGH_NEEDED + 4) runSGHighCount++;
         runSGLowCount = 0;
 
-        ESP_LOGI(TAG, "SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, RUN_SG_TRIP, runSGHighCount,
-                 pos, (unsigned long)sinceChange);
+        webLog("SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, RUN_SG_TRIP, runSGHighCount, pos,
+               (unsigned long)sinceChange);
 
         if (runSGHighCount >= RUN_SG_HIGH_NEEDED) {
-          ESP_LOGW(TAG, "JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg, RUN_SG_TRIP, pos,
-                   currentTarget, runSGHighCount);
+          webLog("JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg, RUN_SG_TRIP, pos, currentTarget,
+                 runSGHighCount);
 
           stepper::forceStop();
           fas_wait_for_stop();
@@ -272,13 +269,13 @@ void safeCreepHome() {
   stepper::setSpeedInHz(CAL_SPEED_HZ);
   stepper::setAcceleration(CAL_ACCEL);
 
-  ESP_LOGI(TAG, "Creep home: start, I=%umA spd=%lu", CAL_CURRENT_MA, (unsigned long)CAL_SPEED_HZ);
+  webLog("Creep home: start, I=%umA spd=%lu", CAL_CURRENT_MA, (unsigned long)CAL_SPEED_HZ);
 
   long hit_pos = 0;
   bool found = move_until_stall(-1, hit_pos);  // -1 = toward UP
 
   if (found) {
-    ESP_LOGI(TAG, "Creep home: found stop at %ld", hit_pos);
+    webLog("Creep home: found stop at %ld", hit_pos);
 
     stepper::move(+300);
     fas_wait_for_stop();
@@ -291,7 +288,7 @@ void safeCreepHome() {
     stepper::moveTo(endpointUp);
     fas_wait_for_stop();
   } else {
-    ESP_LOGW(TAG, "Creep home: FAILED to find stop!");
+    webLog("Creep home: FAILED to find stop!");
   }
 
   tmc5160::rms_current(RUN_CURRENT_MA);
@@ -300,7 +297,7 @@ void safeCreepHome() {
 
   runState = IDLE;
 
-  ESP_LOGI(TAG, "Creep home: done pos=%ld", stepper::getCurrentPosition());
+  webLog("Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
 
   setRunButtonState(false);
   ui_update_main_warning();
@@ -323,8 +320,8 @@ static bool move_until_stall(int dir, long &hit_pos) {
   int8_t sgt = (int8_t)(CAL_SGT < -64 ? -64 : (CAL_SGT > 63 ? 63 : CAL_SGT));
   tmc5160::sgt(sgt);
 
-  ESP_LOGI(TAG, "MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d", dir, (long)start_pos,
-           (unsigned long)ignore_ms, (long)ignore_dst, sgt);
+  webLog("MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d", dir, (long)start_pos,
+         (unsigned long)ignore_ms, (long)ignore_dst, sgt);
 
   stepper::move(target);
   const uint32_t start_ms = millis();
@@ -345,8 +342,8 @@ static bool move_until_stall(int dir, long &hit_pos) {
 
     static uint32_t lastMUSPrint = 0;
     if ((now - lastMUSPrint) > 400) {
-      ESP_LOGI(TAG, "MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u", sg, (long)dist,
-               (unsigned long)elapsed_ms, baseline_started, dyn_ready, dyn_trip);
+      webLog("MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u", sg, (long)dist,
+             (unsigned long)elapsed_ms, baseline_started, dyn_ready, dyn_trip);
       lastMUSPrint = now;
     }
 
@@ -355,7 +352,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
             elapsed_ms, dist)) {
       if (sg <= EARLY_TRIP) {
         if (++confirm_early >= CAL_HIT_CONFIRM) {
-          ESP_LOGI(TAG, "MUS: EARLY HIT sg=%u pos=%ld", sg, stepper::getCurrentPosition());
+          webLog("MUS: EARLY HIT sg=%u pos=%ld", sg, (long)stepper::getCurrentPosition());
           stepper::forceStop();
           fas_wait_for_stop();
           hit_pos = stepper::getCurrentPosition();
@@ -379,15 +376,15 @@ static bool move_until_stall(int dir, long &hit_pos) {
         uint16_t baseline = autolee::baselineAverage(base_sum, base_cnt);
         dyn_trip = autolee::dynamicTrip(baseline, CAL_REL_DROP_Q8, CAL_ABS_MIN);
         dyn_ready = true;
-        ESP_LOGI(TAG, "MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);
+        webLog("MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);
       }
     }
 
     if (dyn_ready) {
       if (sg <= dyn_trip) {
         if (++confirm_dyn >= CAL_HIT_CONFIRM) {
-          ESP_LOGI(TAG, "MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip,
-                   stepper::getCurrentPosition());
+          webLog("MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip,
+                 (long)stepper::getCurrentPosition());
           stepper::forceStop();
           fas_wait_for_stop();
           hit_pos = stepper::getCurrentPosition();
@@ -401,7 +398,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
     delay(1);
   }
   hit_pos = stepper::getCurrentPosition();
-  ESP_LOGW(TAG, "MUS: NO STALL DETECTED, ended at pos=%ld", hit_pos);
+  webLog("MUS: NO STALL DETECTED, ended at pos=%ld", hit_pos);
   return false;
 }
 
@@ -429,7 +426,7 @@ bool return_home_up_safe() {
     const long pos = stepper::getCurrentPosition();
 
     if ((now - start_ms) > HOME_TIMEOUT_MS) {
-      ESP_LOGW(TAG, "Home: TIMEOUT");
+      webLog("Home: TIMEOUT");
       stepper::forceStop();
       fas_wait_for_stop();
       return false;
@@ -444,14 +441,14 @@ bool return_home_up_safe() {
       const uint16_t sg = read_sg();
       if (sg <= HOME_SG_TRIP) {
         if (++confirm_count >= HOME_CONFIRM) {
-          ESP_LOGI(TAG, "Home: stall @%ld retry %d", pos, retries);
+          webLog("Home: stall @%ld retry %d", pos, retries);
           stepper::forceStop();
           fas_wait_for_stop();
           stepper::move(+HOME_RELEASE_STEPS);
           fas_wait_for_stop();
 
           if (retries >= HOME_MAX_RETRIES) {
-            ESP_LOGW(TAG, "Home: max retries");
+            webLog("Home: max retries");
             return false;
           }
           retries++;
@@ -470,7 +467,7 @@ bool return_home_up_safe() {
 
   fas_wait_for_stop();
   long finalPos = stepper::getCurrentPosition();
-  ESP_LOGI(TAG, "Home: pos=%ld tgt=%ld diff=%ld", finalPos, endpointUp, finalPos - endpointUp);
+  webLog("Home: pos=%ld tgt=%ld diff=%ld", finalPos, endpointUp, finalPos - endpointUp);
   return nearPos(finalPos, endpointUp, 50);
 }
 
@@ -483,6 +480,7 @@ void setActiveProfile(uint8_t idx) {
 bool calibrateEndpointsSensorless() {
   runState = CALIBRATING;
   endpointsCalibrated = false;
+  webLog("Calibration: start");
   if (stepper::isRunning()) {
     stepper::forceStop();
     fas_wait_for_stop();
@@ -498,6 +496,7 @@ bool calibrateEndpointsSensorless() {
 
   long hit_up = 0;
   if (!move_until_stall(-1, hit_up)) {
+    webLog("Calibration: FAILED (no UP stop found)");
     tmc5160::rms_current(RUN_CURRENT_MA);
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);
@@ -512,6 +511,7 @@ bool calibrateEndpointsSensorless() {
 
   long hit_down = 0;
   if (!move_until_stall(+1, hit_down)) {
+    webLog("Calibration: FAILED (no DOWN stop found)");
     tmc5160::rms_current(RUN_CURRENT_MA);
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);
@@ -523,7 +523,7 @@ bool calibrateEndpointsSensorless() {
   fas_wait_for_stop();
   rawDown = stepper::getCurrentPosition();
 
-  ESP_LOGI(TAG, "CAL: up=%ld dn=%ld travel=%ld", rawUp, rawDown, rawDown - rawUp);
+  webLog("CAL: up=%ld dn=%ld travel=%ld", rawUp, rawDown, rawDown - rawUp);
   endpointsCalibrated = true;
   upOffsetSteps = 0;
   downOffsetSteps = DOWN_OFFSET_DEFAULT;
