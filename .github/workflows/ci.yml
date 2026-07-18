@@ -27,21 +27,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
-      - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
-        with:
-          version: "v5.3.2"
+      # test_apps/ is a native host build - it only needs one vendored
+      # source file from ESP-IDF (components/unity), not a toolchain.
+      # install-esp-idf-action was tried first, but its cross-toolchain
+      # leaks into this build's `as`/`ld` resolution no matter what env
+      # vars get reset in this step (PATH, COMPILER_PATH - both tried,
+      # neither fixed "as: unrecognized option '--64'"), implying a
+      # system-level change (e.g. gcc specs) the action makes, not a
+      # process-env one. Sparse-clone just the one directory needed instead.
+      - name: Fetch Unity source (the one thing test_apps/ needs from ESP-IDF)
+        # components/unity/unity in the esp-idf repo is a submodule of
+        # ThrowTheSwitch/Unity - clone that directly into the same path
+        # shape test_apps/CMakeLists.txt expects ($IDF_PATH/components/
+        # unity/unity/src), instead of cloning esp-idf itself.
+        run: |
+          mkdir -p /tmp/esp-idf-unity/components/unity
+          git init -q /tmp/esp-idf-unity/components/unity/unity
+          git -C /tmp/esp-idf-unity/components/unity/unity fetch --depth 1 \
+            https://github.com/ThrowTheSwitch/Unity.git \
+            bf560290f6020737eafaa8b5cbd2177c3956c03f
+          git -C /tmp/esp-idf-unity/components/unity/unity checkout -q FETCH_HEAD
+          echo "IDF_PATH=/tmp/esp-idf-unity" >> "$GITHUB_ENV"
       - name: Configure, build, and run
         working-directory: test_apps
-        # install-esp-idf-action's env additions leak the Xtensa/RISC-V
-        # cross-toolchain into this native host build (only needs IDF_PATH,
-        # for the vendored Unity source). Resetting PATH alone didn't fix it
-        # ("as: unrecognized option '--64'" persisted, confirmed via
-        # `which as` resolving to .../xtensa-esp-elf/.../bin/as even under
-        # the reset PATH) - gcc also consults COMPILER_PATH to find `as`/
-        # `ld`, which the action sets independently of PATH. Clear both.
-        env:
-          PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-          COMPILER_PATH: ""
         run: |
           cmake -B build -DAUTOLEE_COVERAGE=ON
           cmake --build build -j
