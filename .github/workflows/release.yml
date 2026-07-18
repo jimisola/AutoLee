@@ -1,0 +1,47 @@
+name: Release firmware
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+
+      # Fails fast: the release tag must be vX.Y matching FW_VERSION in main/config.h.
+      - name: Version guard
+        id: ver
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          FW="$(grep -oP '#define\s+FW_VERSION\s+"\K[^"]+' main/config.h)"
+          if [ "$VER" != "$FW" ]; then
+            echo "::error::Release tag v$VER does not match FW_VERSION \"$FW\" in main/config.h"
+            exit 1
+          fi
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+
+      - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
+        with:
+          version: "v5.3.2"
+
+      - name: Build
+        run: |
+          idf.py set-target esp32c6
+          idf.py build
+
+      - name: Merge full-flash image + rename artifacts
+        run: |
+          idf.py merge-bin -o AutoLee_v${{ steps.ver.outputs.ver }}_merged.bin --fill-flash-size 4MB
+          cp build/autolee.bin build/AutoLee_v${{ steps.ver.outputs.ver }}_update.bin
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: |
+            build/AutoLee_v${{ steps.ver.outputs.ver }}_merged.bin
+            build/AutoLee_v${{ steps.ver.outputs.ver }}_update.bin

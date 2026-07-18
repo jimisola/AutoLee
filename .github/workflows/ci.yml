@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    name: idf.py build (esp32c6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+      - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
+        with:
+          version: "v5.3.2"
+      - name: Build
+        run: |
+          idf.py set-target esp32c6
+          idf.py build
+
+  host-tests:
+    name: Host tests (test_apps/, ctest + coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+      - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
+        with:
+          version: "v5.3.2"
+      - name: Configure, build, and run
+        working-directory: test_apps
+        run: |
+          cmake -B build -DAUTOLEE_COVERAGE=ON
+          cmake --build build -j
+          cd build && ctest --output-on-failure
+      - name: Coverage report
+        working-directory: test_apps
+        run: |
+          pip install gcovr
+          gcovr --root .. --filter '../lib/autolee_logic/' build
+
+  lint:
+    name: Lint (clang-format, ruff, yamllint, API specs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: pre-commit (clang-format, ruff, yamllint, basic checks)
+        run: |
+          pip install pre-commit
+          pre-commit run --all-files --show-diff-on-failure
+      - name: Lint API specs (spectral)
+        run: npx --yes @stoplight/spectral-cli@6 lint api/openapi.yaml api/asyncapi.yaml
+      - name: API contract check (state.example.json against the schema)
+        run: |
+          pip install jsonschema
+          python -c "
+          import json, jsonschema
+          schema = json.load(open('api/schemas/state.schema.json'))
+          example = json.load(open('api/schemas/state.example.json'))
+          jsonschema.validate(example, schema)
+          print('state.example.json matches state.schema.json')
+          "

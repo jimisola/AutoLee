@@ -69,11 +69,11 @@ first for the *why* and the per‑subsystem analysis.
 - **DoD:** ⚙️ **core dump fully verified** (see above). OTA rollback and brownout tuning still need real hardware (an actual OTA cycle; the press's power supply under load) - not done.
 
 ## Phase 7 — CI, release, docs, v1.9
-- [ ] **CI:** `idf.py build` (Espressif `esp-idf-ci-action` or the IDF Docker image) + host tests + coverage; port the lint/quality gates.
-- [ ] **Release:** `idf.py build` → `idf.py merge-bin` → attach `AutoLee_vX.Y_merged.bin` + `_update.bin` to a GitHub Release; keep the `FW_VERSION` tag guard.
-- [ ] **Docs:** update README/CONTRIBUTING for the `idf.py` workflow + the ESP‑IDF VS Code extension; update the ADR status (supersede the PlatformIO decision if we commit to ESP‑IDF).
-- [ ] **v1.9:** diff Karl's v1.8→v1.9 and fold the deltas into this port.
-- **DoD:** green CI; a release builds; docs accurate.
+- [x] **CI** (`.github/workflows/ci.yml`): three jobs - `idf.py build` (via `espressif/install-esp-idf-action`, pinned to ESP-IDF v5.3.2), host tests (`test_apps/` ctest + gcovr coverage), and lint (pre-commit's clang-format/ruff/yamllint + Spectral on the API specs + a JSON Schema contract check). Actions pinned to commit SHAs (verified live via `gh api`, not from memory). **Not yet run in CI** - written and locally sanity-checked (yamllint, and `idf.py merge-bin`'s exact invocation tested by hand) but not pushed through an actual GitHub Actions run yet.
+- [x] **Release** (`.github/workflows/release.yml`): `idf.py build` → `idf.py merge-bin -o ..._merged.bin --fill-flash-size 4MB` (verified by hand: produces exactly a 4 MB raw image, matching the README's "flash at offset 0x0" instructions) + the app-only image as `..._update.bin`, both attached to the GitHub Release. Kept the `FW_VERSION`-must-match-tag guard from the old workflow.
+- [ ] **Docs:** README/CONTRIBUTING/CLAUDE.md already rewritten for the ESP-IDF-only layout as part of the Phase 0-3 rebase (see the `refactor!` commit); nothing further pending here.
+- [ ] **v1.9:** diff Karl's v1.8→v1.9 and fold the deltas into this port - blocked, v1.9 not available yet (per the original decision to build on v1.8 and re-diff later).
+- **DoD:** CI workflow files exist and are locally sanity-checked; **not yet confirmed green in actual CI** (needs a push/PR to exercise). Release workflow's build steps verified by hand; the full release-on-publish flow untested. v1.9 diff blocked on Karl.
 
 ---
 
