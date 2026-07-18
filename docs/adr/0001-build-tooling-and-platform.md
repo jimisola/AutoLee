@@ -84,6 +84,14 @@ library; the rest are swapped for a native equivalent (this is the HAL rewrite):
 | WiFi + captive portal | ✅ example / component | Official ESP‑IDF `captive_portal` example, or a component like [MycilaESPConnect](https://github.com/mathieucarbou/MycilaESPConnect). **low–medium** |
 | Preferences / ArduinoOTA / Update / Wire / SPI | ↔ replace | native `nvs_flash` / `esp_ota` / `esp_https_ota` / i2c+spi master. **low** (standard IDF) |
 
+**Why `TMC-API`, not grblHAL's library, for the *shipped* code:** MIT vs an
+unidentifiable (`NOASSERTION`) license — cleanest for a repo that already has license
+ambiguity, and it matters most on the safety‑critical StallGuard path; it's the
+**vendor's own** register map (least chance of a wrong SG read); it's actively ADI‑
+maintained; and the single SPI callback is the lowest‑coupling shim. Its one downside —
+being low‑level — is covered by reading grblHAL's proven ESP32 StallGuard config as a
+reference.
+
 ### What leaving PlatformIO (for native `idf.py`) costs
 
 - **Build‑tool losses (even keeping Arduino):** the one‑file `platformio.ini` DX; frictionless
