@@ -57,24 +57,31 @@ pioarduino/Arduino):
 
 1. **Arduino‑as‑ESP‑IDF‑component** (smallest): ESP‑IDF build + `sdkconfig` while keeping all
    Arduino libraries/code. Unlocks the safety features with minimal rewrite.
-2. **Pure ESP‑IDF** (largest): rewrite the HAL and build with **native `idf.py` + CMake**
-   (drop PlatformIO — its main value is the Arduino glue), using ESP‑IDF's host/"linux‑target"
-   testing in place of `pio test`.
+2. **Pure ESP‑IDF**: build with **native `idf.py` + CMake** (drop PlatformIO), host tests on
+   the linux target. Per the verified table below, this is **smaller than "rewrite the HAL"
+   implies** — LVGL, the **web layer + SSE** (ESPAsyncWebServer runs as an IDF component),
+   WiFi/captive portal (component/example), FastAccelStepper, and the whole pure core all
+   carry over. The real work is the `esp_lcd` display init, porting TMCStepper's SPI backend,
+   and the LVGL/wiring glue.
 
 ### Library support on ESP‑IDF
 
 Every capability AutoLee needs exists natively on ESP‑IDF, but only some deps are the *same*
 library; the rest are swapped for a native equivalent (this is the HAL rewrite):
 
-| Today (Arduino) | On ESP‑IDF? | Native path |
+> The rows below were **verified by websearch** (2026-07), not assumed — several
+> "obvious rewrites" turned out to have easier paths.
+
+| Today (Arduino) | On ESP‑IDF? | Path / effort |
 |---|---|---|
-| LVGL | ✅ same library | `esp_lvgl_port` (LVGL 8 & 9) + LVGL in the ESP Registry; UI code stays, display/touch wiring changes |
-| GFX Library for Arduino (display) | ❌ Arduino‑only | native `esp_lcd` — ST7789 is built in (`esp_lcd_new_panel_st7789()`) |
-| esp_lcd_touch_axs5106l (touch) | ✅ native variant | ESP‑IDF variant ships in the WaveShare demo (via `esp_lcd_touch`) |
-| FastAccelStepper (motion) | ✅ supports ESP‑IDF | same library (esp‑idf build matrix + CI on master; C6) |
-| TMCStepper | ❌ Arduino‑only | native `esp-tmc5160` (or port over SPI) |
-| ESP Async WebServer + Async TCP | ❌ Arduino‑only | native `esp_http_server` (+ hand‑rolled SSE) |
-| WiFi / Preferences / ArduinoOTA / DNSServer / Update / Wire / SPI | ❌ Arduino wrappers | native `esp_wifi` / `nvs_flash` / `esp_https_ota` / i2c+spi master, etc. |
+| LVGL | ✅ same library | `esp_lvgl_port` (LVGL 8 & 9) + LVGL in the ESP Registry; UI code stays, only the display/touch wiring changes. **low glue** |
+| GFX Library for Arduino (display) | ↔ replace | native `esp_lcd` — ST7789 is built in (`esp_lcd_new_panel_st7789()`). **medium** (panel params — offsets/color/SPI mode are hardware‑fiddly) |
+| esp_lcd_touch_axs5106l (touch) | ✅ native variant | ESP‑IDF variant ships in the WaveShare demo (via `esp_lcd_touch`). **low** |
+| FastAccelStepper (motion) | ✅ supports ESP‑IDF | same library (esp‑idf build matrix + CI on master; C6). **low** |
+| TMCStepper (motion) | ⚠️ port | the native `esp-tmc5160` is a WIP (3 commits, no releases, StallGuard/`DRV_STATUS` **unconfirmed**) — **don't** rely on it for the safety‑critical SG2 read; instead port TMCStepper's register logic onto ESP‑IDF SPI (it covers `sgt`/`TCOOLTHRS`/`DRV_STATUS`/DIAG1). **medium** |
+| **ESP Async WebServer + Async TCP + SSE** | ✅ **keep — it's an ESP‑IDF component** | The ESP32Async/mathieucarbou fork is on the [ESP Registry](https://components.espressif.com/components/esp32async/espasyncwebserver) and runs pure‑ESP‑IDF (no Arduino), **including SSE / `AsyncEventSource`**. So the web layer + SSE broadcast **carry over, no rewrite**. (Optional: native `esp_http_server` + the [official SSE example](https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/simple/README.md) + a client‑fd registry, if you want zero third‑party deps.) **low** |
+| WiFi + captive portal | ✅ example / component | Official ESP‑IDF `captive_portal` example, or a component like [MycilaESPConnect](https://github.com/mathieucarbou/MycilaESPConnect). **low–medium** |
+| Preferences / ArduinoOTA / Update / Wire / SPI | ↔ replace | native `nvs_flash` / `esp_ota` / `esp_https_ota` / i2c+spi master. **low** (standard IDF) |
 
 ### What leaving PlatformIO (for native `idf.py`) costs
 
@@ -89,8 +96,11 @@ library; the rest are swapped for a native equivalent (this is the HAL rewrite):
 
 ## Opinion / recommendation
 
-ESP‑IDF is where AutoLee should **eventually** live, but a full port now would be a large
-rewrite of working, safety‑critical firmware for benefits mostly reachable via step 1. So:
-ship the current PlatformIO + pioarduino setup; take **step 1 (Arduino‑as‑component)** if/when
-the safety features are wanted; go **pure ESP‑IDF (native `idf.py`)** only to fully shed
-Arduino/pioarduino.
+ESP‑IDF is where AutoLee should **eventually** live. A full port is **more tractable than it
+first looked** (the web/SSE/LVGL/WiFi layers carry over — see the verified table), but it's
+still real work and, crucially, **entirely hardware‑unvalidated until flashed** — on
+safety‑critical firmware that's the binding risk (display params, the shared‑CS StallGuard
+read, motion stop paths). So: ship the current PlatformIO + pioarduino setup; take **step 1
+(Arduino‑as‑component)** if/when the safety features are wanted; go **pure ESP‑IDF (native
+`idf.py`)** to fully shed Arduino/pioarduino — the biggest remaining costs are the display
+init and the TMC SPI port, not the web layer.
