@@ -61,7 +61,8 @@ pioarduino/Arduino):
    the linux target. Per the verified table below, this is **smaller than "rewrite the HAL"
    implies** — LVGL, the **web layer + SSE** (ESPAsyncWebServer runs as an IDF component),
    WiFi/captive portal (component/example), FastAccelStepper, and the whole pure core all
-   carry over. The real work is the `esp_lcd` display init, porting TMCStepper's SPI backend,
+   carry over. The real work is the `esp_lcd` display init, the TMC5160/StallGuard driver
+   (adopt the portable `TMC-API` / grblHAL Trinamic‑library + a small `spi_master` SPI shim),
    and the LVGL/wiring glue.
 
 ### Library support on ESP‑IDF
@@ -78,7 +79,7 @@ library; the rest are swapped for a native equivalent (this is the HAL rewrite):
 | GFX Library for Arduino (display) | ↔ replace | native `esp_lcd` — ST7789 is built in (`esp_lcd_new_panel_st7789()`). **medium** (panel params — offsets/color/SPI mode are hardware‑fiddly) |
 | esp_lcd_touch_axs5106l (touch) | ✅ native variant | ESP‑IDF variant ships in the WaveShare demo (via `esp_lcd_touch`). **low** |
 | FastAccelStepper (motion) | ✅ supports ESP‑IDF | same library (esp‑idf build matrix + CI on master; C6). **low** |
-| TMCStepper (motion) | ⚠️ port | the native `esp-tmc5160` is **confirmed insufficient** (source‑checked): it exposes only a stall *flag* + DIAG1 config — **no `SG_RESULT`/`DRV_STATUS` value read, no `SGT`/`TCOOLTHRS`/`COOLCONF`** — is built around the chip's internal ramp generator (not our external‑STEP + StallGuard‑sensor model), and is abandoned (last commit 2020). So **port TMCStepper's register logic onto ESP‑IDF SPI** (`spi_master`) — it already implements the SG2 value read + all needed registers, keeping jam detection identical. **medium** |
+| TMCStepper (motion / StallGuard) | ✅ portable lib + small shim | Don't port TMCStepper (and skip `esp-tmc5160` — source‑checked, it lacks `SG_RESULT`/`SGT`/`TCOOLTHRS` and is abandoned). Use the official vendor [`TMC-API`](https://github.com/analogdevicesinc/TMC-API) (CPU‑independent C, full register map, one user SPI callback) or [`terjeio/Trinamic-library`](https://github.com/terjeio/Trinamic-library) — the latter is used by **grblHAL for StallGuard sensorless homing on ESP32**, i.e. AutoLee's exact mechanism. Work = a small `spi_master` read/write callback + translating our config/SG2 read. Proven on ESP32 (grblHAL/Grbl_Esp32). **low–medium** |
 | **ESP Async WebServer + Async TCP + SSE** | ✅ **keep — it's an ESP‑IDF component** | The ESP32Async/mathieucarbou fork is on the [ESP Registry](https://components.espressif.com/components/esp32async/espasyncwebserver) and runs pure‑ESP‑IDF (no Arduino), **including SSE / `AsyncEventSource`**. So the web layer + SSE broadcast **carry over, no rewrite**. (Optional: native `esp_http_server` + the [official SSE example](https://github.com/espressif/esp-idf/blob/master/examples/protocols/http_server/simple/README.md) + a client‑fd registry, if you want zero third‑party deps.) **low** |
 | WiFi + captive portal | ✅ example / component | Official ESP‑IDF `captive_portal` example, or a component like [MycilaESPConnect](https://github.com/mathieucarbou/MycilaESPConnect). **low–medium** |
 | Preferences / ArduinoOTA / Update / Wire / SPI | ↔ replace | native `nvs_flash` / `esp_ota` / `esp_https_ota` / i2c+spi master. **low** (standard IDF) |
@@ -103,4 +104,5 @@ safety‑critical firmware that's the binding risk (display params, the shared�
 read, motion stop paths). So: ship the current PlatformIO + pioarduino setup; take **step 1
 (Arduino‑as‑component)** if/when the safety features are wanted; go **pure ESP‑IDF (native
 `idf.py`)** to fully shed Arduino/pioarduino — the biggest remaining costs are the display
-init and the TMC SPI port, not the web layer.
+init and the TMC5160/StallGuard driver (via a portable Trinamic lib + SPI shim), not the web
+layer.
