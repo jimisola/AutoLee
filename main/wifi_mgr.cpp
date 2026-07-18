@@ -169,7 +169,11 @@ void start() {
     ap_config.ap.max_connection = 4;
     ap_config.ap.channel = 1;
 
-    esp_wifi_set_mode(WIFI_MODE_AP);
+    // APSTA, not plain AP: esp_wifi_scan_start() requires the STA interface
+    // to be active - a pure-AP mode fails every scan (found via hardware
+    // testing: the WiFi setup page always showed "Scan failed"). The STA
+    // side here is never connected, just enabled so scanning works.
+    esp_wifi_set_mode(WIFI_MODE_APSTA);
     esp_wifi_set_config(WIFI_IF_AP, &ap_config);
     esp_wifi_start();
     s_ap_mode = true;

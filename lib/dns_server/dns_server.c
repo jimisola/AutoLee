@@ -121,10 +121,16 @@ static int parse_dns_request(char *req, size_t req_len, char *dns_reply, size_t 
     header->flags |= QR_FLAG;
 
     uint16_t qd_count = ntohs(header->qd_count);
-    header->an_count = htons(qd_count);
 
-    int reply_len = qd_count * sizeof(dns_answer_t) + req_len;
-    if (reply_len > dns_reply_max_len) {
+    // Upper-bound size check only - an_count/actual reply length are set
+    // below from how many questions we actually answer, not qd_count. The
+    // original code set an_count = qd_count unconditionally, which lies for
+    // any question we skip (AAAA/non-A queries, or names with no matching
+    // rule): the client sees "N answers" but reads uninitialized/zeroed
+    // bytes for the ones we never filled in. Reproduced this: `dig` against
+    // this server for a domain also queried as AAAA reported FORMERR.
+    int max_reply_len = qd_count * sizeof(dns_answer_t) + req_len;
+    if (max_reply_len > dns_reply_max_len) {
         return -1;
     }
 
@@ -132,6 +138,7 @@ static int parse_dns_request(char *req, size_t req_len, char *dns_reply, size_t 
     char *cur_ans_ptr = dns_reply + req_len;
     char *cur_qd_ptr = dns_reply + sizeof(dns_header_t);
     char name[128];
+    uint16_t answered = 0;
 
     // Respond to all questions based on configured rules
     for (int qd_i = 0; qd_i < qd_count; qd_i++) {
@@ -145,9 +152,11 @@ static int parse_dns_request(char *req, size_t req_len, char *dns_reply, size_t 
         uint16_t qd_type = ntohs(question->type);
         uint16_t qd_class = ntohs(question->class);
 
-        ESP_LOGD(TAG, "Received type: %d | Class: %d | Question for: %s", qd_type, qd_class, name);
+        ESP_LOGI(TAG, "Received type: %d | Class: %d | Question for: %s", qd_type, qd_class, name);
 
-        if (qd_type == QD_TYPE_A) {
+        if (qd_type != QD_TYPE_A) {
+            ESP_LOGI(TAG, "Not answering '%s' - non-A query type %d (e.g. AAAA)", name, qd_type);
+        } else {
             esp_ip4_addr_t ip = { .addr = IPADDR_ANY };
             // Check the configured rules to decide whether to answer this question or not
             for (int i = 0; i < h->num_of_entries; ++i) {
@@ -165,6 +174,7 @@ static int parse_dns_request(char *req, size_t req_len, char *dns_reply, size_t 
                 }
             }
             if (ip.addr == IPADDR_ANY) {    // no rule applies, continue with another question
+                ESP_LOGI(TAG, "No matching rule for '%s' (type %d) - not answering", name, qd_type);
                 continue;
             }
             dns_answer_t *answer = (dns_answer_t *)cur_ans_ptr;
@@ -174,13 +184,17 @@ static int parse_dns_request(char *req, size_t req_len, char *dns_reply, size_t 
             answer->class = htons(qd_class);
             answer->ttl = htonl(ANS_TTL_SEC);
 
-            ESP_LOGD(TAG, "Answer with PTR offset: 0x%" PRIX16 " and IP 0x%" PRIX32, ntohs(answer->ptr_offset), ip.addr);
+            ESP_LOGI(TAG, "Answering '%s' with IP " IPSTR, name, IP2STR(&ip));
 
             answer->addr_len = htons(sizeof(ip.addr));
             answer->ip_addr = ip.addr;
+
+            cur_ans_ptr += sizeof(dns_answer_t);
+            answered++;
         }
     }
-    return reply_len;
+    header->an_count = htons(answered);
+    return answered * sizeof(dns_answer_t) + req_len;
 }
 
 /*

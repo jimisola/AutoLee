@@ -123,6 +123,7 @@ static std::string wifiConfigPage() {
 }
 
 static esp_err_t redirectToRoot(PsychicRequest *req, PsychicResponse *res) {
+  ESP_LOGI(TAG, "Captive portal redirect: host='%s' uri='%s' -> 302 /", req->host(), req->uri());
   res->setCode(302);
   res->addHeader("Location", "/");
   return res->send();
@@ -167,9 +168,15 @@ void setupWebServer() {
 
   server.on("/", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
     if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
+      // PsychicResponse::setContent(const char*) stores the raw pointer, it
+      // doesn't copy - a temporary std::string's buffer would already be
+      // freed by the time send() reads it below (reproduced on hardware:
+      // garbled/garbage bytes served instead of the page). Keep the string
+      // alive in a named local for the rest of this scope.
+      std::string page = wifiConfigPage();
       res->setCode(200);
       res->setContentType("text/html");
-      res->setContent(wifiConfigPage().c_str());
+      res->setContent(page.c_str());
     } else {
       res->setCode(200);
       res->setContentType("text/html");
