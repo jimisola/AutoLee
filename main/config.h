@@ -4,6 +4,8 @@
 // ============================================================================
 #pragma once
 
+#include <cstdint>
+
 #define FW_VERSION "1.8"
 
 static const char *DEFAULT_AP_SSID = "AutoLee-Setup";

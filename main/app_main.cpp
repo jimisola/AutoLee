@@ -3,6 +3,7 @@
 #include "esp_lvgl_port.h"
 
 #include "display_touch.h"
+#include "motion.h"
 #include "config.h" // FW_VERSION single source of truth
 
 static const char *TAG = "autolee";
@@ -18,6 +19,11 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "AutoLee firmware v%s (ESP-IDF)", FW_VERSION);
 
     lv_display_t *disp = display_touch_init();
+
+    // motion_init() adds the TMC5160 to the SPI bus display_touch_init()
+    // already set up - must run after it.
+    motion_init();
+
     if (disp) {
         // Phase 3 bring-up check: a visible screen confirms panel geometry,
         // color, and rotation are right before the real UI (ui_touch.cpp) is
