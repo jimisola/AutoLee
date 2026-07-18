@@ -134,15 +134,14 @@ static esp_err_t redirectToRoot(PsychicRequest *req, PsychicResponse *res) {
 //  OTA (esp_ota_ops, replacing Arduino's Update class)
 // ==========================================================================
 // Set for the duration of an upload; broadcastState() checks this to skip
-// SSE sends. Found via hardware testing + core dump: pump_task's SSE send
-// can block on the socket for the full 5s send-timeout while a large OTA
-// POST is also in flight on the same HTTP server, which is long enough to
-// starve the IDLE task and trip the task watchdog - crashing mid-upload
-// every time. pump_task also drives handleMotion()'s jam/homing dispatch,
-// so this isn't just an OTA nuisance; skipping SSE during OTA is the
-// narrow fix for the reproduced failure, not a general fix for SSE send
-// blocking pump_task under other slow/lossy-network conditions - see
-// docs/PLAN.md Phase 5 for the broader architectural note.
+// SSE sends. Originally added to fix a real watchdog crash reproduced
+// during hardware testing (SSE send blocking pump_task long enough to
+// starve the watchdog while an OTA POST was also in flight) - that crash
+// is now fixed properly by moving broadcastState() off pump_task entirely
+// (see app_main.cpp's sse_task), so this guard is no longer load-bearing
+// for safety. Kept as a minor optimization: no reason to contend with the
+// OTA upload's bandwidth/socket for state broadcasts nobody's reading
+// during an upload anyway.
 static volatile bool s_ota_in_progress = false;
 
 static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_t index,

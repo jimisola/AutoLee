@@ -24,9 +24,13 @@ static inline uint32_t millis() {
 }
 
 // Replaces the Arduino loop(): handleMotion/handleWebCalibration/
-// handleWebHome/broadcastState were all pumped from loop() every iteration;
-// the DNS captive-portal server and web server both run their own tasks now,
-// so this is just motion + web state + the deferred-reboot handling.
+// handleWebHome were all pumped from loop() every iteration; the DNS
+// captive-portal server and web server both run their own tasks now, so
+// this is just motion + web state + the deferred-reboot handling.
+//
+// broadcastState() (SSE) deliberately does NOT run here - see sse_task()
+// below for why. This task is watchdog-subscribed and must never block on
+// anything whose latency depends on a network client.
 static void pump_task(void *) {
   esp_task_wdt_add(nullptr);
   for (;;) {
@@ -34,7 +38,6 @@ static void pump_task(void *) {
     handleMotion();
     handleWebCalibration();
     handleWebHome();
-    broadcastState();
 
     if (rebootRequested && (millis() - rebootRequestMs) > 500) {
       if (stepper::isRunning()) stepper::forceStop();
@@ -48,6 +51,25 @@ static void pump_task(void *) {
     // exact bug during bring-up). 10ms is still frequent enough for
     // this pump loop and leaves IDLE real headroom.
     vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
+
+// broadcastState()'s SSE send is a plain blocking socket send() that can
+// stall for the socket's ~5s send timeout if a client's connection is
+// slow/stalled (weak WiFi, backgrounded browser tab, or - as reproduced
+// during OTA hardware testing - another big request tying up the same
+// HTTP server). It used to run inline in pump_task, sharing that task's
+// watchdog subscription with handleMotion()'s jam/homing dispatch: a
+// stalled SSE client was enough to starve the watchdog reset and force a
+// hard chip reset mid-motion, with none of motion.cpp's controlled-stop
+// sequencing. Moved to its own task specifically so a slow web client can
+// never affect motion timing or force a reset - and deliberately NOT
+// watchdog-subscribed, since blocking here is an expected network
+// condition, not a bug that should panic the whole device.
+static void sse_task(void *) {
+  for (;;) {
+    broadcastState();  // internally rate-limited to SSE_INTERVAL_MS
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
 
@@ -91,4 +113,5 @@ extern "C" void app_main(void) {
   }
 
   xTaskCreate(pump_task, "pump", 8192, nullptr, 5, nullptr);
+  xTaskCreate(sse_task, "sse", 4096, nullptr, 4, nullptr);
 }

@@ -71,6 +71,16 @@ Mostly hidden/hardcoded in the precompiled Arduino/PlatformIO setup; ESP-IDF exp
 - **Watchdog (fuller)** — a hung loop/ISR forces a reset rather than leaving a powered stepper
   frozen mid-stroke. *(We already ship a basic task watchdog on Arduino; ESP-IDF adds fuller,
   configurable coverage incl. the interrupt watchdog — more control, not a hard unlock.)*
+  **Lesson learned during Phase 5 hardware testing, worth carrying forward:** the watchdog only
+  "fails safe" if the task it's subscribed to never legitimately blocks on something outside its
+  control. A real bug put `broadcastState()`'s blocking SSE `send()` on the same task
+  (`pump_task`) as `handleMotion()`'s jam/homing dispatch; a stalled web client (weak WiFi, a
+  backgrounded browser tab, or heavy contention from an OTA upload) was enough to starve the
+  watchdog reset and force an uncontrolled hard reset mid-cycle, bypassing all of
+  `motion.cpp`'s controlled-stop sequencing entirely. Fixed by moving `broadcastState()` to its
+  own task, deliberately *not* watchdog-subscribed (see `main/app_main.cpp`'s `sse_task`). The
+  design rule: nothing whose latency depends on a network client belongs on a watchdog-critical,
+  motion-driving task.
 - **Brownout (finer control)** — a clean reset when the 5 V rail dips (e.g. the stepper draws
   a current spike) rather than the MCU glitching mid-operation, which on a press could mean a
   mis-step or a missed jam detection. *(Available on Arduino too; ESP-IDF tunes the
