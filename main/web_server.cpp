@@ -36,8 +36,8 @@ static inline uint32_t millis() {
 static std::string buildStateJSON() {
   const char *wfStat =
       wifi_mgr::isConnected() ? "Connected" : (wifi_mgr::isApMode() ? "AP Mode" : "Disconnected");
-  std::string wfSSID = wifi_mgr::isConnected() ? ""  // STA SSID isn't tracked separately here
-                                               : (wifi_mgr::isApMode() ? DEFAULT_AP_SSID : "-");
+  std::string wfSSID =
+      (wifi_mgr::isConnected() || wifi_mgr::isApMode()) ? wifi_mgr::ssid() : "-";
   std::string wfIP =
       (wifi_mgr::isConnected() || wifi_mgr::isApMode()) ? wifi_mgr::ipAddress() : "-";
 

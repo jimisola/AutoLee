@@ -12,6 +12,7 @@
 #include "globals.h"
 #include "stepper.h"
 #include "tmc5160_ctrl.h"
+#include "ui_touch.h"
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -44,18 +45,7 @@ static inline void wdt_feed() {
   esp_task_wdt_reset();
 }
 
-// --- UI hooks: not yet ported (Phase 3's screens aren't built out yet) ---
-// TODO(Phase 3/5): wire these to the real LVGL/web UI once ported; for now
-// they're logged so the state machine's behavior is still observable.
-static void showJamScreen() {
-  ESP_LOGW(TAG, "JAM screen (UI not yet wired)");
-}
-static void setRunButtonState(bool running) {
-  ESP_LOGI(TAG, "run button -> %d (UI not yet wired)", running);
-}
-static void ui_update_main_warning() {}
-static void ui_update_tuning_numbers() {}
-static void ui_update_endpoint_edit_values() {}
+// UI hooks: real implementations in ui_touch.cpp.
 
 // Shared SPI bus is initialized by display_touch.cpp (SCK=1, MOSI=2, MISO=3);
 // this only adds the TMC5160 as a device on it and brings up the stepper.

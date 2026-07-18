@@ -28,6 +28,7 @@ static bool s_ap_mode = false;
 static esp_netif_t *s_sta_netif = nullptr;
 static esp_netif_t *s_ap_netif = nullptr;
 static std::string s_scanned_html;
+static std::string s_connected_ssid;
 
 static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t event_id, void *data) {
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -150,6 +151,7 @@ void start() {
     if (connect_sta(ssid, pass, 10000)) {
       s_connected = true;
       s_ap_mode = false;
+      s_connected_ssid = ssid;
       esp_netif_ip_info_t ip_info;
       esp_netif_get_ip_info(s_sta_netif, &ip_info);
       ESP_LOGI(TAG, "connected! IP=" IPSTR, IP2STR(&ip_info.ip));
@@ -202,6 +204,10 @@ std::string ipAddress() {
 
 std::string scannedOptionsHtml() {
   return s_scanned_html;
+}
+
+std::string ssid() {
+  return s_ap_mode ? DEFAULT_AP_SSID : s_connected_ssid;
 }
 
 }  // namespace wifi_mgr

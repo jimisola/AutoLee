@@ -16,6 +16,14 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # option enabled for httpd_ws_frame_t etc. to be declared.
 CONFIG_HTTPD_WS_SUPPORT=y
 
+# Use our own include/lv_conf.h instead of the LVGL component's Kconfig-
+# generated defaults. Misleadingly named: LV_CONF_SKIP=y (the component's
+# own default) means "skip lv_conf.h", not "skip Kconfig" - found the hard
+# way when every LVGL font/color setting silently fell back to Kconfig
+# defaults (only montserrat_14 enabled) despite include/lv_conf.h enabling
+# the others; see managed_components/lvgl__lvgl/src/lv_conf_internal.h.
+CONFIG_LV_CONF_SKIP=n
+
 # --- Phase 6 safety features ---
 
 # OTA rollback: an update that doesn't self-validate reverts to the last-good app

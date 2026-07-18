@@ -13,6 +13,7 @@
 #include "stepper.h"
 #include "wifi_mgr.h"
 #include "web_server.h"
+#include "ui_touch.h"
 #include "globals.h"
 #include "config.h"  // FW_VERSION single source of truth
 
@@ -70,18 +71,8 @@ extern "C" void app_main(void) {
   setupWebServer();
 
   if (disp) {
-    // Phase 3 bring-up check: a visible screen confirms panel geometry,
-    // color, and rotation are right before the real UI (ui_touch.cpp) is
-    // ported in a follow-up. See docs/PLAN.md Phase 3.
-    lvgl_port_lock(0);
-    lv_obj_t *scr = lv_scr_act();
-    lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
-    lv_obj_t *label = lv_label_create(scr);
-    lv_label_set_text(label, "AutoLee\nESP-IDF bring-up");
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
-    lv_obj_center(label);
-    lvgl_port_unlock();
-    ESP_LOGI(TAG, "LVGL display+touch bring-up complete");
+    buildUI();
+    ESP_LOGI(TAG, "LVGL UI built");
   } else {
     ESP_LOGE(TAG, "display_touch_init() failed");
   }

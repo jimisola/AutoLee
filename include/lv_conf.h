@@ -85,11 +85,12 @@
 
 /*Use a custom tick source that tells the elapsed time in milliseconds.
  *It removes the need to manually update the tick with `lv_tick_inc()`)*/
-#define LV_TICK_CUSTOM 1
-#if LV_TICK_CUSTOM
-    #define LV_TICK_CUSTOM_INCLUDE "esp_timer.h"
-    #define LV_TICK_CUSTOM_SYS_TIME_EXPR ((esp_timer_get_time() / 1000LL))
-#endif   /*LV_TICK_CUSTOM*/
+// 0, not 1: esp_lvgl_port owns the tick via its own periodic lv_tick_inc()
+// call (see esp_lvgl_port.c's lvgl_port_tick_increment) - LV_TICK_CUSTOM=1
+// hides that function's declaration entirely, breaking the build. Found by
+// the actual build error once this file's settings started being honored
+// (see sdkconfig.defaults' CONFIG_LV_CONF_SKIP note).
+#define LV_TICK_CUSTOM 0
 
 /*Default Dot Per Inch. Used to initialize default sizes such as widgets sized, style paddings.
  *(Not so important, you can adjust it to modify default sizes and spaces)*/
