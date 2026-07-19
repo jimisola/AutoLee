@@ -79,19 +79,13 @@ flowchart LR
 **The rule:** only `pump_task` touches the stepper, the TMC5160, or the motion
 state machine. Everything else *requests*; nothing else acts.
 
-Two independent sources confirm this is necessary, not theoretical:
-
-- **Our PR review** flagged it (findings #2, #3).
-- **Karl's upstream v1.10.0** independently made the same fix in the Arduino
-  build, for the same stated reason — see [upstream-v1.10.0-diff.md](upstream-v1.10.0-diff.md).
-
 ### Why `sse_task` is separate
 
 `broadcastState()` does a blocking socket `send()`. It used to run inside
 `pump_task`, which is watchdog-subscribed. A stalled SSE client (weak WiFi, a
 backgrounded tab) could block long enough to starve the watchdog reset and force
 a **hard reset mid-stroke**, bypassing every controlled-stop path in
-`motion.cpp`. This actually happened on the bench, twice.
+`motion.cpp`.
 
 So SSE now runs on its own task, and that task is deliberately **not**
 watchdog-subscribed: blocking there is an expected network condition, not a bug
@@ -162,11 +156,10 @@ The transition table is encoded in `lib/autolee_logic/motor_fsm.h` and is
 host-tested exhaustively (every invalid `(state, event)` pair must be rejected).
 
 > **Partial gap:** jam detection and the calibration/homing confirmation counters
-> now run through the tested `StallCounter` / `ConfirmCounter`, but the *transition
+> run through the tested `StallCounter` / `ConfirmCounter`, but the *transition
 > table itself* is still implemented inline in `motion.cpp`'s `handleMotion()`
-> switch rather than calling `motorTransition()`. So the "cannot Start from
-> Stalled" rule above is tested, but not yet enforced by the tested code —
-> remainder of review finding #4, tracked in [PLAN.md](PLAN.md).
+> switch rather than calling `motorTransition()`. The "cannot Start from Stalled"
+> rule above is therefore tested, but not yet enforced by the tested code.
 
 ### Jam detection
 
@@ -207,9 +200,9 @@ module boundary.
 
 | Mechanism | What it buys | Verified? |
 |---|---|---|
-| OTA rollback | An image that fails its post-boot self-check reverts automatically | ✅ both halves, on hardware |
-| Task + interrupt watchdog | A hung task resets the board rather than leaving a powered stepper frozen | ✅ genuinely tripped by 3 real bugs |
-| Core dump to flash | Post-crash backtrace instead of a silent reboot | ✅ used to root-cause real bugs |
+| OTA rollback | An image that fails its post-boot self-check reverts automatically | ✅ on hardware |
+| Task + interrupt watchdog | A hung task resets the board rather than leaving a powered stepper frozen | ✅ on hardware |
+| Core dump to flash | Post-crash backtrace instead of a silent reboot | ✅ on hardware |
 | Digest auth on all writes | Nobody on the network can start the press or flash firmware | ✅ on hardware |
 | Brownout detection | Clean reset when the rail sags | ⚙️ needs the press's PSU under load |
 | Jam detection / controlled stop | Brass jams only — **never** a guard for hands | ⚙️ needs the motor rig |
@@ -223,6 +216,6 @@ for why ESP-IDF was chosen and what each option concretely buys.
 ## See also
 
 - [PLAN.md](PLAN.md) — phased migration checklist and what remains unverified
-- [upstream-v1.10.0-diff.md](upstream-v1.10.0-diff.md) — deltas from Karl's Arduino source
+- [upstream-v1.10.0-diff.md](upstream-v1.10.0-diff.md) — deltas from the upstream Arduino source
 - [wiring.md](wiring.md) · [bill-of-materials.md](bill-of-materials.md)
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) — build, test, and release workflow
