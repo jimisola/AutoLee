@@ -30,4 +30,3 @@ Parts list: [Bill of Materials](bill-of-materials.md).
 > **Important:** The display and TMC5160 share the SPI bus (GPIO 1, 2). The firmware manages chip-select lines (GPIO 8 for TMC, GPIO 14 for display) to avoid bus conflicts. The display CS is forced high before every StallGuard SPI read.
 
 ---
-
