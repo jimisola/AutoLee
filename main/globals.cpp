@@ -7,9 +7,9 @@
 
 // config.h's cross-module mutable state (single definition site).
 SpeedProfile profiles[NUM_PROFILES] = {
-    {"Slow", 15000, 350, 350},
-    {"Normal", 35000, 15, 15},
-    {"Fast", 45000, 1, 1},
+    {"Slow", 15000, 350},
+    {"Normal", 35000, 15},
+    {"Fast", 45000, 1},
 };
 uint8_t activeProfile = 1;  // default to Normal
 int32_t upOffsetSteps = 0;
@@ -35,8 +35,6 @@ bool batchActive = false;
 int32_t batchCount = 0;
 int32_t batchTarget = 0;
 
-volatile bool webCalRequested = false;
-volatile bool webHomeRequested = false;
 volatile bool rebootRequested = false;
 uint32_t rebootRequestMs = 0;
 
@@ -56,6 +54,7 @@ lv_obj_t *lbl_up_eff = nullptr, *lbl_dn_eff = nullptr;
 lv_obj_t *lbl_ep_up_val = nullptr, *lbl_ep_dn_val = nullptr;
 lv_obj_t *lbl_wifi_status = nullptr;
 lv_obj_t *btn_run_global = nullptr;
+lv_obj_t *btn_calibrate = nullptr;
 lv_obj_t *jam_scr = nullptr;
 lv_obj_t *jam_status_lbl = nullptr;
 lv_obj_t *stall_scr = nullptr;

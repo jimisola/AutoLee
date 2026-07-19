@@ -33,8 +33,7 @@ static const char *DEFAULT_AP_SSID = "AutoLee-Setup";
 struct SpeedProfile {
   const char *name;
   uint32_t speed_hz;
-  uint16_t sg_trip_default;  // factory default SG for this speed
-  uint16_t sg_trip;          // current (user-tweakable) SG trip
+  uint16_t sg_trip;  // current (user-tweakable) SG trip
 };
 
 static constexpr uint8_t NUM_PROFILES = 3;

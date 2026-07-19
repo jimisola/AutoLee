@@ -7,6 +7,7 @@
 #include "web_server.h"
 #include "globals.h"
 #include "motion.h"
+#include "motion_cmd.h"
 #include "stepper.h"
 #include "tmc5160_ctrl.h"
 #include "wifi_mgr.h"
@@ -203,7 +204,9 @@ static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_
     // HTTP task as the upload that leaked it, so no cross-task race on abort.
     if (s_ota_handle) otaAbort("leftover handle from a prior aborted upload");
     s_ota_in_progress = true;
-    if (runState == RUNNING) requestGracefulStop();
+    // Deferred: stepper calls must not run in the HTTP task. pump_task keeps
+    // running during the upload, so the stop executes within milliseconds.
+    if (runState == RUNNING) motion_cmd::requestStop();
     s_ota_partition = esp_ota_get_next_update_partition(nullptr);
     if (!s_ota_partition ||
         esp_ota_begin(s_ota_partition, OTA_SIZE_UNKNOWN, &s_ota_handle) != ESP_OK) {
@@ -344,30 +347,26 @@ void setupWebServer() {
   });
 
   server.on("/api/v1/toggle_run", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    if (runState == IDLE) {
-      startRunBetweenEndpoints();
-    } else if (runState == RUNNING) {
-      requestGracefulStop();
-    }
+    // Deferred to pump_task: touches the stepper, TMC5160 SPI and LVGL.
+    motion_cmd::requestToggleRun();
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/profile", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("idx")) {
       uint8_t idx = (uint8_t)atoi(req->getParam("idx", "0"));
-      if (idx < NUM_PROFILES) setActiveProfile(idx);
+      // Deferred: setActiveProfile() drives the stepper and refreshes LVGL.
+      if (idx < NUM_PROFILES) motion_cmd::requestProfile(idx);
     }
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/current", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("ma")) {
-      int ma = atoi(req->getParam("ma", "0"));
-      if (ma < RUN_CURRENT_MIN) ma = RUN_CURRENT_MIN;
-      if (ma > RUN_CURRENT_MAX) ma = RUN_CURRENT_MAX;
-      RUN_CURRENT_MA = (uint16_t)ma;
-      tmc5160::rms_current(RUN_CURRENT_MA);
-      webLog("Current set to %u mA", RUN_CURRENT_MA);
+      // Deferred: rms_current() is an SPI write that would collide with
+      // pump_task's StallGuard reads on the shared display/TMC bus.
+      // Clamping happens at execution time.
+      motion_cmd::requestCurrentMa(atoi(req->getParam("ma", "0")));
     }
     return res->send(200, "text/plain", "ok");
   });
@@ -380,7 +379,8 @@ void setupWebServer() {
         upOffsetSteps = autolee::clamp_i32(upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
       else
         downOffsetSteps = autolee::clamp_i32(downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
-      recomputeEffectiveEndpoints();
+      recomputeEffectiveEndpoints();   // pure math, no hardware/LVGL
+      motion_cmd::requestUiRefresh();  // LVGL label update deferred to pump_task
     }
     return res->send(200, "text/plain", "ok");
   });
@@ -396,11 +396,13 @@ void setupWebServer() {
       if (v < RUN_SG_TRIP_MIN) v = RUN_SG_TRIP_MIN;
       if (v > RUN_SG_TRIP_MAX) v = RUN_SG_TRIP_MAX;
       profiles[tgt].sg_trip = (uint16_t)v;
+      motion_cmd::requestUiRefresh();
     } else if (req->hasParam("delta")) {
       int32_t v = (int32_t)profiles[tgt].sg_trip + atoi(req->getParam("delta", "0"));
       if (v < RUN_SG_TRIP_MIN) v = RUN_SG_TRIP_MIN;
       if (v > RUN_SG_TRIP_MAX) v = RUN_SG_TRIP_MAX;
       profiles[tgt].sg_trip = (uint16_t)v;
+      motion_cmd::requestUiRefresh();
     }
     return res->send(200, "text/plain", "ok");
   });
@@ -411,6 +413,7 @@ void setupWebServer() {
       if (v < SG_WORK_ZONE_MIN) v = SG_WORK_ZONE_MIN;
       if (v > SG_WORK_ZONE_MAX) v = SG_WORK_ZONE_MAX;
       SG_WORK_ZONE_STEPS = v;
+      motion_cmd::requestUiRefresh();
     }
     return res->send(200, "text/plain", "ok");
   });
@@ -419,17 +422,19 @@ void setupWebServer() {
     if (req->hasParam("delta")) {
       int32_t v = batchTarget + atoi(req->getParam("delta", "0"));
       batchTarget = (v < 0) ? 0 : (v > BATCH_TARGET_MAX ? BATCH_TARGET_MAX : v);
+      motion_cmd::requestUiRefresh();
     }
     if (req->hasParam("action")) {
       std::string a = req->getParam("action", "");
-      if (a == "start" && batchTarget > 0 && runState == IDLE && endpointsCalibrated) {
-        batchCount = 0;
-        batchActive = true;
-        startRunBetweenEndpoints();
+      if (a == "start") {
+        // Deferred: startRunBetweenEndpoints() drives the stepper + TMC SPI.
+        // Validity (target set, IDLE, calibrated) is re-checked at execution.
+        motion_cmd::requestBatchStart();
       } else if (a == "clear") {
         batchTarget = 0;
         batchCount = 0;
         batchActive = false;
+        motion_cmd::requestUiRefresh();
       }
     }
     return res->send(200, "text/plain", "ok");
@@ -438,10 +443,10 @@ void setupWebServer() {
   server.on("/api/v1/action", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("do")) {
       std::string action = req->getParam("do", "");
-      if (action == "calibrate" && runState == IDLE) {
-        webCalRequested = true;
-      } else if (action == "return_home" && runState == STALLED) {
-        webHomeRequested = true;
+      if (action == "calibrate") {
+        motion_cmd::requestCalibrate();
+      } else if (action == "return_home") {
+        motion_cmd::requestReturnHome();
       } else if (action == "reset_counter") {
         counter = 0;
       }
@@ -469,8 +474,9 @@ void setupWebServer() {
   });
 
   server.on("/api/v1/log_clear", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    g_log = autolee::LogRing<LOG_LINES, LOG_LINE_LEN>();
-    logSentSerial = 0;
+    // Deferred: reassigning the ring here would race webLog()'s push from
+    // pump_task / the LVGL task.
+    motion_cmd::requestLogClear();
     return res->send(200, "text/plain", "ok");
   });
 
@@ -511,21 +517,6 @@ void setupWebServer() {
 
   server.begin();
   ESP_LOGI(TAG, "Web server started on port 80");
-}
-
-void handleWebCalibration() {
-  if (!webCalRequested) return;
-  webCalRequested = false;
-  if (runState != IDLE) return;
-  calibrateEndpointsSensorless();
-  recomputeEffectiveEndpoints();
-}
-
-void handleWebHome() {
-  if (!webHomeRequested) return;
-  webHomeRequested = false;
-  if (runState != STALLED) return;
-  safeCreepHome();
 }
 
 static uint32_t s_lastSSEMs = 0;

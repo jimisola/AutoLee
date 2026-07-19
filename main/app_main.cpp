@@ -10,6 +10,7 @@
 
 #include "display_touch.h"
 #include "motion.h"
+#include "motion_cmd.h"
 #include "stepper.h"
 #include "wifi_mgr.h"
 #include "web_server.h"
@@ -23,8 +24,8 @@ static inline uint32_t millis() {
   return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-// Replaces the Arduino loop(): handleMotion/handleWebCalibration/
-// handleWebHome were all pumped from loop() every iteration; the DNS
+// Replaces the Arduino loop(): handleMotion + the deferred web/UI commands
+// are pumped from here every iteration; the DNS
 // captive-portal server and web server both run their own tasks now, so
 // this is just motion + web state + the deferred-reboot handling.
 //
@@ -36,8 +37,7 @@ static void pump_task(void *) {
   for (;;) {
     esp_task_wdt_reset();
     handleMotion();
-    handleWebCalibration();
-    handleWebHome();
+    motion_cmd::processPendingCommands();
 
     if (rebootRequested && (millis() - rebootRequestMs) > 500) {
       if (stepper::isRunning()) stepper::forceStop();

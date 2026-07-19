@@ -49,6 +49,10 @@ inline void jsonEscape(const char *in, char *out, size_t outSize) {
   size_t o = 0;
   for (size_t i = 0; in[i] != '\0' && o + 2 < outSize; i++) {
     char c = in[i];
+    // Drop raw control characters outright: they'd need \uXXXX escapes to be
+    // valid JSON, and no legitimate SSID contains them (upstream v1.10.0 does
+    // the same).
+    if ((unsigned char)c < 0x20) continue;
     if (c == '"' || c == '\\') out[o++] = '\\';
     out[o++] = c;
   }

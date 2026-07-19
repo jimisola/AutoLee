@@ -14,6 +14,7 @@
 //  no screen/touch module attached. ***
 // ============================================================================
 #include "ui_touch.h"
+#include "motion_cmd.h"
 #include "globals.h"
 #include "motion.h"
 #include "wifi_mgr.h"
@@ -140,8 +141,9 @@ void showJamScreen() {
 
 static void onJamReturnHome(lv_event_t *e) {
   LV_UNUSED(e);
-  if (runState != STALLED) return;
-  safeCreepHome();
+  // Deferred to pump_task: safeCreepHome() drives the stepper + TMC SPI for
+  // seconds. Running it here would block the LVGL task and race pump_task.
+  motion_cmd::requestReturnHome();
 }
 
 // ==========================================================================
@@ -412,26 +414,16 @@ static void on_go_ep_dn(lv_event_t *e) {
 
 static void on_calibrate(lv_event_t *e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-  lv_obj_t *btn = lv_event_get_target(e);
-  lv_obj_t *lbl = lv_obj_get_child(btn, 0);
-  lv_obj_add_state(btn, LV_STATE_DISABLED);
-  if (lbl) lv_label_set_text(lbl, "Calibrating...");
-  // NOTE: calibrateEndpointsSensorless() blocks for several seconds. This
-  // handler runs on esp_lvgl_port's own task, so unlike the original
-  // Arduino loop() (which pumped lv_timer_handler() throughout), the
-  // display will NOT refresh during calibration - the "Calibrating..."
-  // text above won't actually reach the screen until this returns.
-  // Cosmetic only; verify once hardware is available and revisit if it
-  // matters (e.g. move calibration to pump_task via a request flag,
-  // matching the web UI's webCalRequested pattern, instead of blocking
-  // the LVGL task directly).
-  bool ok = calibrateEndpointsSensorless();
-  if (lbl) lv_label_set_text(lbl, ok ? "Calibrate" : "Retry");
-  lv_obj_clear_state(btn, LV_STATE_DISABLED);
-  ui_update_main_warning();
-  recomputeEffectiveEndpoints();
-  ui_update_tuning_numbers();
-  ui_update_endpoint_edit_values();
+  LV_UNUSED(e);
+  // Deferred to pump_task rather than blocking the LVGL task here.
+  //
+  // This also fixes the "Calibrating..." label never rendering: calibration
+  // blocks for seconds, and on esp_lvgl_port this handler runs ON the LVGL
+  // task, so nothing could repaint until it returned. Karl's upstream v1.10.0
+  // worked around the same symptom with lv_refr_now(); moving the work off the
+  // UI task is the better fix for this threading model. The button label and
+  // enabled state now follow runState via counter_timer_cb().
+  motion_cmd::requestCalibrate();
 }
 
 static void counter_timer_cb(lv_timer_t *t) {
@@ -441,6 +433,17 @@ static void counter_timer_cb(lv_timer_t *t) {
   if (main_scr && lv_scr_act() == main_scr) {
     ui_update_main_warning();
     ui_update_batch_remain();
+  }
+  // Calibration runs on pump_task now, so the button reflects runState here
+  // instead of being driven inline by a blocking handler.
+  if (btn_calibrate) {
+    lv_obj_t *lbl = lv_obj_get_child(btn_calibrate, 0);
+    bool busy = (runState == CALIBRATING);
+    if (lbl) lv_label_set_text(lbl, busy ? "Calibrating..." : "Calibrate");
+    if (busy)
+      lv_obj_add_state(btn_calibrate, LV_STATE_DISABLED);
+    else
+      lv_obj_clear_state(btn_calibrate, LV_STATE_DISABLED);
   }
 }
 
@@ -521,6 +524,7 @@ void buildUI() {
   lv_obj_t *st2 = make_title(sc, "Settings");
   lv_obj_align(st2, LV_ALIGN_TOP_MID, 0, 2);
   lv_obj_t *b_cal = make_btn(sc, "Calibrate", 140, 44, 0x444444, &lv_font_montserrat_20);
+  btn_calibrate = b_cal;
   lv_obj_t *b_config = make_btn(sc, "Config", 140, 44, 0x1F6FEB, &lv_font_montserrat_20);
   lv_obj_t *b_reset = make_btn(sc, "Reset Count", 140, 44, 0xB42318, &lv_font_montserrat_20);
   lv_obj_t *b_back_s = make_btn(sn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
@@ -566,10 +570,9 @@ void buildUI() {
         profile_btns[i],
         [](lv_event_t *e) {
           uint8_t idx = (uint8_t)(intptr_t)lv_event_get_user_data(e);
-          setActiveProfile(idx);
-          ui_update_speed_val();
-          ui_update_sg_val();
-          ui_update_profile_screen();
+          // Deferred: setActiveProfile() drives the stepper. pump_task
+          // refreshes the labels once applied.
+          motion_cmd::requestProfile(idx);
           webLog("Profile: %s spd=%lu sg=%u", profiles[idx].name, (unsigned long)ui_speed_hz,
                  RUN_SG_TRIP);
         },
@@ -812,11 +815,8 @@ void buildUI() {
       btn_start_batch,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        if (batchTarget <= 0 || runState != IDLE || !endpointsCalibrated) return;
-        batchCount = 0;
-        batchActive = true;
-        startRunBetweenEndpoints();
-        setRunButtonState(true);
+        // Deferred: validity is re-checked in pump_task at execution time.
+        motion_cmd::requestBatchStart();
         go(main_scr);
       },
       LV_EVENT_CLICKED, nullptr);
@@ -851,14 +851,8 @@ void buildUI() {
       btn_run_global,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        if (runState == IDLE) {
-          startRunBetweenEndpoints();
-          setRunButtonState(runState == RUNNING);
-        } else if (runState == RUNNING) {
-          requestGracefulStop();
-          setRunButtonState(false);
-          batchActive = false;
-        }
+        // Deferred: touches the stepper + TMC SPI.
+        motion_cmd::requestToggleRun();
       },
       LV_EVENT_CLICKED, nullptr);
 

@@ -27,11 +27,8 @@ extern bool batchActive;
 extern int32_t batchCount;
 extern int32_t batchTarget;
 
-// Web request flags (set from the HTTP server's task, serviced from the main
-// loop) - mirrors the original's "async callbacks must not touch motion"
-// rule (see CLAUDE.md).
-extern volatile bool webCalRequested;
-extern volatile bool webHomeRequested;
+// Deferred reboot (set from a handler, serviced by pump_task). Motion-affecting
+// requests go through motion_cmd:: instead - see main/motion/motion_cmd.h.
 extern volatile bool rebootRequested;
 extern uint32_t rebootRequestMs;
 
@@ -56,6 +53,7 @@ extern lv_obj_t *lbl_up_eff, *lbl_dn_eff;
 extern lv_obj_t *lbl_ep_up_val, *lbl_ep_dn_val;
 extern lv_obj_t *lbl_wifi_status;
 extern lv_obj_t *btn_run_global;
+extern lv_obj_t *btn_calibrate;
 extern lv_obj_t *jam_scr;
 extern lv_obj_t *jam_status_lbl;
 extern lv_obj_t *stall_scr;

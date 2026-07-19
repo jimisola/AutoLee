@@ -38,11 +38,6 @@ extern "C" void tmc5160_readWriteSPI(uint16_t icID, uint8_t *data, size_t dataLe
   (void)icID;
   if (s_tmc_spi == nullptr || data == nullptr || dataLength == 0) return;
 
-  // Display CS forced high before every StallGuard/TMC SPI transfer to
-  // prevent bus contention - preserve this when touching SPI/SG code.
-  gpio_set_level((gpio_num_t)LCD_CS_GPIO, 1);
-  esp_rom_delay_us(10);  // let the bus settle after display CS release
-
   // TMC-API expects the response written back into `data` in-place; the SPI
   // driver doesn't guarantee tx_buffer == rx_buffer is safe, so use a
   // separate rx buffer and copy back.
@@ -53,9 +48,24 @@ extern "C" void tmc5160_readWriteSPI(uint16_t icID, uint8_t *data, size_t dataLe
   t.tx_buffer = data;
   t.rx_buffer = rx;
 
+  // Hold the bus for the whole CS-low..CS-high window. The display shares this
+  // SPI bus, and its LVGL flush runs on a different task: without the lock, an
+  // esp_lcd transfer can be interleaved between our CS toggle and our transfer,
+  // corrupting a StallGuard read - i.e. silently feeding the jam detector
+  // garbage. acquire_bus() also blocks the display's transfers for the
+  // duration, which is what makes the manual CS handling below safe.
+  spi_device_acquire_bus(s_tmc_spi, portMAX_DELAY);
+
+  // Display CS forced high before every StallGuard/TMC SPI transfer to
+  // prevent bus contention - preserve this when touching SPI/SG code.
+  gpio_set_level((gpio_num_t)LCD_CS_GPIO, 1);
+  esp_rom_delay_us(10);  // let the bus settle after display CS release
+
   gpio_set_level((gpio_num_t)TMC_CS, 0);
   spi_device_polling_transmit(s_tmc_spi, &t);
   gpio_set_level((gpio_num_t)TMC_CS, 1);
+
+  spi_device_release_bus(s_tmc_spi);
 
   memcpy(data, rx, dataLength);
 }
