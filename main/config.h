@@ -149,6 +149,15 @@ static constexpr uint16_t LOG_LINE_LEN = 140;
 static constexpr uint32_t SSE_INTERVAL_MS = 250;
 
 // ==========================================================================
+//  OTA
+// ==========================================================================
+// If an in-flight OTA upload goes this long with no new chunk, treat it as a
+// dead/aborted transfer (client vanished mid-upload) so the in-progress flag
+// can't stay stuck forever. Generous, since a slow-but-live upload still sends
+// chunks far more often than this.
+static constexpr uint32_t OTA_STALE_TIMEOUT_MS = 15000;
+
+// ==========================================================================
 //  STOP TIMEOUT
 // ==========================================================================
 static constexpr uint32_t STOP_TIMEOUT_MS = 8000;

@@ -68,7 +68,8 @@ static void pump_task(void *) {
 // condition, not a bug that should panic the whole device.
 static void sse_task(void *) {
   for (;;) {
-    broadcastState();  // internally rate-limited to SSE_INTERVAL_MS
+    otaWatchdogTick();  // release a stuck OTA flag from a vanished-client upload
+    broadcastState();   // internally rate-limited to SSE_INTERVAL_MS
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }

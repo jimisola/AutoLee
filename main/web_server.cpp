@@ -142,39 +142,82 @@ static esp_err_t redirectToRoot(PsychicRequest *req, PsychicResponse *res) {
 // OTA upload's bandwidth/socket for state broadcasts nobody's reading
 // during an upload anyway.
 static volatile bool s_ota_in_progress = false;
+// Wall-clock of the last received OTA chunk; drives the stale-upload watchdog
+// (otaWatchdogTick). Written by the HTTP task, read by sse_task - a plain
+// aligned uint32_t load/store, atomic on this target.
+static volatile uint32_t s_ota_last_activity_ms = 0;
+
+// Reset all OTA bookkeeping. Does NOT touch the driver - call after the handle
+// has already been released (via esp_ota_end or esp_ota_abort).
+static void otaClear() {
+  s_ota_handle = 0;
+  s_ota_partition = nullptr;
+  s_ota_in_progress = false;
+}
+
+// Abort an OTA whose handle is still open (esp_ota_end not yet called) and
+// clear state. MUST NOT run after esp_ota_end (which already frees the handle).
+// Only ever called from the HTTP task, so it can't race the upload it aborts.
+static void otaAbort(const char *why) {
+  ESP_LOGE(TAG, "OTA: aborting (%s)", why);
+  if (s_ota_handle) esp_ota_abort(s_ota_handle);
+  otaClear();
+}
 
 static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_t index,
                                  uint8_t *data, size_t len, bool final) {
+  s_ota_last_activity_ms = millis();
   if (index == 0) {
     ESP_LOGI(TAG, "OTA: upload '%s'", filename);
+    // Reclaim any handle a previous upload leaked (e.g. a client that vanished
+    // mid-transfer, which never delivers a `final` chunk). Runs on this same
+    // HTTP task as the upload that leaked it, so no cross-task race on abort.
+    if (s_ota_handle) otaAbort("leftover handle from a prior aborted upload");
     s_ota_in_progress = true;
     if (runState == RUNNING) requestGracefulStop();
     s_ota_partition = esp_ota_get_next_update_partition(nullptr);
     if (!s_ota_partition ||
         esp_ota_begin(s_ota_partition, OTA_SIZE_UNKNOWN, &s_ota_handle) != ESP_OK) {
       ESP_LOGE(TAG, "OTA: begin failed");
-      s_ota_in_progress = false;
+      s_ota_handle = 0;  // begin failure leaves no valid handle to abort
+      otaClear();
       return ESP_FAIL;
     }
   }
   if (s_ota_handle && esp_ota_write(s_ota_handle, data, len) != ESP_OK) {
-    ESP_LOGE(TAG, "OTA: write failed");
-    s_ota_in_progress = false;
+    otaAbort("write failed");
     return ESP_FAIL;
   }
   if (final) {
-    s_ota_in_progress = false;
-    if (esp_ota_end(s_ota_handle) == ESP_OK &&
-        esp_ota_set_boot_partition(s_ota_partition) == ESP_OK) {
+    // esp_ota_end frees the handle on both success and failure, so neither
+    // branch below may call esp_ota_abort - just clear the bookkeeping.
+    bool ended = (esp_ota_end(s_ota_handle) == ESP_OK);
+    if (ended && esp_ota_set_boot_partition(s_ota_partition) == ESP_OK) {
       ESP_LOGI(TAG, "OTA: success, %llu bytes", index + len);
       rebootRequested = true;
       rebootRequestMs = millis();
+      otaClear();
     } else {
       ESP_LOGE(TAG, "OTA: end/set-boot-partition failed");
+      otaClear();
       return ESP_FAIL;
     }
   }
   return ESP_OK;
+}
+
+// Periodic guard (called from sse_task) for an upload that died without a
+// `final` chunk - the HTTP upload handler gives us no abort callback, so a
+// vanished client would otherwise leave s_ota_in_progress stuck true, freezing
+// SSE state/log broadcasts until reboot. We only clear the flag here (a bool,
+// so no cross-task driver race); the leaked handle itself is reclaimed by the
+// HTTP-task defensive abort on the next upload, or by a reboot.
+void otaWatchdogTick() {
+  if (s_ota_in_progress && (millis() - s_ota_last_activity_ms) > OTA_STALE_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "OTA: upload stale (no chunk in %lums) - releasing SSE",
+             (unsigned long)OTA_STALE_TIMEOUT_MS);
+    s_ota_in_progress = false;
+  }
 }
 
 // ==========================================================================
