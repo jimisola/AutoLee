@@ -179,20 +179,12 @@ On a confirmed jam: stop → back off → `STALLED` → operator returns home.
 
 ## 5. Build-time layout
 
-| Path | Role |
-|---|---|
-| `main/` | `app_main.cpp`, `config.h` (all tuning constants), `globals.*` |
-| `main/drivers/` | Hardware: stepper, TMC5160, display, touch |
-| `main/motion/` | `motion.*` (FSM) + `motion_cmd.*` (deferred commands) |
-| `main/net/` | WiFi, web server, compiled-in web UI |
-| `main/ui/` | LVGL screens |
-| `lib/autolee_logic/` | Pure logic — no ESP-IDF, no Arduino |
-| `host_test/` | Unity suites + CMake/CTest harness (ESP-IDF's `host_test/` convention) |
-| `api/` | OpenAPI + AsyncAPI + JSON Schema — the external contract |
+The directory layout is documented in
+[CONTRIBUTING.md](../CONTRIBUTING.md#repository-layout).
 
-Subdirectories under `main/` are all on `INCLUDE_DIRS`, so `#include "motion.h"`
-resolves from anywhere. The grouping is navigational, not a compiler-enforced
-module boundary.
+Architecturally the one thing worth knowing: the subdirectories under `main/`
+are all on `INCLUDE_DIRS`, so `#include "motion.h"` resolves from anywhere. The
+grouping is navigational, not a module boundary the compiler enforces.
 
 ---
 
@@ -216,6 +208,5 @@ for why ESP-IDF was chosen and what each option concretely buys.
 ## See also
 
 - [PLAN.md](PLAN.md) — phased migration checklist and what remains unverified
-- [upstream-v1.10.0-diff.md](upstream-v1.10.0-diff.md) — deltas from the upstream Arduino source
 - [wiring.md](wiring.md) · [bill-of-materials.md](bill-of-materials.md)
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) — build, test, and release workflow

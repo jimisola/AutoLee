@@ -99,7 +99,6 @@ The stall detection and jam protection features are designed to detect brass get
 |---|---|
 | **[Bill of Materials](docs/bill-of-materials.md)** | Every part needed, with links |
 | **[Wiring](docs/wiring.md)** | Pin-by-pin connections + wiring diagram |
-| **[Architecture](docs/ARCHITECTURE.md)** | How the firmware fits together (diagrams) |
 
 Read the safety warning above first.
 
@@ -125,7 +124,8 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full toolchain setup, host-test
-instructions, and repo layout.
+instructions, and repo layout, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+for how the firmware fits together (task model, shared SPI bus, motion FSM).
 
 ## Flash Pre-Compiled Binary (No Arduino IDE Required)
 
@@ -190,15 +190,15 @@ The HTTP + SSE contract lives in [`api/`](api/) and is validated in CI.
 
 | Spec | Source | Rendered |
 |---|---|---|
-| REST (`/api/v1/*`) | [`api/openapi.yaml`](api/openapi.yaml) | [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/openapi.yaml) · [Redoc](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/openapi.yaml) |
-| SSE (`/api/v1/events`) | [`api/asyncapi.yaml`](api/asyncapi.yaml) | [AsyncAPI Studio](https://studio.asyncapi.com/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/asyncapi.yaml) |
+| REST (`/api/v1/*`) | [`api/openapi.yaml`](api/openapi.yaml) | [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/jimisola/AutoLee/feat/esp-idf/api/openapi.yaml) · [Redoc](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/jimisola/AutoLee/feat/esp-idf/api/openapi.yaml) |
+| SSE (`/api/v1/events`) | [`api/asyncapi.yaml`](api/asyncapi.yaml) | [AsyncAPI Studio](https://studio.asyncapi.com/?url=https://raw.githubusercontent.com/jimisola/AutoLee/feat/esp-idf/api/asyncapi.yaml) |
 | State object | [`api/schemas/state.schema.json`](api/schemas/state.schema.json) | (referenced by both) |
 
 All state-changing endpoints and the OTA upload require **HTTP Digest auth**; reads
 (`GET /api/v1/state`, the dashboard, the SSE stream) are open.
 
-> The rendered links read the specs from `main` via raw.githubusercontent.com, so
-> they reflect the released contract rather than a work-in-progress branch.
+> The rendered links currently point at the `feat/esp-idf` branch so they can be
+> checked before merge; switch them to `main` once this lands.
 
 ---
 
@@ -218,4 +218,4 @@ Commercial use — including selling devices, kits, or services based on this pr
 
 THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. USE AT YOUR OWN RISK.
 
-Copyright (c) 2025 K.L Design
+Copyright (c) 2025-2026 K.L Design
