@@ -9,8 +9,7 @@ to build, test, and release the firmware.
 |---|---|
 | `main/` | The firmware: `app_main.cpp` (entry point), `config.h` (pins, speed profiles, tuning constants), and the hardware modules (`display_touch.*`, `axs5106l_touch.*`, and more as they're ported — see `docs/PLAN.md`). |
 | `lib/autolee_logic/` | Pure, hardware-independent logic (endpoint math, SG filter/blanking, stall FSM, batch, log ring, calibration, state JSON, motor FSM). Shared by the firmware **and** the host tests, so tested code == shipped code. |
-| `test/` | Host unit tests — one folder per module, run via `test_apps/`. |
-| `test_apps/` | A plain CMake + CTest project that builds and runs `test/`'s Unity suites against ESP-IDF's vendored Unity source (not an `idf.py` app — each suite has its own `main()`, so they can't share one). |
+| `test/` | Host unit tests — one folder per module, plus the CMake+CTest harness that builds them. |
 | `api/` (`openapi.yaml`, `asyncapi.yaml`, `schemas/`) | API contract (shared JSON Schema + REST/SSE specs). |
 | `include/lv_conf.h` | LVGL config (found via `-D LV_CONF_INCLUDE_SIMPLE`, wired project-wide in the root `CMakeLists.txt`). |
 | `CMakeLists.txt`, `partitions.csv`, `sdkconfig.defaults` | ESP-IDF build config. |
@@ -44,13 +43,13 @@ Pure logic goes in `lib/autolee_logic/` and is covered by a Unity suite in `test
 Run them (no hardware needed):
 
 ```bash
-cd test_apps
+cd test
 cmake -B build
 cmake --build build -j
 cd build && ctest --output-on-failure
 ```
 
-For coverage: `cmake -B build -DAUTOLEE_COVERAGE=ON`, then run `gcovr --root .. --filter '../lib/autolee_logic/' build` from `test_apps/`.
+For coverage: `cmake -B build -DAUTOLEE_COVERAGE=ON`, then run `gcovr --root .. --filter '../lib/autolee_logic/' build` from `test/`.
 
 Keep new algorithmic logic in `lib/autolee_logic/` (not inline in `main/`) so it can be tested on
 the host and reused by the firmware.

@@ -8,7 +8,7 @@ using namespace autolee;
 
 // Read the shared JSON contract example, stripping a single trailing newline so
 // it can be compared byte-for-byte against the (unterminated) serializer output.
-// STATE_EXAMPLE_JSON_PATH is injected by test_apps/CMakeLists.txt.
+// STATE_EXAMPLE_JSON_PATH is injected by test/CMakeLists.txt.
 static std::string readContractExample() {
 #ifdef STATE_EXAMPLE_JSON_PATH
   FILE *f = fopen(STATE_EXAMPLE_JSON_PATH, "rb");

@@ -23,11 +23,11 @@ jobs:
           idf.py build
 
   host-tests:
-    name: Host tests (test_apps/, ctest + coverage)
+    name: Host tests (test/, ctest + coverage)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
-      # test_apps/ is a native host build - it only needs one vendored
+      # test/ is a native host build - it only needs one vendored
       # source file from ESP-IDF (components/unity), not a toolchain.
       # install-esp-idf-action was tried first, but its cross-toolchain
       # leaks into this build's `as`/`ld` resolution no matter what env
@@ -35,10 +35,10 @@ jobs:
       # neither fixed "as: unrecognized option '--64'"), implying a
       # system-level change (e.g. gcc specs) the action makes, not a
       # process-env one. Sparse-clone just the one directory needed instead.
-      - name: Fetch Unity source (the one thing test_apps/ needs from ESP-IDF)
+      - name: Fetch Unity source (the one thing test/ needs from ESP-IDF)
         # components/unity/unity in the esp-idf repo is a submodule of
         # ThrowTheSwitch/Unity - clone that directly into the same path
-        # shape test_apps/CMakeLists.txt expects ($IDF_PATH/components/
+        # shape test/CMakeLists.txt expects ($IDF_PATH/components/
         # unity/unity/src), instead of cloning esp-idf itself.
         run: |
           mkdir -p /tmp/esp-idf-unity/components/unity
@@ -49,13 +49,13 @@ jobs:
           git -C /tmp/esp-idf-unity/components/unity/unity checkout -q FETCH_HEAD
           echo "IDF_PATH=/tmp/esp-idf-unity" >> "$GITHUB_ENV"
       - name: Configure, build, and run
-        working-directory: test_apps
+        working-directory: test
         run: |
           cmake -B build -DAUTOLEE_COVERAGE=ON
           cmake --build build -j
           cd build && ctest --output-on-failure
       - name: Coverage report
-        working-directory: test_apps
+        working-directory: test
         run: |
           pip install gcovr
           # Regression floor, NOT a target to chase: actual coverage is ~98%,

@@ -1,11 +1,15 @@
-# Host (Linux) tests for lib/autolee_logic on ESP-IDF's toolchain-independent
-# Unity, mirroring `pio test -e native`. See docs/PLAN.md Phase 2.
+# Host (Linux) tests for lib/autolee_logic, built on ESP-IDF's
+# toolchain-independent Unity. See docs/PLAN.md Phase 2.
 #
-# Plain CMake + CTest, not an idf.py app: each test/test_*/test_*.cpp already
-# defines its own main() (shared with PlatformIO's native env), so the 9
-# suites can't be linked into one idf.py "linux" target app. Requires
-# IDF_PATH (i.e. ESP-IDF's export.sh sourced) to find the vendored Unity
-# source shared with on-target ESP-IDF tests.
+# Plain CMake + CTest, not an idf.py app: each test_*/test_*.cpp defines its own
+# main(), so the suites can't be linked into one idf.py "linux" target app.
+# Requires IDF_PATH (i.e. ESP-IDF's export.sh sourced) only to locate the
+# vendored Unity source.
+#
+# Deliberately `test/`, not ESP-IDF's `test_apps/` convention: `test_apps/` means
+# an on-target application you flash and run on the chip, which these are not.
+# Naming them that would imply hardware tests we don't have. If genuine on-target
+# tests are added later, `test_apps/` is free for them.
 cmake_minimum_required(VERSION 3.16)
 project(autolee_logic_tests C CXX)
 
@@ -24,7 +28,7 @@ add_library(unity STATIC "${UNITY_DIR}/unity.c")
 target_include_directories(unity PUBLIC "${UNITY_DIR}")
 
 set(AUTOLEE_LOGIC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/autolee_logic")
-set(TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../test")
+set(TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 enable_testing()
 

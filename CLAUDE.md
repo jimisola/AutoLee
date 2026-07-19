@@ -28,7 +28,7 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
 
 - **Board:** ESP32-C6 (WaveShare 1.47" Touch LCD module).
 - **Toolchain:** ESP-IDF >= 5.3, enforced by `main/idf_component.yml`'s `idf: ">=5.3"` - the
-  version this port was built and tested against (native RMT+PCNT stepper via `main/stepper.*`,
+  version this port was built and tested against (native RMT+PCNT stepper via `main/drivers/stepper.*`,
   not FastAccelStepper, which was dropped - see ADR 0001).
   Dependencies (LVGL, `esp_lvgl_port`) are pinned in `main/idf_component.yml` and fetched by the
   Component Manager; `dependencies.lock` is committed for reproducibility.
@@ -39,36 +39,49 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
   core dump to flash, brownout detection — see `docs/adr/0001-*.md` for what each concretely buys
   over the old Arduino/PlatformIO setup.
 - **Pure logic + tests:** hardware-independent algorithms live in `lib/autolee_logic/` (registered
-  as an ESP-IDF component) and are covered by Unity suites in `test/`, run via `test_apps/` (a
-  plain CMake + CTest project — not an `idf.py` app, since each suite has its own `main()`):
+  as an ESP-IDF component) and are covered by Unity suites in `test/`, which also holds the
+  CMake + CTest harness that builds them (deliberately *not* named `test_apps/` — that ESP-IDF
+  convention means on-target apps you flash to the chip; these are host tests):
   ```bash
-  cd test_apps && cmake -B build && cmake --build build -j && cd build && ctest --output-on-failure
+  cd test && cmake -B build && cmake --build build -j && cd build && ctest --output-on-failure
   ```
   Add `-DAUTOLEE_COVERAGE=ON` to the `cmake -B build` step for gcov/gcovr coverage.
 - **LVGL setup:** `include/lv_conf.h` is found via `-D LV_CONF_INCLUDE_SIMPLE` (set project-wide in
   the root `CMakeLists.txt`) — must stay visible to every component that includes `lvgl.h`.
 
-Pure-logic changes can be verified with the `test_apps/` host tests; full hardware behavior still
+Pure-logic changes can be verified with the `test/` host tests; full hardware behavior still
 requires flashing to the board.
 
 ## Architecture
 
 ### `main/` is the firmware app; `lib/autolee_logic/` is the tested core
 
+`main/` is grouped by concern. All groups are on `INCLUDE_DIRS` (see `main/CMakeLists.txt`), so
+`#include "motion.h"` works from anywhere — the grouping is for humans navigating the tree, not a
+module boundary the compiler enforces:
+
+| Dir | Holds |
+|---|---|
+| `main/` | `app_main.cpp` (entry), `config.h`, `globals.{h,cpp}` |
+| `main/drivers/` | `display_touch`, `axs5106l_touch`, `tmc5160_hal`, `tmc5160_ctrl`, `stepper`, `stepper_motor_encoder` |
+| `main/motion/` | `motion.{h,cpp}` — the safety-critical run/jam/calibration/homing state machine |
+| `main/net/` | `wifi_mgr`, `web_server`, `index_html.h` |
+| `main/ui/` | `ui_touch` — the on-device LVGL UI |
+
 - **`main/config.h`** — pins, `SpeedProfile profiles[3]` (Slow/Normal/Fast, each with its own
   `sg_trip`), and all tuning constants. `FW_VERSION` here is the single source of truth for the
   firmware version (read by `app_main`'s log banner).
-- **`main/display_touch.{h,cpp}`** — SPI bus + `esp_lcd` panel bring-up and I2C touch bus
+- **`main/drivers/display_touch.{h,cpp}`** — SPI bus + `esp_lcd` panel bring-up and I2C touch bus
   bring-up, LVGL display registration via `esp_lvgl_port`. The panel is a **JD9853**
   (ST7789-command-compatible but needs its own vendor init sequence — `jd9853_send_init_sequence()`
   is a byte-for-byte port of the original Arduino driver's `init_operations`; do not replace it
   with `esp_lcd_new_panel_st7789()`'s generic default init).
-- **`main/axs5106l_touch.{h,cpp}`** — native I2C driver for the AXS5106L touch controller
+- **`main/drivers/axs5106l_touch.{h,cpp}`** — native I2C driver for the AXS5106L touch controller
   (registry components require LVGL 9; this project is pinned to LVGL 8.4), registered as an LVGL
   8 `lv_indev_drv_t`.
 - **`lib/autolee_logic/`** — pure, hardware-independent modules (endpoint math, SG filter/blanking,
   stall FSM, batch, log ring, calibration, state JSON, motor FSM), header-only, no ESP-IDF or
-  Arduino dependency. Shared by the firmware **and** the host tests in `test_apps/`, so tested code
+  Arduino dependency. Shared by the firmware **and** the host tests in `test/`, so tested code
   == shipped code.
 
 ### Shared SPI bus
@@ -77,7 +90,7 @@ The ST7789/JD9853 display and the TMC5160 share the SPI bus (SCK=GPIO1, MOSI=GPI
 MISO is unused by the display, only needed for TMC5160 StallGuard reads). Chip-select is managed
 in software: TMC CS on GPIO 8, display CS on GPIO 14. **The display CS must be forced HIGH before
 every StallGuard SPI read** to prevent bus contention — preserve this when touching SPI/SG code
-(carried over from the original Arduino firmware; implemented in `main/tmc5160_hal.cpp`'s
+(carried over from the original Arduino firmware; implemented in `main/drivers/tmc5160_hal.cpp`'s
 `tmc5160_readWriteSPI()`).
 
 ## Conventions

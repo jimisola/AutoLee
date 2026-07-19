@@ -28,4 +28,4 @@ repos:
     rev: v22.1.8
     hooks:
       - id: clang-format
-        files: ^(main|lib|test|test_apps)/.*\.(cpp|h)$
+        files: ^(main|lib|test)/.*\.(cpp|h)$

@@ -99,9 +99,9 @@ The firmware is a native **ESP-IDF** project (`idf.py`, not the Arduino IDE/Plat
 
 | Path | Purpose |
 |---|---|
-| `main/` | The firmware: `app_main.cpp` (entry point), `config.h` (pins, speed profiles, tuning constants), and the hardware modules (display/touch, motion, web, WiFi — see CLAUDE.md for the current set) |
+| `main/` | The firmware, grouped by concern: `app_main.cpp` + `config.h` + `globals.*` at the top, then `drivers/` (display, touch, TMC5160, stepper), `motion/`, `net/` (WiFi, web server) and `ui/` (LVGL touch UI) |
 | `lib/autolee_logic/` | Pure, hardware-independent logic (endpoint math, SG filter/blanking, stall FSM, batch, log ring, calibration, state JSON, motor FSM). Shared by the firmware **and** the host tests, so tested code == shipped code |
-| `test/` | Host unit tests (one folder per pure-logic module), run via `test_apps/` (plain CMake + CTest) |
+| `test/` | Host unit tests (one folder per pure-logic module) + the plain CMake + CTest harness |
 | `api/` | API contract: `openapi.yaml` (REST), `asyncapi.yaml` (SSE), `schemas/` (shared JSON Schema) |
 | `include/lv_conf.h` | LVGL configuration — display size, enabled features, font selections |
 | `CMakeLists.txt`, `partitions.csv`, `sdkconfig.defaults` | ESP-IDF build config (see CONTRIBUTING.md) |
@@ -223,7 +223,7 @@ The firmware is a native **ESP-IDF** project (`idf.py`, not the Arduino IDE/Plat
 Built with **ESP-IDF** (native `idf.py`, no Arduino IDE or PlatformIO). LVGL and
 `esp_lvgl_port` are fetched automatically by the ESP-IDF Component Manager
 (pinned in `main/idf_component.yml`); the TMC5160 and AXS5106L touch drivers
-are implemented directly in `main/` against ESP-IDF's SPI/I2C APIs — no
+are implemented directly under `main/drivers/` against ESP-IDF's SPI/I2C APIs — no
 offline/manually-installed libraries needed.
 
 ### Build & Flash
