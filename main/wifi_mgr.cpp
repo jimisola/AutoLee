@@ -108,10 +108,18 @@ static void scan_networks() {
   esp_wifi_scan_get_ap_records(&count, records.data());
   for (uint16_t i = 0; i < count; i++) {
     std::string ssid(reinterpret_cast<char *>(records[i].ssid));
-    // Minimal HTML-escaping (same characters src/wifi_ota.cpp escaped).
+    // Minimal HTML-escaping. '&' matters and was missing here (an SSID
+    // containing it produced broken markup in the dropdown) - fixed upstream in
+    // Karl's v1.10.0. Note his fix had to escape '&' *first* because it used
+    // sequential String::replace() calls, which would otherwise double-escape
+    // the entities it just inserted; this char-by-char build is immune to that,
+    // so case order below is irrelevant.
     std::string escaped;
     for (char c : ssid) {
       switch (c) {
+        case '&':
+          escaped += "&amp;";
+          break;
         case '"':
           escaped += "&quot;";
           break;

@@ -155,8 +155,12 @@ void handleMotion() {
       long pos = stepper::getCurrentPosition();
 
       if (!stepper::isRunning()) {
-        if (currentTarget == endpointDown && counter < COUNTER_MAX) {
-          counter++;
+        if (currentTarget == endpointDown) {
+          // COUNTER_MAX caps the *display* counter only (cosmetic, 4-digit
+          // field). Batch counting must NOT be gated by it, or a batch stalls
+          // forever once the lifetime counter saturates. (Fixed upstream in
+          // Karl's v1.10.0; this port inherited the v1.8 bug.)
+          if (counter < COUNTER_MAX) counter++;
           if (batchActive) {
             batchCount++;
             if (autolee::batchComplete(batchCount, batchTarget)) {
@@ -194,11 +198,17 @@ void handleMotion() {
         break;
       }
 
+      // Decel blank: skip SG monitoring inside the deceleration window, UNLESS
+      // we already have jam evidence to carry through. The carry-through must
+      // key on ANY prior high reading (count > 0), not on count >=
+      // RUN_SG_HIGH_NEEDED: reaching NEEDED would already have fired the jam
+      // above, so the old `< RUN_SG_HIGH_NEEDED` test was always true here and
+      // silently discarded partial jam evidence entering the decel window.
+      // (Fixed upstream in Karl's v1.10.0; this port inherited the v1.8 bug.)
       {
         int32_t distToTarget = labs(pos - currentTarget);
         int32_t decelBlank = autolee::decelBlankSteps(ui_speed_hz, RUN_DECEL);
-        if (distToTarget < decelBlank && runSGHighCount < RUN_SG_HIGH_NEEDED) {
-          runSGHighCount = 0;
+        if (distToTarget < decelBlank && runSGHighCount == 0) {
           runSGLowCount = 0;
           break;
         }
