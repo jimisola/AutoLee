@@ -41,9 +41,9 @@ flowchart TB
     MOTION -.uses.-> CORE
     NET -.uses.-> CORE
 
-    style CMD fill:#fff3cd,stroke:#856404,stroke-width:2px
-    style CORE fill:#d4edda,stroke:#155724,stroke-width:2px
-    style MOTION fill:#f8d7da,stroke:#721c24,stroke-width:2px
+    style CMD stroke-width:3px
+    style CORE stroke-width:3px
+    style MOTION stroke-width:3px
 ```
 
 `lib/autolee_logic/` is deliberately free of ESP-IDF and Arduino dependencies, so
@@ -72,8 +72,8 @@ flowchart LR
     PUMP --> STEP["stepper / TMC5160 SPI"]
     PUMP --> FSM["motion FSM"]
 
-    style PUMP fill:#f8d7da,stroke:#721c24,stroke-width:2px
-    style Q fill:#fff3cd,stroke:#856404,stroke-width:2px
+    style PUMP stroke-width:3px
+    style Q stroke-width:3px
 ```
 
 **The rule:** only `pump_task` touches the stepper, the TMC5160, or the motion
@@ -104,8 +104,8 @@ flowchart TB
     C -->|"pump_task<br/>(old)"| D["watchdog starved<br/>➜ hard reset mid-motion"]
     C -->|"sse_task<br/>(now)"| E["only SSE lags<br/>motion unaffected"]
 
-    style D fill:#f8d7da,stroke:#721c24
-    style E fill:#d4edda,stroke:#155724
+    style D stroke-width:3px
+    style E stroke-width:3px
 ```
 
 ---
@@ -122,7 +122,7 @@ flowchart LR
     LCD -.driven by.-> LVGLT["LVGL task"]
     TMC -.driven by.-> PUMPT["pump_task"]
 
-    style SPI fill:#fff3cd,stroke:#856404,stroke-width:2px
+    style SPI stroke-width:3px
 ```
 
 Two different tasks, one bus. Every TMC transfer therefore:
@@ -161,9 +161,12 @@ stateDiagram-v2
 The transition table is encoded in `lib/autolee_logic/motor_fsm.h` and is
 host-tested exhaustively (every invalid `(state, event)` pair must be rejected).
 
-> **Known gap:** the shipped firmware still implements this inline in
-> `motion.cpp` rather than calling the tested module — review finding #4, tracked
-> in [PLAN.md](PLAN.md).
+> **Partial gap:** jam detection and the calibration/homing confirmation counters
+> now run through the tested `StallCounter` / `ConfirmCounter`, but the *transition
+> table itself* is still implemented inline in `motion.cpp`'s `handleMotion()`
+> switch rather than calling `motorTransition()`. So the "cannot Start from
+> Stalled" rule above is tested, but not yet enforced by the tested code —
+> remainder of review finding #4, tracked in [PLAN.md](PLAN.md).
 
 ### Jam detection
 

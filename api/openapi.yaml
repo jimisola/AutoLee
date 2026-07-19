@@ -7,6 +7,13 @@ info:
     All mutating endpoints are POST; the canonical device state is returned by
     `GET /api/v1/state` and pushed continuously over Server-Sent Events at `/api/v1/events`
     (see asyncapi.yaml). Parameters are passed as query parameters.
+
+    Authentication: every state-changing endpoint (all POSTs, including the OTA
+    upload) requires HTTP Digest auth. Reads (`GET /api/v1/state`, the dashboard
+    and the SSE stream) are deliberately open - they expose only the cycle
+    counter, SSID and IP. The password is stored in NVS and is changeable via
+    `POST /api/v1/web_password`; the shipped factory default is public, so change
+    it on first setup.
   license:
     name: CC BY-NC 4.0
     url: https://creativecommons.org/licenses/by-nc/4.0/
@@ -126,6 +133,25 @@ paths:
       operationId: clearLog
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
+  /api/v1/web_password:
+    post:
+      summary: Change the web UI / API password
+      description: >
+        Sets a new Digest-auth password and persists it to NVS. Takes effect
+        immediately - no reboot. Itself authenticated, so only a caller who
+        already knows the current password can change it.
+      operationId: setWebPassword
+      parameters:
+        - name: pass
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+          description: The new password.
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { description: Missing or over-long password }
+        "500": { description: Could not persist the password to NVS }
+
   /api/v1/ota:
     post:
       summary: Upload firmware (OTA)
@@ -144,7 +170,18 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Ok" }
 
+security:
+  - digestAuth: []
+
 components:
+  securitySchemes:
+    digestAuth:
+      type: http
+      scheme: digest
+      description: >
+        Required for all POST endpoints. Digest rather than Basic because the
+        device serves plain HTTP - Basic would put the password on the wire in
+        reversible base64 on every request.
   responses:
     Ok:
       description: >

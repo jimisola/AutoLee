@@ -184,41 +184,27 @@ Key constants are in `config.h`:
 
 ## API Reference
 
-All endpoints accept `POST` requests.
+The HTTP + SSE contract lives in [`api/`](api/) and is validated in CI.
 
-| Endpoint | Parameters | Description |
+**Browse it rendered:**
+
+| Spec | Source | Rendered |
 |---|---|---|
-| `GET /api/state` | — | Returns full JSON state |
-| `/api/toggle_run` | — | Start or stop running |
-| `/api/profile` | `idx=0\|1\|2` | Switch speed profile |
-| `/api/sg_trip` | `value=N` or `delta=N`, `&profile=N` (optional) | Set or adjust SG threshold; targets active profile by default |
-| `/api/current` | `ma=N` | Set motor run current (1,000–4,500 mA) |
-| `/api/work_zone` | `delta=N` | Adjust work zone blanking steps |
-| `/api/endpoint` | `which=up\|down` `&delta=N` | Adjust endpoint offset |
-| `/api/batch` | `delta=N` or `action=start\|clear` | Adjust batch target or start/clear |
-| `/api/action` | `do=calibrate\|return_home\|reset_counter` | Trigger actions |
-| `/api/wifi` | `ssid=...` `&pass=...` | Save WiFi credentials and reboot |
-| `/api/wifi_reset` | — | Clear saved WiFi, reboot to AP mode |
-| `/api/ota` | multipart `.bin` upload | Firmware update |
-| `/api/log_clear` | — | Clear the log buffer |
+| REST (`/api/v1/*`) | [`api/openapi.yaml`](api/openapi.yaml) | [Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/openapi.yaml) · [Redoc](https://redocly.github.io/redoc/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/openapi.yaml) |
+| SSE (`/api/v1/events`) | [`api/asyncapi.yaml`](api/asyncapi.yaml) | [AsyncAPI Studio](https://studio.asyncapi.com/?url=https://raw.githubusercontent.com/jimisola/AutoLee/main/api/asyncapi.yaml) |
+| State object | [`api/schemas/state.schema.json`](api/schemas/state.schema.json) | (referenced by both) |
 
-SSE stream available at `/events` — pushes JSON state every 250 ms and log lines as `log` events.
+All state-changing endpoints and the OTA upload require **HTTP Digest auth**; reads
+(`GET /api/v1/state`, the dashboard, the SSE stream) are open.
+
+> The rendered links read the specs from `main` via raw.githubusercontent.com, so
+> they reflect the released contract rather than a work-in-progress branch.
 
 ---
 
 ## Version History
 
-| Version | Changes |
-|---|---|
-| **v1.8** | Firmware split into modular files (`config.h`, `motion.h`, `ui_touch.h`, `web_server.h`, `wifi_ota.h`) for maintainability — no functional changes from v1.7 (Arduino-era file names; the ESP-IDF port renamed these to `main/config.h`, `main/motion.cpp`, `main/ui_touch.cpp`, `main/web_server.cpp`, `main/wifi_mgr.*`) |
-| **v1.7** | WiFi Info moved to Configuration sub-menu; Reset WiFi button on WiFi info screen; speed profile buttons resized to fit display; WiFi info centered in card |
-| **v1.6** | Adjustable motor current (1,000–4,500 mA) via web; multi-page web UI (Main, Configuration, Log, Firmware, WiFi); touch UI restructured (Settings → Configuration sub-menu); WiFi page shows SSID + IP; SG text inputs with auto-submit on blur; profiles retuned (Slow 15kHz/350, Normal 35kHz/15, Fast 45kHz/1); all labels fitted to 172px display |
-| **v1.5** | Speed profiles (Slow/Normal/Fast) replace speed slider; per-profile SG thresholds; profile API |
-| **v1.4** | Captive portal WiFi; work zone SG blanking; RUN_DECEL 800k; median-of-5 SPI filter; sliding counter stall detection; 500-line log; redesigned web UI |
-| **v1.3** | Batch run; jam screen with return-home; runtime StallGuard monitoring; web log viewer |
-| **v1.2** | Web UI with SSE; OTA updates; endpoint tuning; WiFi AP/STA |
-| **v1.1** | Sensorless calibration; basic touch UI |
-| **v1.0** | Initial release |
+See [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
