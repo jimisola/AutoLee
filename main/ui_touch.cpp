@@ -436,7 +436,7 @@ static void on_calibrate(lv_event_t *e) {
 
 static void counter_timer_cb(lv_timer_t *t) {
   LV_UNUSED(t);
-  long shown = counter < 9999L ? counter : 9999L;
+  long shown = counter < COUNTER_MAX ? counter : COUNTER_MAX;
   if (counter_label) lv_label_set_text_fmt(counter_label, "%ld", shown);
   if (main_scr && lv_scr_act() == main_scr) {
     ui_update_main_warning();
@@ -475,7 +475,7 @@ void buildUI() {
   lv_obj_align_to(main_warn, lbl_speed_val, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
 
   counter_label = lv_label_create(mc);
-  lv_label_set_text_fmt(counter_label, "%ld", counter < 9999L ? counter : 9999L);
+  lv_label_set_text_fmt(counter_label, "%ld", counter < COUNTER_MAX ? counter : COUNTER_MAX);
   lv_obj_set_style_text_font(counter_label, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_set_style_text_color(counter_label, lv_color_hex(0x00FF00), LV_PART_MAIN);
   lv_obj_align(counter_label, LV_ALIGN_CENTER, 0, -10);
@@ -796,7 +796,7 @@ void buildUI() {
   auto br_cb = [](lv_event_t *e) {
     int32_t d = (int32_t)(intptr_t)lv_event_get_user_data(e);
     int32_t v = batchTarget + d;
-    batchTarget = clampi(v, 0, 9999);
+    batchTarget = clampi(v, 0, BATCH_TARGET_MAX);
     ui_update_batch_val();
   };
   lv_obj_add_event_cb(brM100, br_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-100);

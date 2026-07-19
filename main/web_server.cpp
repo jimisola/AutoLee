@@ -66,7 +66,7 @@ static std::string buildStateJSON() {
   st.currentMa = RUN_CURRENT_MA;
   st.profileIdx = activeProfile;
   st.profileName = profiles[activeProfile].name;
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < NUM_PROFILES; i++) {
     st.profiles[i] = {profiles[i].name, profiles[i].speed_hz, profiles[i].sg_trip};
   }
   st.wifiStatus = wfStat;
@@ -324,7 +324,7 @@ void setupWebServer() {
   server.on("/api/v1/batch", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("delta")) {
       int32_t v = batchTarget + atoi(req->getParam("delta", "0"));
-      batchTarget = (v < 0) ? 0 : (v > 9999 ? 9999 : v);
+      batchTarget = (v < 0) ? 0 : (v > BATCH_TARGET_MAX ? BATCH_TARGET_MAX : v);
     }
     if (req->hasParam("action")) {
       std::string a = req->getParam("action", "");

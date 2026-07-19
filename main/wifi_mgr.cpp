@@ -25,6 +25,11 @@ static constexpr int kFailBit = BIT1;
 
 static bool s_connected = false;
 static bool s_ap_mode = false;
+// True only once an initial STA connection has succeeded and we're committed to
+// staying on the network. Gates auto-reconnect so it can't fire during the
+// initial connect attempt (which must be allowed to time out and fall back to
+// the captive-portal AP) or in AP fallback mode.
+static bool s_sta_active = false;
 static esp_netif_t *s_sta_netif = nullptr;
 static esp_netif_t *s_ap_netif = nullptr;
 static std::string s_scanned_html;
@@ -34,9 +39,23 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
     esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    xEventGroupSetBits(s_wifi_event_group, kFailBit);
+    // Clear the flag so isConnected() stops lying the moment the link drops.
+    s_connected = false;
+    if (s_sta_active) {
+      // Established link dropped - keep trying to get back on. The supplicant
+      // spaces these internally, so this doesn't tight-loop; no explicit
+      // esp_timer backoff (kept out deliberately - unverifiable without WiFi
+      // hardware access this session, and the driver already rate-limits).
+      esp_wifi_connect();
+    } else {
+      // Still in the initial connect attempt (or AP fallback's idle STA):
+      // let connect_sta() time out on kFailBit and fall back to the AP.
+      xEventGroupSetBits(s_wifi_event_group, kFailBit);
+    }
   } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     (void)data;
+    // (Re)connected - restore the flag so a recovered link reads as connected.
+    s_connected = true;
     xEventGroupSetBits(s_wifi_event_group, kConnectedBit);
   }
 }
@@ -150,6 +169,7 @@ void start() {
     ESP_LOGI(TAG, "connecting to '%s'...", ssid.c_str());
     if (connect_sta(ssid, pass, 10000)) {
       s_connected = true;
+      s_sta_active = true;  // from now on, auto-reconnect if the link drops
       s_ap_mode = false;
       s_connected_ssid = ssid;
       esp_netif_ip_info_t ip_info;

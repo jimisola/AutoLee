@@ -64,6 +64,23 @@ static inline long flipTarget(long t) {
   return (t == endpointUp) ? endpointDown : endpointUp;
 }
 
+static inline int8_t clampSgt(int v) {
+  return (int8_t)(v < SGT_MIN ? SGT_MIN : (v > SGT_MAX ? SGT_MAX : v));
+}
+
+// Put the TMC5160 into sensorless (StallGuard2) mode: SpreadCycle (StealthChop
+// off), CoolStep threshold wide open so SG2 is always active, and the SGT
+// threshold applied. Shared by run, calibration, and homing - all fields are
+// independent COOLCONF/PWMCONF register fields (each a read-modify-write), so
+// callers may set semin/semax etc. separately before/after without ordering
+// concerns.
+static inline void tmc_enter_sensorless_mode(int8_t sgt) {
+  tmc5160::en_pwm_mode(false);
+  tmc5160::TPWMTHRS(0);
+  tmc5160::TCOOLTHRS(0xFFFFF);
+  tmc5160::sgt(sgt);
+}
+
 // Median-of-5 filter to reject SPI glitch spikes.
 uint16_t read_sg() {
   uint16_t s[5];
@@ -106,12 +123,9 @@ void startRunBetweenEndpoints() {
   lastDirectionChangeMs = millis();
 
   tmc5160::rms_current(RUN_CURRENT_MA);
-  tmc5160::en_pwm_mode(false);
-  tmc5160::TPWMTHRS(0);
-  tmc5160::TCOOLTHRS(0xFFFFF);
   tmc5160::semin(0);
   tmc5160::semax(0);
-  tmc5160::sgt((int8_t)(CAL_SGT < -64 ? -64 : (CAL_SGT > 63 ? 63 : CAL_SGT)));
+  tmc_enter_sensorless_mode(clampSgt(CAL_SGT));
 
   long pos = stepper::getCurrentPosition();
   if (nearPos(pos, endpointUp))
@@ -141,7 +155,7 @@ void handleMotion() {
       long pos = stepper::getCurrentPosition();
 
       if (!stepper::isRunning()) {
-        if (currentTarget == endpointDown && counter < 9999) {
+        if (currentTarget == endpointDown && counter < COUNTER_MAX) {
           counter++;
           if (batchActive) {
             batchCount++;
@@ -194,7 +208,7 @@ void handleMotion() {
       if (sg <= 1) break;
 
       static uint32_t lastSGPrintMs = 0;
-      if ((millis() - lastSGPrintMs) > 500) {
+      if ((millis() - lastSGPrintMs) > RUN_SG_LOG_INTERVAL_MS) {
         int32_t distToTarget = labs(pos - currentTarget);
         webLog("RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u", sg, RUN_SG_TRIP, pos,
                (long)distToTarget, (unsigned long)sinceChange, runSGHighCount, RUN_SG_HIGH_NEEDED);
@@ -202,7 +216,7 @@ void handleMotion() {
       }
 
       if (sg > RUN_SG_TRIP) {
-        if (runSGHighCount < RUN_SG_HIGH_NEEDED + 4) runSGHighCount++;
+        if (runSGHighCount < RUN_SG_HIGH_NEEDED + RUN_SG_HIGH_SATURATION_MARGIN) runSGHighCount++;
         runSGLowCount = 0;
 
         webLog("SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, RUN_SG_TRIP, runSGHighCount, pos,
@@ -230,7 +244,7 @@ void handleMotion() {
         }
       } else {
         runSGLowCount++;
-        if (runSGLowCount >= 3) {
+        if (runSGLowCount >= RUN_SG_LOW_DECAY_COUNT) {
           runSGLowCount = 0;
           if (runSGHighCount > 0) runSGHighCount--;
         }
@@ -240,7 +254,7 @@ void handleMotion() {
 
     case STOPPING: {
       long pos = stepper::getCurrentPosition();
-      if (!stepper::isRunning() || nearPos(pos, endpointUp, 10)) {
+      if (!stepper::isRunning() || nearPos(pos, endpointUp, STOP_ARRIVAL_TOL)) {
         if (stepper::isRunning()) stepper::forceStop();
         runState = IDLE;
         break;
@@ -277,7 +291,7 @@ void safeCreepHome() {
   if (found) {
     webLog("Creep home: found stop at %ld", hit_pos);
 
-    stepper::move(+300);
+    stepper::move(+CAL_OVERSHOOT_BACKOFF_STEPS);
     fas_wait_for_stop();
 
     stepper::setCurrentPosition(0);
@@ -314,11 +328,8 @@ static bool move_until_stall(int dir, long &hit_pos) {
   const uint32_t ignore_ms = autolee::calIgnoreMs(CAL_SPEED_HZ, CAL_ACCEL);
   const int32_t ignore_dst = autolee::calIgnoreDist(CAL_SPEED_HZ, CAL_ACCEL);
 
-  tmc5160::en_pwm_mode(false);
-  tmc5160::TPWMTHRS(0);
-  tmc5160::TCOOLTHRS(0xFFFFF);
-  int8_t sgt = (int8_t)(CAL_SGT < -64 ? -64 : (CAL_SGT > 63 ? 63 : CAL_SGT));
-  tmc5160::sgt(sgt);
+  int8_t sgt = clampSgt(CAL_SGT);
+  tmc_enter_sensorless_mode(sgt);
 
   webLog("MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d", dir, (long)start_pos,
          (unsigned long)ignore_ms, (long)ignore_dst, sgt);
@@ -341,7 +352,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
     const uint16_t sg = read_sg();
 
     static uint32_t lastMUSPrint = 0;
-    if ((now - lastMUSPrint) > 400) {
+    if ((now - lastMUSPrint) > CAL_MUS_LOG_INTERVAL_MS) {
       webLog("MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u", sg, (long)dist,
              (unsigned long)elapsed_ms, baseline_started, dyn_ready, dyn_trip);
       lastMUSPrint = now;
@@ -408,10 +419,7 @@ bool return_home_up_safe() {
   stepper::setSpeedInHz(HOME_SPEED_HZ);
   stepper::setAcceleration(HOME_ACCEL);
 
-  tmc5160::en_pwm_mode(false);
-  tmc5160::TPWMTHRS(0);
-  tmc5160::TCOOLTHRS(0xFFFFF);
-  tmc5160::sgt((int8_t)(CAL_SGT < -64 ? -64 : (CAL_SGT > 63 ? 63 : CAL_SGT)));
+  tmc_enter_sensorless_mode(clampSgt(CAL_SGT));
 
   const uint32_t start_ms = millis();
   uint8_t retries = 0;
@@ -432,7 +440,7 @@ bool return_home_up_safe() {
       return false;
     }
 
-    if (nearPos(pos, endpointUp, 20)) break;
+    if (nearPos(pos, endpointUp, HOME_ARRIVAL_TOL)) break;
 
     const int32_t moved = labs(pos - move_origin);
     const uint32_t time_moving = now - move_start_ms;
@@ -468,7 +476,7 @@ bool return_home_up_safe() {
   fas_wait_for_stop();
   long finalPos = stepper::getCurrentPosition();
   webLog("Home: pos=%ld tgt=%ld diff=%ld", finalPos, endpointUp, finalPos - endpointUp);
-  return nearPos(finalPos, endpointUp, 50);
+  return nearPos(finalPos, endpointUp, HOME_FINAL_TOL);
 }
 
 void setActiveProfile(uint8_t idx) {
@@ -504,7 +512,7 @@ bool calibrateEndpointsSensorless() {
     return false;
   }
 
-  stepper::move(+300);
+  stepper::move(+CAL_OVERSHOOT_BACKOFF_STEPS);
   fas_wait_for_stop();
   stepper::setCurrentPosition(0);
   rawUp = 0;
@@ -519,7 +527,7 @@ bool calibrateEndpointsSensorless() {
     return false;
   }
 
-  stepper::move(-300);
+  stepper::move(-CAL_OVERSHOOT_BACKOFF_STEPS);
   fas_wait_for_stop();
   rawDown = stepper::getCurrentPosition();
 

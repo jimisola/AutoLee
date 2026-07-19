@@ -65,6 +65,9 @@ static constexpr int32_t CAL_PREMOVE_DOWN_STEPS = 5500;
 //  CALIBRATION CONSTANTS
 // ==========================================================================
 static constexpr int8_t CAL_SGT = -1;
+// TMC5160 SGT (StallGuard2 threshold) COOLCONF field is a signed 7-bit value.
+static constexpr int8_t SGT_MIN = -64;
+static constexpr int8_t SGT_MAX = 63;
 extern uint16_t RUN_CURRENT_MA;  // defined in globals.cpp
 static constexpr uint16_t RUN_CURRENT_MIN = 1000;
 static constexpr uint16_t RUN_CURRENT_MAX = 4500;
@@ -75,6 +78,9 @@ static constexpr int32_t CAL_SEARCH_STEPS = 120000;
 static constexpr uint16_t CAL_ABS_MIN = 12;
 static constexpr uint8_t CAL_REL_DROP_Q8 = 235;
 static constexpr uint8_t CAL_HIT_CONFIRM = 2;
+// After hitting a mechanical stop, back off this many steps before re-zeroing
+// so position 0 sits just off the hard stop (used at both endpoints + home).
+static constexpr int32_t CAL_OVERSHOOT_BACKOFF_STEPS = 300;
 
 static constexpr uint32_t EARLY_WINDOW_MS = 300;
 static constexpr int32_t EARLY_WINDOW_DST_MAX = 1200;
@@ -92,6 +98,11 @@ static constexpr int32_t HOME_MIN_MOVE = 600;
 static constexpr int32_t HOME_RELEASE_STEPS = 1200;
 static constexpr uint8_t HOME_MAX_RETRIES = 2;
 static constexpr uint32_t HOME_TIMEOUT_MS = 15000;
+// Position tolerances (steps) for "arrived at the UP endpoint":
+//   - HOME_ARRIVAL_TOL: break the return-home polling loop
+//   - HOME_FINAL_TOL:   accept the final settled position as home
+static constexpr long HOME_ARRIVAL_TOL = 20;
+static constexpr long HOME_FINAL_TOL = 50;
 
 // ==========================================================================
 //  RUNTIME STALL DETECTION
@@ -100,6 +111,16 @@ static constexpr uint16_t RUN_SG_TRIP_MIN = 0;
 static constexpr uint16_t RUN_SG_TRIP_MAX = 500;
 static constexpr int32_t RUN_BACKOFF_STEPS = 1000;  // steps to back off after jam
 static constexpr uint8_t RUN_SG_HIGH_NEEDED = 2;    // need this many high readings to trigger jam
+// Extra headroom the high-reading counter may climb past RUN_SG_HIGH_NEEDED
+// before saturating (so a burst of high readings can't overflow the counter).
+static constexpr uint8_t RUN_SG_HIGH_SATURATION_MARGIN = 4;
+// Consecutive below-trip readings needed to decay the high counter by one
+// (debounces transient dips so a real jam isn't un-counted by noise).
+static constexpr uint8_t RUN_SG_LOW_DECAY_COUNT = 3;
+// Throttle for the periodic RUN-phase SG telemetry line to the web log.
+static constexpr uint32_t RUN_SG_LOG_INTERVAL_MS = 500;
+// Throttle for the periodic calibration (move-until-stall) SG telemetry line.
+static constexpr uint32_t CAL_MUS_LOG_INTERVAL_MS = 400;
 
 // Work zone: skip SG monitoring near the DOWN endpoint where the tool
 // does useful work (e.g. pushing primers). The resistance here is normal
@@ -131,6 +152,16 @@ static constexpr uint32_t SSE_INTERVAL_MS = 250;
 //  STOP TIMEOUT
 // ==========================================================================
 static constexpr uint32_t STOP_TIMEOUT_MS = 8000;
+// Position tolerance (steps) for treating the graceful stop as arrived at UP.
+static constexpr long STOP_ARRIVAL_TOL = 10;
+
+// ==========================================================================
+//  UI COUNTER / BATCH LIMITS
+// ==========================================================================
+// 4-digit ceiling shared by the lifetime cycle counter and the batch target
+// (both rendered in a 4-char field on the 172px display).
+static constexpr long COUNTER_MAX = 9999;
+static constexpr int BATCH_TARGET_MAX = 9999;
 
 // ==========================================================================
 //  TASK WATCHDOG (safety)

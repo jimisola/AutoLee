@@ -37,6 +37,12 @@ foreach(suite ${test_suites})
     target_include_directories(${suite} PRIVATE "${AUTOLEE_LOGIC_DIR}")
     target_link_libraries(${suite} PRIVATE unity)
     target_compile_options(${suite} PRIVATE -Wall -Wextra -Werror)
+    # Absolute path to the shared JSON contract example, so test_state_json can
+    # assert the serializer stays byte-for-byte in sync with the contract file
+    # (api/schemas/state.example.json, which CI validates against the schema).
+    # Harmless for the suites that don't use it.
+    target_compile_definitions(${suite} PRIVATE
+      STATE_EXAMPLE_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../api/schemas/state.example.json")
     if(AUTOLEE_COVERAGE)
       target_compile_options(${suite} PRIVATE --coverage -O0 -g)
       target_link_options(${suite} PRIVATE --coverage)
