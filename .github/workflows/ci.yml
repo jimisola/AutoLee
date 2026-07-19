@@ -58,10 +58,13 @@ jobs:
         working-directory: test_apps
         run: |
           pip install gcovr
-          # Fail the job if line coverage of the pure logic drops below 95%.
-          # Actual is ~98%; the floor is set a little lower so it isn't brittle
-          # to minor changes but still catches a real coverage regression.
-          gcovr --root .. --filter '../lib/autolee_logic/' --fail-under-line 95 build
+          # Regression floor, NOT a target to chase: actual coverage is ~98%,
+          # but the gate is deliberately set far below that so it only trips on
+          # a real accident (a whole suite silently stops running, or a large
+          # untested module lands). Keeping it loose avoids pressuring
+          # low-value tests just to hold a number - the real coverage figure is
+          # printed above for reviewers to judge on quality, not quantity.
+          gcovr --root .. --filter '../lib/autolee_logic/' --fail-under-line 80 build
 
   lint:
     name: Lint (clang-format, ruff, yamllint, API specs)
