@@ -6,10 +6,12 @@
 # Requires IDF_PATH (i.e. ESP-IDF's export.sh sourced) only to locate the
 # vendored Unity source.
 #
-# Deliberately `test/`, not ESP-IDF's `test_apps/` convention: `test_apps/` means
-# an on-target application you flash and run on the chip, which these are not.
-# Naming them that would imply hardware tests we don't have. If genuine on-target
-# tests are added later, `test_apps/` is free for them.
+# Named per ESP-IDF convention: `host_test/` is what ESP-IDF itself uses for
+# tests that run on the build machine (9 components in v5.3.2, e.g. esp_event,
+# nvs_flash, log). Deliberately NOT `test_apps/` - that convention (77
+# components) means an on-target application you flash and run on the chip,
+# which these are not. If genuine on-target tests are added later, `test_apps/`
+# is free for them.
 cmake_minimum_required(VERSION 3.16)
 project(autolee_logic_tests C CXX)
 

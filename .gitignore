@@ -7,9 +7,9 @@ managed_components/
 *.elf
 *.map
 
-# test/ host tests (plain CMake, out-of-tree build dirs)
-test/build/
-test/build-coverage/
+# host_test/ (plain CMake, out-of-tree build dirs)
+host_test/build/
+host_test/build-coverage/
 
 # OS cruft
 .DS_Store

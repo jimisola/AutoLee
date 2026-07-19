@@ -20,7 +20,7 @@
 #include "freertos/task.h"
 #include "driver/spi_master.h"
 
-// Pure, host-tested logic shared with the native unit tests (test/).
+// Pure, host-tested logic shared with the native unit tests (host_test/).
 #include "endpoint_math.h"
 #include "sg_filter.h"
 #include "sg_blanking.h"

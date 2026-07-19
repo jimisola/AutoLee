@@ -7,15 +7,35 @@ to build, test, and release the firmware.
 
 | Path | Purpose |
 |---|---|
-| `main/` | The firmware: `app_main.cpp` (entry point), `config.h` (pins, speed profiles, tuning constants), and the hardware modules (`display_touch.*`, `axs5106l_touch.*`, and more as they're ported — see `docs/PLAN.md`). |
+| `main/` | The firmware, grouped by concern (see below). |
 | `lib/autolee_logic/` | Pure, hardware-independent logic (endpoint math, SG filter/blanking, stall FSM, batch, log ring, calibration, state JSON, motor FSM). Shared by the firmware **and** the host tests, so tested code == shipped code. |
-| `test/` | Host unit tests — one folder per module, plus the CMake+CTest harness that builds them. |
+| `host_test/` | Host unit tests — one folder per module, plus the CMake+CTest harness that builds them. |
 | `api/` (`openapi.yaml`, `asyncapi.yaml`, `schemas/`) | API contract (shared JSON Schema + REST/SSE specs). |
 | `include/lv_conf.h` | LVGL config (found via `-D LV_CONF_INCLUDE_SIMPLE`, wired project-wide in the root `CMakeLists.txt`). |
 | `CMakeLists.txt`, `partitions.csv`, `sdkconfig.defaults` | ESP-IDF build config. |
-| `tools/mock_server.py` | Run the web UI on your desktop without hardware (once the web server is ported — see `docs/PLAN.md` Phase 5). |
-| `docs/adr/` | Architecture decision records — why ESP-IDF, what was considered, what it costs. |
-| `docs/PLAN.md` | The active migration checklist. |
+| `tools/mock_server.py` | Run the web UI on your desktop without hardware. |
+| `docs/` | [Wiring](docs/wiring.md), [Bill of Materials](docs/bill-of-materials.md), [PLAN.md](docs/PLAN.md) (migration checklist), `adr/` (architecture decision records), and the [upstream v1.10.0 diff](docs/upstream-v1.10.0-diff.md). |
+
+### Inside `main/`
+
+Grouped by concern. All groups are also on `INCLUDE_DIRS` (see `main/CMakeLists.txt`), so
+`#include "motion.h"` resolves from anywhere — the grouping is navigational, not a
+compiler-enforced module boundary.
+
+| Path | Purpose |
+|---|---|
+| `main/` | `app_main.cpp` (entry point), `config.h` (pins, speed profiles, tuning constants), `globals.{h,cpp}` (cross-module mutable state). |
+| `main/drivers/` | `display_touch`, `axs5106l_touch`, `tmc5160_hal`, `tmc5160_ctrl`, `stepper`, `stepper_motor_encoder`. |
+| `main/motion/` | `motion.{h,cpp}` — the safety-critical run / jam-detection / calibration / homing state machine. |
+| `main/net/` | `wifi_mgr`, `web_server`, `index_html.h` (the compiled-in web UI). |
+| `main/ui/` | `ui_touch` — the on-device LVGL UI. |
+
+### Why `host_test/`, not `test/` or `test_apps/`
+
+ESP-IDF uses `host_test/` for tests that run on the build machine and `test_apps/` for
+on-target applications you flash to a chip (77 components use `test_apps/`, 9 use
+`host_test/` in v5.3.2). Ours are host tests, so `host_test/` it is — and `test_apps/`
+stays free should real on-target tests ever be added.
 
 ## Toolchain
 
@@ -35,21 +55,24 @@ Dependencies (LVGL, `esp_lvgl_port`) are pinned in `main/idf_component.yml` and 
 automatically by the ESP-IDF Component Manager on first build; `dependencies.lock` is committed
 for reproducibility. `managed_components/` (the downloaded source) is gitignored.
 
-> ESP32-C6 needs **ESP-IDF >= 5.3** (FastAccelStepper's I2S-mux step driver requirement).
+> ESP32-C6 needs **ESP-IDF >= 5.3**, enforced by `main/idf_component.yml`'s `idf: ">=5.3"` —
+> the version this port was built and tested against. (An earlier note credited
+> FastAccelStepper's I2S-mux driver; that library was dropped for a native RMT+PCNT
+> stepper — see ADR 0001.)
 
 ### Host tests
 
-Pure logic goes in `lib/autolee_logic/` and is covered by a Unity suite in `test/test_<module>/`.
+Pure logic goes in `lib/autolee_logic/` and is covered by a Unity suite in `host_test/test_<module>/`.
 Run them (no hardware needed):
 
 ```bash
-cd test
+cd host_test
 cmake -B build
 cmake --build build -j
 cd build && ctest --output-on-failure
 ```
 
-For coverage: `cmake -B build -DAUTOLEE_COVERAGE=ON`, then run `gcovr --root .. --filter '../lib/autolee_logic/' build` from `test/`.
+For coverage: `cmake -B build -DAUTOLEE_COVERAGE=ON`, then run `gcovr --root .. --filter '../lib/autolee_logic/' build` from `host_test/`.
 
 Keep new algorithmic logic in `lib/autolee_logic/` (not inline in `main/`) so it can be tested on
 the host and reused by the firmware.
@@ -79,8 +102,9 @@ configurable.
 
 - The firmware version lives in `main/config.h` as `FW_VERSION` (single source of truth; read by
   the serial banner). Keep the README version history consistent when bumping.
-- The CI release pipeline (build + `idf.py merge-bin` + GitHub Release) is not yet ported to
-  ESP-IDF — see `docs/PLAN.md` Phase 7.
+- The CI release pipeline (build + `idf.py merge-bin` + GitHub Release) lives in
+  `.github/workflows/release.yml` and fires on `release: published`. A version guard fails the
+  build if the tag doesn't match `FW_VERSION`.
 
 ## Local hooks (optional)
 

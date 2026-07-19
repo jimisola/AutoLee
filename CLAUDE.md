@@ -39,17 +39,17 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
   core dump to flash, brownout detection — see `docs/adr/0001-*.md` for what each concretely buys
   over the old Arduino/PlatformIO setup.
 - **Pure logic + tests:** hardware-independent algorithms live in `lib/autolee_logic/` (registered
-  as an ESP-IDF component) and are covered by Unity suites in `test/`, which also holds the
+  as an ESP-IDF component) and are covered by Unity suites in `host_test/`, which also holds the
   CMake + CTest harness that builds them (deliberately *not* named `test_apps/` — that ESP-IDF
   convention means on-target apps you flash to the chip; these are host tests):
   ```bash
-  cd test && cmake -B build && cmake --build build -j && cd build && ctest --output-on-failure
+  cd host_test && cmake -B build && cmake --build build -j && cd build && ctest --output-on-failure
   ```
   Add `-DAUTOLEE_COVERAGE=ON` to the `cmake -B build` step for gcov/gcovr coverage.
 - **LVGL setup:** `include/lv_conf.h` is found via `-D LV_CONF_INCLUDE_SIMPLE` (set project-wide in
   the root `CMakeLists.txt`) — must stay visible to every component that includes `lvgl.h`.
 
-Pure-logic changes can be verified with the `test/` host tests; full hardware behavior still
+Pure-logic changes can be verified with the `host_test/` host tests; full hardware behavior still
 requires flashing to the board.
 
 ## Architecture
@@ -81,7 +81,7 @@ module boundary the compiler enforces:
   8 `lv_indev_drv_t`.
 - **`lib/autolee_logic/`** — pure, hardware-independent modules (endpoint math, SG filter/blanking,
   stall FSM, batch, log ring, calibration, state JSON, motor FSM), header-only, no ESP-IDF or
-  Arduino dependency. Shared by the firmware **and** the host tests in `test/`, so tested code
+  Arduino dependency. Shared by the firmware **and** the host tests in `host_test/`, so tested code
   == shipped code.
 
 ### Shared SPI bus
