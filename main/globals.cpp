@@ -43,7 +43,8 @@ uint32_t rebootRequestMs = 0;
 autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
 uint32_t logSentSerial = 0;
 
-lv_obj_t *main_scr = nullptr, *settings_scr = nullptr, *config_scr = nullptr, *profile_scr = nullptr;
+lv_obj_t *main_scr = nullptr, *settings_scr = nullptr, *config_scr = nullptr,
+         *profile_scr = nullptr;
 lv_obj_t *tuning_scr = nullptr, *ep_up_scr = nullptr, *ep_dn_scr = nullptr;
 lv_obj_t *wifi_scr = nullptr;
 lv_obj_t *counter_label = nullptr, *main_warn = nullptr, *main_warn_lbl = nullptr;

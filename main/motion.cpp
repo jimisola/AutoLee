@@ -196,8 +196,7 @@ void handleMotion() {
       if ((millis() - lastSGPrintMs) > 500) {
         int32_t distToTarget = labs(pos - currentTarget);
         webLog("RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u", sg, RUN_SG_TRIP, pos,
-               (long)distToTarget, (unsigned long)sinceChange, runSGHighCount,
-               RUN_SG_HIGH_NEEDED);
+               (long)distToTarget, (unsigned long)sinceChange, runSGHighCount, RUN_SG_HIGH_NEEDED);
         lastSGPrintMs = millis();
       }
 
