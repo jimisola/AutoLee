@@ -25,7 +25,23 @@ void init(spi_host_device_t spi_host, float r_sense_ohm) {
   gpio_config(&diag_cfg);  // configured but not read - see CLAUDE.md; SG polled over SPI
 
   // Mirrors the original Arduino firmware's TMCStepper setup() sequence.
-  tmc5160_fieldWrite(kIcID, TMC5160_TOFF_FIELD, 5);
+  // TOFF=4 (was 5): shorter slow-decay phase per chopper cycle, tuned upstream
+  // for low-speed high-load torque. TBL=1 -> 24 tCLK comparator blank time.
+  // INTPOL: MicroPlyer interpolates 16 microsteps to 256 internally - smoother
+  // motion at no torque cost.
+  //
+  // *** All three come from Karl's upstream v1.10.0 and are UNVERIFIED on this
+  // port's hardware. They change torque/smoothness characteristics; confirm on
+  // the bench rig before trusting them on the press (docs/PLAN.md Phase 4). ***
+  //
+  // Note: upstream had to write TBL as a raw register field because
+  // TMCStepper's blank_time() silently no-ops on the value 1 (it expects
+  // 16/24/36/54 clock counts). We use TMC-API's field writes throughout, so we
+  // are not exposed to that particular trap - but the value below is the raw
+  // TBL field encoding, not a clock count.
+  tmc5160_fieldWrite(kIcID, TMC5160_TOFF_FIELD, 4);
+  tmc5160_fieldWrite(kIcID, TMC5160_TBL_FIELD, 1);
+  tmc5160_fieldWrite(kIcID, TMC5160_INTPOL_FIELD, 1);
   tmc5160_fieldWrite(kIcID, TMC5160_MRES_FIELD, 4);         // 16 microsteps: log2(256/16)=4
   tmc5160_fieldWrite(kIcID, TMC5160_EN_PWM_MODE_FIELD, 0);  // SpreadCycle, not StealthChop
   tmc5160_fieldWrite(kIcID, TMC5160_TPWMTHRS_FIELD, 0);

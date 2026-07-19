@@ -40,6 +40,10 @@ static std::atomic<uint32_t> s_speedHz{1000};
 static std::atomic<uint32_t> s_accel{4000};  // steps/s^2
 static std::atomic<bool> s_running{false};
 static std::atomic<bool> s_stopRequested{false};
+// Set by moveTo() when a move is already in flight: asks move_task to abandon
+// the current profile at the next chunk boundary and start the new target
+// immediately, instead of finishing the whole stroke first (see moveTo()).
+static std::atomic<bool> s_retarget{false};
 static std::atomic<int32_t> s_targetPosition{0};
 static std::atomic<int32_t> s_zeroOffset{0};  // getCurrentPosition() = pcnt_count + s_zeroOffset
 
@@ -56,13 +60,13 @@ static int32_t pcnt_position() {
 // so forceStop() can interrupt it promptly. Blocking (call from the move task).
 static void transmit_uniform(rmt_encoder_handle_t uniform_encoder, uint32_t freq_hz,
                              uint32_t count) {
-  if (count == 0 || s_stopRequested.load()) return;
+  if (count == 0 || s_stopRequested.load() || s_retarget.load()) return;
   uint32_t chunk_pulses = (freq_hz * kCruiseChunkMs) / 1000;
   if (chunk_pulses < 1) chunk_pulses = 1;
 
   rmt_transmit_config_t tx_cfg = {};
   uint32_t remaining = count;
-  while (remaining > 0 && !s_stopRequested.load()) {
+  while (remaining > 0 && !s_stopRequested.load() && !s_retarget.load()) {
     uint32_t this_chunk = remaining < chunk_pulses ? remaining : chunk_pulses;
     tx_cfg.loop_count = (int)this_chunk - 1;  // loop_count=0 means "once"
     rmt_transmit(s_rmt_chan, uniform_encoder, &freq_hz, sizeof(freq_hz), &tx_cfg);
@@ -74,7 +78,7 @@ static void transmit_uniform(rmt_encoder_handle_t uniform_encoder, uint32_t freq
 // Transmits one accel (start_hz -> end_hz) or decel (end_hz -> start_hz)
 // curve of `points` pulses. Blocking.
 static void transmit_curve(uint32_t start_hz, uint32_t end_hz, uint32_t points) {
-  if (points == 0 || start_hz == end_hz || s_stopRequested.load()) return;
+  if (points == 0 || start_hz == end_hz || s_stopRequested.load() || s_retarget.load()) return;
   stepper_motor_curve_encoder_config_t cfg = {};
   cfg.resolution = kResolutionHz;
   cfg.sample_points = points;
@@ -96,7 +100,12 @@ static void move_task(void *) {
 
   for (;;) {
     xSemaphoreTake(s_moveRequest, portMAX_DELAY);
+    // Reset both here, in the single task that owns them, rather than in
+    // moveTo(): a producer clearing s_stopRequested could otherwise wipe a
+    // stop another caller had just requested (review finding #7).
     s_stopRequested.store(false);
+    s_retarget.store(false);
+    s_running.store(true);
 
     int32_t target = s_targetPosition.load();
     int32_t start_pos = pcnt_position();
@@ -139,7 +148,11 @@ static void move_task(void *) {
     transmit_uniform(uniform_encoder, target_hz, cruise_points);
     transmit_curve(target_hz, kMinFreqHz, decel_points);
 
-    s_running.store(false);
+    // Only report stopped if no new target arrived mid-move. If one did, the
+    // semaphore moveTo() gave is already pending, so the next take() returns
+    // immediately and motion continues without ever reading as idle - which
+    // would otherwise let handleMotion() treat a retarget as "move complete".
+    if (!s_retarget.load()) s_running.store(false);
   }
 }
 
@@ -192,9 +205,24 @@ void setAcceleration(uint32_t steps_per_s2) {
   s_accel.store(steps_per_s2);
 }
 
+// Start (or redirect) a move to an absolute position.
+//
+// If a move is already in flight this RETARGETS it: the current profile is
+// abandoned at the next chunk boundary and the new target starts immediately.
+// Before this, a mid-move moveTo() only took effect after the current stroke
+// finished - so requestGracefulStop() would run the press all the way to the
+// end of its travel before heading home, and STOPPING->IDLE could be reported
+// while it was still moving (review finding #6).
+//
+// Deliberately does NOT clear s_stopRequested - move_task does that when it
+// actually begins the new move (review finding #7).
+//
+// *** Interrupt latency is bounded by one cruise chunk (kCruiseChunkMs) OR one
+// accel/decel curve, whichever is in flight: the curve encoders transmit in a
+// single shot and cannot be interrupted mid-curve. UNVERIFIED ON HARDWARE. ***
 void moveTo(int32_t absolute_position) {
   s_targetPosition.store(absolute_position);
-  s_stopRequested.store(false);
+  if (s_running.load()) s_retarget.store(true);
   s_running.store(true);
   xSemaphoreGive(s_moveRequest);
 }

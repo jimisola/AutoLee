@@ -23,6 +23,7 @@
 // Pure, host-tested logic shared with the native unit tests (host_test/).
 #include "endpoint_math.h"
 #include "sg_filter.h"
+#include "stall_monitor.h"
 #include "sg_blanking.h"
 #include "batch.h"
 #include "calibration.h"
@@ -62,6 +63,19 @@ static inline bool nearPos(long a, long b, long tol = 2) {
 }
 static inline long flipTarget(long t) {
   return (t == endpointUp) ? endpointDown : endpointUp;
+}
+
+// Runtime jam detection uses the host-tested StallCounter (review finding #4:
+// tested == shipped) instead of an inline copy of the same sliding-counter
+// logic. runSGHighCount/runSGLowCount are mirrored from it purely so the
+// telemetry lines keep reporting the same numbers.
+static autolee::StallCounter s_stall(RUN_SG_HIGH_NEEDED, RUN_SG_HIGH_SATURATION_MARGIN,
+                                     RUN_SG_LOW_DECAY_COUNT);
+
+static inline void resetStallCounter() {
+  s_stall.reset();
+  runSGHighCount = 0;
+  runSGLowCount = 0;
 }
 
 static inline int8_t clampSgt(int v) {
@@ -118,8 +132,7 @@ void recomputeEffectiveEndpoints() {
 void startRunBetweenEndpoints() {
   if (!endpointsCalibrated) return;
   runState = RUNNING;
-  runSGHighCount = 0;
-  runSGLowCount = 0;
+  resetStallCounter();
   lastDirectionChangeMs = millis();
 
   tmc5160::rms_current(RUN_CURRENT_MA);
@@ -174,8 +187,7 @@ void handleMotion() {
         }
         currentTarget = flipTarget(currentTarget);
         lastDirectionChangeMs = millis();
-        runSGHighCount = 0;
-        runSGLowCount = 0;
+        resetStallCounter();
         stepper::setSpeedInHz(ui_speed_hz);
         stepper::setAcceleration(RUN_DECEL);
         stepper::moveTo(currentTarget);
@@ -193,8 +205,7 @@ void handleMotion() {
       // Work zone: skip SG near DOWN where primer-seating resistance is normal.
       if (currentTarget == endpointDown &&
           autolee::inWorkZone(pos, endpointDown, SG_WORK_ZONE_STEPS)) {
-        runSGHighCount = 0;
-        runSGLowCount = 0;
+        resetStallCounter();
         break;
       }
 
@@ -225,14 +236,15 @@ void handleMotion() {
         lastSGPrintMs = millis();
       }
 
-      if (sg > RUN_SG_TRIP) {
-        if (runSGHighCount < RUN_SG_HIGH_NEEDED + RUN_SG_HIGH_SATURATION_MARGIN) runSGHighCount++;
-        runSGLowCount = 0;
+      const bool jam = s_stall.update(sg, RUN_SG_TRIP);
+      runSGHighCount = s_stall.highCount();
+      runSGLowCount = s_stall.lowCount();
 
+      if (sg > RUN_SG_TRIP) {
         webLog("SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, RUN_SG_TRIP, runSGHighCount, pos,
                (unsigned long)sinceChange);
 
-        if (runSGHighCount >= RUN_SG_HIGH_NEEDED) {
+        if (jam) {
           webLog("JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg, RUN_SG_TRIP, pos, currentTarget,
                  runSGHighCount);
 
@@ -248,15 +260,8 @@ void handleMotion() {
           fas_wait_for_stop();
 
           runState = STALLED;
-          runSGHighCount = 0;
-          runSGLowCount = 0;
+          resetStallCounter();
           showJamScreen();
-        }
-      } else {
-        runSGLowCount++;
-        if (runSGLowCount >= RUN_SG_LOW_DECAY_COUNT) {
-          runSGLowCount = 0;
-          if (runSGHighCount > 0) runSGHighCount--;
         }
       }
       break;
@@ -353,7 +358,9 @@ static bool move_until_stall(int dir, long &hit_pos) {
   uint16_t base_cnt = 0;
   bool dyn_ready = false;
   uint16_t dyn_trip = CAL_ABS_MIN;
-  uint8_t confirm_dyn = 0, confirm_early = 0;
+  // Host-tested ConfirmCounter instead of inline ++/reset counters (#4).
+  autolee::ConfirmCounter confirm_early(CAL_HIT_CONFIRM);
+  autolee::ConfirmCounter confirm_dyn(CAL_HIT_CONFIRM);
 
   while (stepper::isRunning()) {
     const uint32_t now = millis();
@@ -371,16 +378,13 @@ static bool move_until_stall(int dir, long &hit_pos) {
     if (autolee::earlyArmed(
             {EARLY_WINDOW_MS, EARLY_WINDOW_DST_MAX, EARLY_MIN_TIME_MS, EARLY_MIN_MOVE_STEPS},
             elapsed_ms, dist)) {
-      if (sg <= EARLY_TRIP) {
-        if (++confirm_early >= CAL_HIT_CONFIRM) {
-          webLog("MUS: EARLY HIT sg=%u pos=%ld", sg, (long)stepper::getCurrentPosition());
-          stepper::forceStop();
-          fas_wait_for_stop();
-          hit_pos = stepper::getCurrentPosition();
-          return true;
-        }
-      } else
-        confirm_early = 0;
+      if (confirm_early.feed(sg <= EARLY_TRIP)) {
+        webLog("MUS: EARLY HIT sg=%u pos=%ld", sg, (long)stepper::getCurrentPosition());
+        stepper::forceStop();
+        fas_wait_for_stop();
+        hit_pos = stepper::getCurrentPosition();
+        return true;
+      }
     }
 
     if (!baseline_started && autolee::baselineReady(elapsed_ms, dist, ignore_ms, ignore_dst)) {
@@ -388,7 +392,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
       base_start_ms = now;
       base_sum = 0;
       base_cnt = 0;
-      confirm_dyn = 0;
+      confirm_dyn.reset();
     }
     if (baseline_started && !dyn_ready) {
       base_sum += sg;
@@ -402,17 +406,14 @@ static bool move_until_stall(int dir, long &hit_pos) {
     }
 
     if (dyn_ready) {
-      if (sg <= dyn_trip) {
-        if (++confirm_dyn >= CAL_HIT_CONFIRM) {
-          webLog("MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip,
-                 (long)stepper::getCurrentPosition());
-          stepper::forceStop();
-          fas_wait_for_stop();
-          hit_pos = stepper::getCurrentPosition();
-          return true;
-        }
-      } else
-        confirm_dyn = 0;
+      if (confirm_dyn.feed(sg <= dyn_trip)) {
+        webLog("MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip,
+               (long)stepper::getCurrentPosition());
+        stepper::forceStop();
+        fas_wait_for_stop();
+        hit_pos = stepper::getCurrentPosition();
+        return true;
+      }
     }
 
     wdt_feed();
@@ -435,7 +436,7 @@ bool return_home_up_safe() {
   uint8_t retries = 0;
   long move_origin = stepper::getCurrentPosition();
   uint32_t move_start_ms = millis();
-  uint8_t confirm_count = 0;
+  autolee::ConfirmCounter confirm_count(HOME_CONFIRM);
 
   stepper::moveTo(endpointUp);
 
@@ -457,26 +458,23 @@ bool return_home_up_safe() {
 
     if (time_moving >= HOME_MIN_MS && moved >= HOME_MIN_MOVE) {
       const uint16_t sg = read_sg();
-      if (sg <= HOME_SG_TRIP) {
-        if (++confirm_count >= HOME_CONFIRM) {
-          webLog("Home: stall @%ld retry %d", pos, retries);
-          stepper::forceStop();
-          fas_wait_for_stop();
-          stepper::move(+HOME_RELEASE_STEPS);
-          fas_wait_for_stop();
+      if (confirm_count.feed(sg <= HOME_SG_TRIP)) {
+        webLog("Home: stall @%ld retry %d", pos, retries);
+        stepper::forceStop();
+        fas_wait_for_stop();
+        stepper::move(+HOME_RELEASE_STEPS);
+        fas_wait_for_stop();
 
-          if (retries >= HOME_MAX_RETRIES) {
-            webLog("Home: max retries");
-            return false;
-          }
-          retries++;
-          confirm_count = 0;
-          move_origin = stepper::getCurrentPosition();
-          move_start_ms = millis();
-          stepper::moveTo(endpointUp);
+        if (retries >= HOME_MAX_RETRIES) {
+          webLog("Home: max retries");
+          return false;
         }
-      } else
-        confirm_count = 0;
+        retries++;
+        confirm_count.reset();
+        move_origin = stepper::getCurrentPosition();
+        move_start_ms = millis();
+        stepper::moveTo(endpointUp);
+      }
     }
 
     wdt_feed();

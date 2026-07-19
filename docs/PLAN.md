@@ -58,13 +58,13 @@ first for the *why* and the per‑subsystem analysis.
 - [x] Ported `motion.cpp`'s algorithms (calibration phases, sliding‑counter jam detection, homing/creep, `handleMotion` state machine) verbatim onto the above (`main/motion.cpp`) — only the plumbing changed (TMCStepper→`tmc5160::`, FastAccelStepper→`stepper::`, `millis()`/`delay()`→`esp_timer`/`vTaskDelay`), safety logic unchanged. UI hooks (`showJamScreen()` etc.) are logged stubs pending Phase 3's UI port.
 - **DoD:** ⚙️ **not yet met — build/boot-verified only, zero hardware verification.** No motor/TMC5160 rig was connected while this was written (bare ESP32-C6 board only). Before trusting on the real press: calibration finds UP/DOWN stops; a run cycle; **jam detection triggers + safe return‑home**; speed‑profile change; and specifically confirm `forceStop()`'s actual latency (designed bound: one `kCruiseChunkMs` chunk, see `stepper.cpp`) is acceptable. Needs a safety-focused code review before that bench session, not just before shipping.
 
-### Concurrency/motion-safety rework — do as ONE coherent piece with the bench session (from PR #4 review, findings #2-#8)
+### Concurrency/motion-safety rework — CODE COMPLETE, bench verification outstanding (from PR #4 review, findings #2-#8)
 The Arduino cooperative `loop()` became several FreeRTOS tasks (`pump_task`, LVGL, HTTP, `sse_task`), so motion state and the shared SPI bus are now touched concurrently with no synchronization. These findings are all facets of that one root cause, touch the same files, and must be fixed together (fixing one in isolation risks half-measures). Deliberately slotted here, not done earlier, because they can only be *meaningfully* verified with the motor rig attached — the same session + safety review this phase already requires. Suggested internal order:
-- [ ] **#8 + #2 (foundation):** collect the ~40 cross-task motion/endpoint/batch globals into one struct owned by `pump_task`, snapshot under a critical section; route ALL motion-affecting commands (run/stop/batch/profile/current — not just calibrate/home) through the deferred request-flag/queue pattern so only `pump_task` touches the stepper/TMC. Also fixes the TOCTOU on the calibrate guard.
-- [ ] **#6 + #7 (stepper stop/retarget semantics):** manage `s_running` inside `move_task` so `isRunning()` is true for the whole queued move; make `requestGracefulStop()` actually interrupt the in-flight move (`forceStop()` first, or live retargeting) instead of finishing the full stroke; serialize move submission so a second `moveTo()` can't clear a `s_stopRequested` a concurrent `forceStop()` just set.
-- [ ] **#3 (SPI bus lock):** wrap the TMC CS-toggle + transfer in `spi_device_acquire_bus()`/`release_bus()` so a StallGuard read can't interleave with the LVGL display flush on the shared bus (corrupting the safety-path SG value).
-- [ ] **#4 (tested == shipped):** once the command path is clean, route the firmware through the already-host-tested `StallCounter` / `motorTransition`+`canStart` / `ConfirmCounter` modules (`lib/autolee_logic/`) instead of the inline re-implementations, so the "can't Start from Stalled" rule etc. is enforced by tested code — or delete the modules if genuinely superseded.
-- [ ] **#5 (OTA handle leak):** on every OTA failure path call `esp_ota_abort()` and reset the handle/partition/flag (add a stale-OTA timeout). *(Self-contained + bench-verifiable without the motor — may be pulled forward into an earlier batch.)*
+- [x] **#8 + #2 (foundation):** collect the ~40 cross-task motion/endpoint/batch globals into one struct owned by `pump_task`, snapshot under a critical section; route ALL motion-affecting commands (run/stop/batch/profile/current — not just calibrate/home) through the deferred request-flag/queue pattern so only `pump_task` touches the stepper/TMC. Also fixes the TOCTOU on the calibrate guard.
+- [x] **#6 + #7 (stepper stop/retarget semantics):** manage `s_running` inside `move_task` so `isRunning()` is true for the whole queued move; make `requestGracefulStop()` actually interrupt the in-flight move (`forceStop()` first, or live retargeting) instead of finishing the full stroke; serialize move submission so a second `moveTo()` can't clear a `s_stopRequested` a concurrent `forceStop()` just set.
+- [x] **#3 (SPI bus lock):** wrap the TMC CS-toggle + transfer in `spi_device_acquire_bus()`/`release_bus()` so a StallGuard read can't interleave with the LVGL display flush on the shared bus (corrupting the safety-path SG value).
+- [x] **#4 (tested == shipped):** once the command path is clean, route the firmware through the already-host-tested `StallCounter` / `motorTransition`+`canStart` / `ConfirmCounter` modules (`lib/autolee_logic/`) instead of the inline re-implementations, so the "can't Start from Stalled" rule etc. is enforced by tested code — or delete the modules if genuinely superseded.
+- [x] **#5 (OTA handle leak):** on every OTA failure path call `esp_ota_abort()` and reset the handle/partition/flag (add a stale-OTA timeout). *(Self-contained + bench-verifiable without the motor — may be pulled forward into an earlier batch.)*
 
 ### Security hardening — TODO, needs a scope decision (from PR #4 review, findings #1, #20)
 Not a blocker for the port itself, but must be decided before the press is used unattended on a shared network:
@@ -126,3 +126,28 @@ ADR 0001 · WaveShare ESP32‑C6‑Touch‑LCD‑1.47 ESP‑IDF demo (display + 
 [`esp_lvgl_port`](https://components.espressif.com/components/espressif/esp_lvgl_port) ·
 [ESPAsyncWebServer (IDF component)](https://components.espressif.com/components/esp32async/espasyncwebserver) ·
 ESP‑IDF `captive_portal` + `http_server` SSE examples.
+
+### Phase 4 — what is now code-complete vs. still bench-gated
+
+**Implemented (build-verified + network-verified, NOT motor-verified):**
+- Deferred command layer (`main/motion/motion_cmd.*`): every motion-affecting
+  request from the HTTP task and the LVGL task is queued and executed only on
+  `pump_task`. Verified over the network that profile/current/batch changes are
+  applied by `pump_task`.
+- SPI bus lock around every TMC transfer (`spi_device_acquire_bus`).
+- Stepper retargeting so a graceful stop interrupts the in-flight move, and the
+  stop flag is owned by `move_task` rather than clobbered by `moveTo()`.
+- Jam detection + calibration/homing confirmation now run through the
+  host-tested `StallCounter` / `ConfirmCounter` (tested == shipped).
+- Karl's TMC tuning (TOFF=4, TBL=1, INTPOL) applied.
+
+**Still requires the motor/TMC5160 rig before it can be trusted:**
+- [ ] Calibration finds both mechanical stops.
+- [ ] A full run cycle between endpoints.
+- [ ] **Jam detection actually triggers, backs off, and returns home safely.**
+- [ ] `forceStop()` / retarget latency measured (design bound: one
+      `kCruiseChunkMs` cruise chunk OR one accel/decel curve, whichever is in
+      flight - curves transmit in a single shot and cannot be interrupted
+      mid-curve).
+- [ ] The TMC tuning values confirmed against the real press (torque/smoothness).
+- [ ] A safety-focused review of the whole motion path before the first run.
