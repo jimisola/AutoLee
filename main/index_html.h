@@ -241,6 +241,14 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <button class="btn btn-red btn-sm" onclick="resetWifi()" style="flex:1">Reset WiFi</button></div>
 </div>
 
+<div class="sec">
+<h2>Web Password</h2>
+<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload (user <b>autolee</b>). The factory default is public &mdash; change it.</div>
+<input type="password" id="wpNew" placeholder="New password">
+<button class="btn btn-blue btn-sm" onclick="saveWebPassword()" style="width:100%">Change Password</button>
+<div id="wpMsg" class="hint" style="margin-top:6px"></div>
+</div>
+
 <!-- NAV FOOTER -->
 <div class="nav-footer">
 <a onclick="showPage('pageMain')">Main</a>
@@ -390,6 +398,14 @@ function resetWifi(){
   if(!confirm('Clear saved WiFi credentials and reboot into setup mode?'))return;
   fetch('/api/v1/wifi_reset',{method:'POST'})
   .then(()=>{alert('WiFi cleared! Rebooting into setup mode...');setTimeout(()=>location.reload(),5000)})}
+function saveWebPassword(){
+  const p=document.getElementById('wpNew').value,m=document.getElementById('wpMsg');
+  if(!p){m.textContent='Enter a new password.';m.style.color='#FF4444';return}
+  fetch('/api/v1/web_password?pass='+encodeURIComponent(p),{method:'POST'})
+  .then(r=>{if(r.ok){document.getElementById('wpNew').value='';m.style.color='#00FF00';
+    m.textContent='Password changed. The browser will ask for it on your next action.'}
+    else{m.style.color='#FF4444';r.text().then(t=>m.textContent='Failed: '+t)}})
+  .catch(()=>{m.style.color='#FF4444';m.textContent='Request failed.'})}
 
 function upFW(f){
   if(!f)return;

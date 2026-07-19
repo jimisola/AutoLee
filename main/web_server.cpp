@@ -16,16 +16,45 @@
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "nvs.h"
 
 #include "state_json.h"
 #include "endpoint_math.h"  // autolee::clamp_i32
 
 static const char *TAG = "web_server";
+static const char *kNvsNamespace = "autolee";
+static const char *kNvsWebPassKey = "webpass";
 
 static PsychicHttpServer server;
 static PsychicEventSource events;
 static esp_ota_handle_t s_ota_handle = 0;
 static const esp_partition_t *s_ota_partition = nullptr;
+
+// ==========================================================================
+//  WEB AUTHENTICATION (see config.h's WEB AUTHENTICATION block for the
+//  rationale: Digest over plain HTTP, writes gated, reads left open)
+// ==========================================================================
+static AuthenticationMiddleware s_auth;
+
+// Current password: NVS value if one was ever saved, else the factory default.
+static std::string loadWebPassword() {
+  nvs_handle_t h;
+  if (nvs_open(kNvsNamespace, NVS_READONLY, &h) != ESP_OK) return WEB_AUTH_DEFAULT_PASS;
+  char buf[WEB_AUTH_PASS_MAX + 1] = {0};
+  size_t len = sizeof(buf);
+  bool have = nvs_get_str(h, kNvsWebPassKey, buf, &len) == ESP_OK && buf[0] != '\0';
+  nvs_close(h);
+  return have ? std::string(buf) : std::string(WEB_AUTH_DEFAULT_PASS);
+}
+
+static bool saveWebPassword(const std::string &pass) {
+  nvs_handle_t h;
+  if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return false;
+  esp_err_t err = nvs_set_str(h, kNvsWebPassKey, pass.c_str());
+  if (err == ESP_OK) err = nvs_commit(h);
+  nvs_close(h);
+  return err == ESP_OK;
+}
 
 static inline uint32_t millis() {
   return (uint32_t)(esp_timer_get_time() / 1000);
@@ -222,7 +251,29 @@ void otaWatchdogTick() {
 
 // ==========================================================================
 void setupWebServer() {
-  server.config.max_uri_handlers = 24;
+  server.config.max_uri_handlers = 26;
+
+  // Digest auth for every state-changing route (attached per-endpoint below).
+  std::string webPass = loadWebPassword();
+  s_auth.setUsername(WEB_AUTH_USER)
+      .setPassword(webPass.c_str())
+      .setRealm(WEB_AUTH_REALM)
+      .setAuthMethod(DIGEST_AUTH)
+      .setAuthFailureMessage("AutoLee: authentication required");
+  if (webPass == WEB_AUTH_DEFAULT_PASS) {
+    webLog("SECURITY: web password is still the factory default - change it on the WiFi page");
+  }
+  // Attached once, server-wide, rather than per-endpoint: gating on the HTTP
+  // method means every state-changing route is covered automatically - including
+  // any added later - instead of relying on someone remembering to attach the
+  // middleware to each new POST. GET (dashboard, /api/v1/state, SSE) passes
+  // straight through. Delegates to AuthenticationMiddleware so the actual
+  // digest challenge/nonce handling stays the library's, not hand-rolled.
+  server.addMiddleware(
+      [](PsychicRequest *req, PsychicResponse *res, PsychicMiddlewareNext next) -> esp_err_t {
+        if (req->method() == HTTP_GET) return next();
+        return s_auth.run(req, res, next);
+      });
 
   server.on("/", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
     if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
@@ -420,6 +471,19 @@ void setupWebServer() {
   server.on("/api/v1/log_clear", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     g_log = autolee::LogRing<LOG_LINES, LOG_LINE_LEN>();
     logSentSerial = 0;
+    return res->send(200, "text/plain", "ok");
+  });
+
+  // Change the web password. Itself auth-gated (it's a POST), so only someone
+  // who already knows the current password can set a new one. Takes effect
+  // immediately - no reboot - since the middleware reads from s_auth.
+  server.on("/api/v1/web_password", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    std::string pass = req->getParam("pass", "");
+    if (pass.empty()) return res->send(400, "text/plain", "password required");
+    if (pass.length() > WEB_AUTH_PASS_MAX) return res->send(400, "text/plain", "password too long");
+    if (!saveWebPassword(pass)) return res->send(500, "text/plain", "could not save password");
+    s_auth.setPassword(pass.c_str());
+    webLog("Web password changed");
     return res->send(200, "text/plain", "ok");
   });
 

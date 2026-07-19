@@ -149,6 +149,26 @@ static constexpr uint16_t LOG_LINE_LEN = 140;
 static constexpr uint32_t SSE_INTERVAL_MS = 250;
 
 // ==========================================================================
+//  WEB AUTHENTICATION
+// ==========================================================================
+// Every state-changing endpoint (all POSTs + the OTA upload) requires HTTP
+// Digest auth - Digest, not Basic, because the device serves plain HTTP, so
+// Basic would put the password on the wire in reversible base64 on every
+// request. Reads (dashboard, /api/v1/state, SSE) are deliberately left open:
+// they only expose the cycle counter / SSID / IP, and gating them would break
+// EventSource and add a login prompt to merely glancing at the counter.
+//
+// The password lives in NVS and is changeable from the web UI's WiFi page.
+// WEB_AUTH_DEFAULT_PASS is only the FACTORY DEFAULT used until it is changed -
+// this repo is public, so treat the default as public knowledge and change it
+// on first setup. The firmware logs a warning on every boot while it is still
+// at the default.
+static const char *WEB_AUTH_USER = "autolee";
+static const char *WEB_AUTH_DEFAULT_PASS = "autolee";
+static const char *WEB_AUTH_REALM = "AutoLee";
+static constexpr size_t WEB_AUTH_PASS_MAX = 64;
+
+// ==========================================================================
 //  OTA
 // ==========================================================================
 // If an in-flight OTA upload goes this long with no new chunk, treat it as a
