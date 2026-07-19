@@ -14,7 +14,7 @@ to build, test, and release the firmware.
 | `include/lv_conf.h` | LVGL config (found via `-D LV_CONF_INCLUDE_SIMPLE`, wired project-wide in the root `CMakeLists.txt`). |
 | `CMakeLists.txt`, `partitions.csv`, `sdkconfig.defaults` | ESP-IDF build config. |
 | `tools/mock_server.py` | Run the web UI on your desktop without hardware. |
-| `docs/` | [Wiring](docs/wiring.md), [Bill of Materials](docs/bill-of-materials.md), [PLAN.md](docs/PLAN.md) (migration checklist), `adr/` (architecture decision records), and the [upstream v1.10.0 diff](docs/upstream-v1.10.0-diff.md). |
+| `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md) (task model, SPI bus, motion FSM — start here), [Wiring](docs/wiring.md), [Bill of Materials](docs/bill-of-materials.md), [PLAN.md](docs/PLAN.md) (migration checklist), `adr/` (architecture decision records), and the [upstream v1.10.0 diff](docs/upstream-v1.10.0-diff.md). |
 
 ### Inside `main/`
 

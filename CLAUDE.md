@@ -14,7 +14,9 @@ Hardware-independent logic lives in `lib/autolee_logic/`; the firmware app lives
 against brass jams only — never treat it as a safety system for people. Preserve the safety
 semantics of motion code; do not weaken stop/backoff/homing logic.
 
-See [`docs/PLAN.md`](docs/PLAN.md) for the phased migration checklist (this is an active,
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the task model, the shared-SPI
+rules and the motion FSM (read this before touching motion or concurrency),
+[`docs/PLAN.md`](docs/PLAN.md) for the phased migration checklist (this is an active,
 in-progress port) and [`docs/adr/0001-build-tooling-and-platform.md`](docs/adr/0001-build-tooling-and-platform.md)
 for why ESP-IDF was chosen.
 

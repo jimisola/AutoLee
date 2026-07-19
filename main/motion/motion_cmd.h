@@ -25,15 +25,15 @@
 namespace motion_cmd {
 
 // --- Producers: safe to call from any task -------------------------------
-void requestToggleRun();          // RUN/STOP button (web + touch UI)
-void requestStop();               // stop only (used by the OTA upload path)
-void requestCalibrate();          // begin sensorless calibration
-void requestReturnHome();         // jam-screen "return home"
-void requestBatchStart();         // start a batch run
-void requestProfile(uint8_t idx);        // switch speed profile
-void requestCurrentMa(int32_t ma);       // set motor run current (SPI write)
-void requestUiRefresh();          // refresh LVGL labels from pump_task
-void requestLogClear();           // clear the log ring
+void requestToggleRun();            // RUN/STOP button (web + touch UI)
+void requestStop();                 // stop only (used by the OTA upload path)
+void requestCalibrate();            // begin sensorless calibration
+void requestReturnHome();           // jam-screen "return home"
+void requestBatchStart();           // start a batch run
+void requestProfile(uint8_t idx);   // switch speed profile
+void requestCurrentMa(int32_t ma);  // set motor run current (SPI write)
+void requestUiRefresh();            // refresh LVGL labels from pump_task
+void requestLogClear();             // clear the log ring
 
 // --- Consumer: pump_task ONLY --------------------------------------------
 // Executes whatever was requested since the last call. Must not be called
