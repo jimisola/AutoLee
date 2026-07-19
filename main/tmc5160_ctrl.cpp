@@ -24,7 +24,7 @@ void init(spi_host_device_t spi_host, float r_sense_ohm) {
   diag_cfg.mode = GPIO_MODE_INPUT;
   gpio_config(&diag_cfg);  // configured but not read - see CLAUDE.md; SG polled over SPI
 
-  // Mirrors src/main.cpp's TMCStepper setup() sequence.
+  // Mirrors the original Arduino firmware's TMCStepper setup() sequence.
   tmc5160_fieldWrite(kIcID, TMC5160_TOFF_FIELD, 5);
   tmc5160_fieldWrite(kIcID, TMC5160_MRES_FIELD, 4);         // 16 microsteps: log2(256/16)=4
   tmc5160_fieldWrite(kIcID, TMC5160_EN_PWM_MODE_FIELD, 0);  // SpreadCycle, not StealthChop

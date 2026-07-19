@@ -36,12 +36,13 @@ jobs:
 
       - name: Merge full-flash image + rename artifacts
         run: |
-          idf.py merge-bin -o AutoLee_v${{ steps.ver.outputs.ver }}_merged.bin --fill-flash-size 4MB
+          idf.py merge-bin -o build/AutoLee_v${{ steps.ver.outputs.ver }}_merged.bin --fill-flash-size 4MB
           cp build/autolee.bin build/AutoLee_v${{ steps.ver.outputs.ver }}_update.bin
 
       - name: Attach to the release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
+          fail_on_unmatched_files: true
           files: |
             build/AutoLee_v${{ steps.ver.outputs.ver }}_merged.bin
             build/AutoLee_v${{ steps.ver.outputs.ver }}_update.bin

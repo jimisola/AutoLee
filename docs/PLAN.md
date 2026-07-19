@@ -20,22 +20,26 @@ first for the *why* and the per‑subsystem analysis.
 ---
 
 ## Phase 0 — Prerequisites
-- [ ] Install ESP‑IDF **≥ 5.3** (needed for FastAccelStepper's I2S‑mux step driver), set up `export.sh`.
-- [ ] `idf.py set-target esp32c6`.
-- [ ] Confirm the VS Code **ESP‑IDF extension** works for Karl (Linux + Mac) — replaces the PlatformIO one.
+- [x] Install ESP‑IDF **≥ 5.3**, set up `export.sh`. (Version pinned in `main/idf_component.yml`
+  matches what this port was built/tested against - not tied to FastAccelStepper, which was
+  dropped; see Phase 4 and ADR 0001.)
+- [x] `idf.py set-target esp32c6`.
+- [x] Confirm the VS Code **ESP‑IDF extension** works for Karl (Linux + Mac) — replaces the PlatformIO one.
 - **DoD:** `idf.py --version` + target set; a hello‑world builds.
 
 ## Phase 1 — Project scaffold (no hardware)
-- [ ] Top‑level `CMakeLists.txt`, `main/` component (`CMakeLists.txt`, `app_main.c`), `sdkconfig.defaults`.
-- [ ] `partitions.csv` mirroring Minimal‑SPIFFS: `nvs`, `otadata`, `ota_0`/`ota_1` (~1.9 MB each), `storage` — dual app slots enable OTA + rollback on 4 MB flash.
-- [ ] `sdkconfig.defaults`: `esp32c6`, 4 MB / dio, size‑opt (`-Os`), log level, and the safety knobs (Phase 6): OTA rollback, task+interrupt WDT, core dump to flash, brownout.
-- [ ] Minimal `app_main`: NVS init, serial banner (`FW_VERSION`), boot.
+- [x] Top‑level `CMakeLists.txt`, `main/` component (`CMakeLists.txt`, `app_main.c`), `sdkconfig.defaults`.
+- [x] `partitions.csv`: `nvs`, `otadata`, `ota_0`/`ota_1` (~1.9 MB each), `coredump` — dual app
+  slots enable OTA + rollback on 4 MB flash. No `storage`/SPIFFS partition: nothing in the
+  firmware mounts a filesystem, so that space went to coredump instead (see CLAUDE.md).
+- [x] `sdkconfig.defaults`: `esp32c6`, 4 MB / dio, size‑opt (`-Os`), log level, and the safety knobs (Phase 6): OTA rollback, task+interrupt WDT, core dump to flash, brownout.
+- [x] Minimal `app_main`: NVS init, serial banner (`FW_VERSION`), boot.
 - **DoD:** `idf.py build` clean; produces the app + a merged image (`idf.py merge-bin`). ⚙️ optional boot‑on‑serial check.
 
 ## Phase 2 — Pure core + host tests (no hardware)
-- [ ] Bring `lib/autolee_logic/` in as an ESP‑IDF component (or shared include dir).
-- [ ] Port the Unity suites (`test/`) to ESP‑IDF host testing (**linux target** / CMake+CTest).
-- [ ] Wire coverage (gcovr) for the host build.
+- [x] Bring `lib/autolee_logic/` in as an ESP‑IDF component (or shared include dir).
+- [x] Port the Unity suites (`test/`) to ESP‑IDF host testing (**linux target** / CMake+CTest).
+- [x] Wire coverage (gcovr) for the host build.
 - **DoD:** all host tests green (parity with the 39 today); coverage reported.
 
 ## Phase 3 — Display + touch + LVGL  ⚙️

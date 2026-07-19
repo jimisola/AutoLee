@@ -38,7 +38,7 @@ struct SpeedProfile {
 };
 
 static constexpr uint8_t NUM_PROFILES = 3;
-// Defined in main.cpp (mutable, shared across translation units).
+// Defined in globals.cpp (mutable, shared across translation units).
 extern SpeedProfile profiles[NUM_PROFILES];
 extern uint8_t activeProfile;
 
@@ -52,8 +52,8 @@ static constexpr uint32_t RUN_DECEL =
 // ==========================================================================
 //  ENDPOINT TUNING
 // ==========================================================================
-extern int32_t upOffsetSteps;    // defined in main.cpp
-extern int32_t downOffsetSteps;  // defined in main.cpp
+extern int32_t upOffsetSteps;    // defined in globals.cpp
+extern int32_t downOffsetSteps;  // defined in globals.cpp
 static constexpr int32_t DOWN_OFFSET_DEFAULT = -500;
 static constexpr int32_t OFFSET_MIN = -8000;
 static constexpr int32_t OFFSET_MAX = +8000;
@@ -65,7 +65,7 @@ static constexpr int32_t CAL_PREMOVE_DOWN_STEPS = 5500;
 //  CALIBRATION CONSTANTS
 // ==========================================================================
 static constexpr int8_t CAL_SGT = -1;
-extern uint16_t RUN_CURRENT_MA;  // defined in main.cpp
+extern uint16_t RUN_CURRENT_MA;  // defined in globals.cpp
 static constexpr uint16_t RUN_CURRENT_MIN = 1000;
 static constexpr uint16_t RUN_CURRENT_MAX = 4500;
 static constexpr uint16_t CAL_CURRENT_MA = 3200;
@@ -105,15 +105,11 @@ static constexpr uint8_t RUN_SG_HIGH_NEEDED = 2;    // need this many high readi
 // does useful work (e.g. pushing primers). The resistance here is normal
 // and would false-trigger stall detection at low trip thresholds.
 // SG is still active for the rest of the travel and near the UP endpoint.
-extern int32_t SG_WORK_ZONE_STEPS;  // defined in main.cpp (default 5500)
+extern int32_t SG_WORK_ZONE_STEPS;  // defined in globals.cpp (default 5500)
 static constexpr int32_t SG_WORK_ZONE_MIN = 0;
 static constexpr int32_t SG_WORK_ZONE_MAX = 20000;
 static constexpr uint32_t CREEP_HOME_SPEED = CAL_SPEED_HZ;
 static constexpr uint32_t CREEP_HOME_ACCEL = CAL_ACCEL;
-static constexpr uint16_t CREEP_SG_TRIP = 15;
-static constexpr uint8_t CREEP_SG_CONFIRM = 3;
-static constexpr uint32_t CREEP_IGNORE_MS = 300;
-static constexpr uint32_t CREEP_TIMEOUT_MS = 20000;
 
 // ==========================================================================
 //  DISPLAY / LAYOUT

@@ -1,6 +1,7 @@
 // TMC-API hardware-abstraction callbacks for the TMC5160, over the shared SPI
 // bus (see CLAUDE.md "Shared SPI bus"). Display CS is forced HIGH before every
-// transfer to avoid bus contention - ported from src/motion.cpp's read_sg_raw().
+// transfer to avoid bus contention - ported from the original Arduino
+// firmware's read_sg_raw().
 #include <cstring>
 #include "driver/spi_master.h"
 #include "driver/gpio.h"

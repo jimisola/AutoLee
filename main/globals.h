@@ -4,9 +4,10 @@
 #include "lvgl.h"
 #include "config.h"
 
-// Mutable, cross-module state - defined once in globals.cpp. Mirrors
-// src/main.cpp's role in the old Arduino TU-split (see CLAUDE.md history);
-// config.h's `extern` declarations point here now instead.
+// Mutable, cross-module state - defined once in globals.cpp. Mirrors the
+// original Arduino firmware's `AutoLee.ino` role as the single definition
+// site for these globals; config.h's `extern` declarations point here now
+// instead.
 
 enum RunState : uint8_t { IDLE, RUNNING, STOPPING, CALIBRATING, STALLED, HOMING };
 extern volatile RunState runState;

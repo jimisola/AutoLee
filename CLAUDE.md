@@ -27,7 +27,9 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
 ```
 
 - **Board:** ESP32-C6 (WaveShare 1.47" Touch LCD module).
-- **Toolchain:** ESP-IDF >= 5.3 (needed for FastAccelStepper's I2S-mux step driver on C6).
+- **Toolchain:** ESP-IDF >= 5.3, enforced by `main/idf_component.yml`'s `idf: ">=5.3"` - the
+  version this port was built and tested against (native RMT+PCNT stepper via `main/stepper.*`,
+  not FastAccelStepper, which was dropped - see ADR 0001).
   Dependencies (LVGL, `esp_lvgl_port`) are pinned in `main/idf_component.yml` and fetched by the
   Component Manager; `dependencies.lock` is committed for reproducibility.
 - **Partition scheme:** custom `partitions.csv` — nvs + otadata + dual OTA app slots (~1.9 MB
@@ -75,8 +77,8 @@ The ST7789/JD9853 display and the TMC5160 share the SPI bus (SCK=GPIO1, MOSI=GPI
 MISO is unused by the display, only needed for TMC5160 StallGuard reads). Chip-select is managed
 in software: TMC CS on GPIO 8, display CS on GPIO 14. **The display CS must be forced HIGH before
 every StallGuard SPI read** to prevent bus contention — preserve this when touching SPI/SG code
-(carried over from the original Arduino firmware; not yet re-implemented as of the motion-port
-phase — see `docs/PLAN.md` Phase 4).
+(carried over from the original Arduino firmware; implemented in `main/tmc5160_hal.cpp`'s
+`tmc5160_readWriteSPI()`).
 
 ## Conventions
 

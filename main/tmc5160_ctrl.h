@@ -4,13 +4,14 @@
 #include "driver/spi_master.h"
 
 // Thin wrapper over TMC-API's raw register access, exposing the same
-// operations src/motion.cpp used via TMCStepper's TMC5160Stepper class - see
-// docs/PLAN.md Phase 4. Single-motor (icID always 0).
+// operations the original Arduino firmware's motion logic used via
+// TMCStepper's TMC5160Stepper class - see docs/PLAN.md Phase 4. Single-motor
+// (icID always 0).
 namespace tmc5160 {
 
 // Bring up the SPI device + apply the same GCONF/CHOPCONF/COOLCONF/IHOLD_IRUN
-// defaults src/main.cpp's setup() applied via TMCStepper (toff=5, 16
-// microsteps, SpreadCycle not StealthChop, DIAG1=stall/push-pull).
+// defaults the original Arduino firmware's setup() applied via TMCStepper
+// (toff=5, 16 microsteps, SpreadCycle not StealthChop, DIAG1=stall/push-pull).
 void init(spi_host_device_t spi_host, float r_sense_ohm);
 
 void rms_current(uint16_t mA);

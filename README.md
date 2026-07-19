@@ -90,7 +90,6 @@ The stall detection and jam protection features are designed to detect brass get
 - **Auto-connect** — attempts saved credentials on boot, falls back to AP if it fails
 - **Captive portal** — open AP mode (`AutoLee-Setup`, no password) with DNS redirect so any device gets the setup page automatically
 - **Network scanner** — scans available WiFi networks and presents them in a dropdown
-- **ArduinoOTA support** — update firmware from PlatformIO/Arduino IDE over the network (hostname: `autolee`, password: `autolee`)
 
 ---
 
@@ -273,7 +272,6 @@ Once AutoLee is on your WiFi, go to the web UI → **Firmware** page and drag-an
 After first flash, firmware can be updated two ways:
 
 - **Web UI** — open the AutoLee web interface, go to the Firmware page, drag and drop a `.bin` file
-- **ArduinoOTA** — hostname `autolee`, password `autolee`
 ---
 
 ## Configuration
@@ -323,7 +321,7 @@ SSE stream available at `/events` — pushes JSON state every 250 ms and log lin
 
 | Version | Changes |
 |---|---|
-| **v1.8** | Firmware split into modular files (`config.h`, `motion.h`, `ui_touch.h`, `web_server.h`, `wifi_ota.h`) for maintainability — no functional changes from v1.7 |
+| **v1.8** | Firmware split into modular files (`config.h`, `motion.h`, `ui_touch.h`, `web_server.h`, `wifi_ota.h`) for maintainability — no functional changes from v1.7 (Arduino-era file names; the ESP-IDF port renamed these to `main/config.h`, `main/motion.cpp`, `main/ui_touch.cpp`, `main/web_server.cpp`, `main/wifi_mgr.*`) |
 | **v1.7** | WiFi Info moved to Configuration sub-menu; Reset WiFi button on WiFi info screen; speed profile buttons resized to fit display; WiFi info centered in card |
 | **v1.6** | Adjustable motor current (1,000–4,500 mA) via web; multi-page web UI (Main, Configuration, Log, Firmware, WiFi); touch UI restructured (Settings → Configuration sub-menu); WiFi page shows SSID + IP; SG text inputs with auto-submit on blur; profiles retuned (Slow 15kHz/350, Normal 35kHz/15, Fast 45kHz/1); all labels fitted to 172px display |
 | **v1.5** | Speed profiles (Slow/Normal/Fast) replace speed slider; per-profile SG thresholds; profile API |

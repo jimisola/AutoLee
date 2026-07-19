@@ -33,6 +33,14 @@ static DeviceState sample() {
 void setUp() {}
 void tearDown() {}
 
+void test_ssid_with_quote_and_backslash_is_escaped() {
+  DeviceState s = sample();
+  s.wifiSSID = "My\"Net\\Home";
+  char buf[900];
+  buildStateJson(s, buf, sizeof(buf));
+  TEST_ASSERT_NOT_NULL(strstr(buf, "\"wifiSSID\":\"My\\\"Net\\\\Home\""));
+}
+
 void test_matches_golden() {
   char buf[900];
   buildStateJson(sample(), buf, sizeof(buf));
@@ -60,5 +68,6 @@ int main(int, char **) {
   RUN_TEST(test_matches_golden);
   RUN_TEST(test_returns_full_length);
   RUN_TEST(test_booleans_render_as_words);
+  RUN_TEST(test_ssid_with_quote_and_backslash_is_escaped);
   return UNITY_END();
 }

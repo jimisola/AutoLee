@@ -40,9 +40,26 @@ struct DeviceState {
   bool batchActive;
 };
 
+// SSIDs are attacker-influenceable (a nearby AP or a manually-typed SSID can
+// contain '"' or '\'), unlike every other string field here (firmware
+// constants or machine-generated values) - escape it so it can never break
+// the JSON. Max WiFi SSID length is 32 bytes; sized for the worst case
+// (every byte escaped) plus NUL.
+inline void jsonEscape(const char *in, char *out, size_t outSize) {
+  size_t o = 0;
+  for (size_t i = 0; in[i] != '\0' && o + 2 < outSize; i++) {
+    char c = in[i];
+    if (c == '"' || c == '\\') out[o++] = '\\';
+    out[o++] = c;
+  }
+  out[o] = '\0';
+}
+
 // Serialize into `out` (size `n`). Returns the snprintf return value (number of
 // chars that would have been written). The format mirrors the firmware exactly.
 inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
+  char ssidEscaped[65];
+  jsonEscape(s.wifiSSID, ssidEscaped, sizeof(ssidEscaped));
   return snprintf(
       out, n,
       "{\"version\":\"%s\",\"state\":\"%s\",\"counter\":%ld,\"speed\":%lu,\"calibrated\":%s,"
@@ -60,7 +77,7 @@ inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
       s.position, s.sgTrip, (long)s.workZone, s.currentMa, s.profileIdx, s.profileName,
       s.profiles[0].name, (unsigned long)s.profiles[0].hz, s.profiles[0].sg, s.profiles[1].name,
       (unsigned long)s.profiles[1].hz, s.profiles[1].sg, s.profiles[2].name,
-      (unsigned long)s.profiles[2].hz, s.profiles[2].sg, s.wifiStatus, s.wifiSSID, s.wifiIP,
+      (unsigned long)s.profiles[2].hz, s.profiles[2].sg, s.wifiStatus, ssidEscaped, s.wifiIP,
       s.batchTarget, s.batchCount, s.batchActive ? "true" : "false");
 }
 

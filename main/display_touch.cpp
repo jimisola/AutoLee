@@ -104,7 +104,7 @@ static void jd9853_send_init_sequence(esp_lcd_panel_io_handle_t io) {
 }
 // clang-format on
 
-// Mirrors src/main.cpp:
+// Mirrors the original Arduino firmware:
 //   Arduino_ST7789(bus, /*rst=*/22, /*rotation=*/0, /*ips=*/false,
 //                  /*w=*/172, /*h=*/320, /*colOffset=*/34, /*rowOffset=*/0, 34, 0)
 static esp_lcd_panel_handle_t init_display_panel(esp_lcd_panel_io_handle_t *out_io) {

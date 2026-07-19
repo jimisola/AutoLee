@@ -6,7 +6,7 @@
 // Native RMT/PCNT-based STEP/DIR pulse generator, replacing FastAccelStepper
 // (which turned out to require Arduino-as-an-ESP-IDF-component - see ADR
 // 0001 and docs/PLAN.md Phase 4). Exposes the small subset of
-// FastAccelStepper's API src/motion.cpp actually used.
+// FastAccelStepper's API the original motion logic actually used.
 //
 // *** UNVERIFIED ON HARDWARE - build-verified only. No motor/TMC5160 rig was
 // connected while this was written. Before trusting this on the real press,

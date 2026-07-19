@@ -2,7 +2,8 @@
 
 #include <cstdint>
 
-// Motion state machine + StallGuard logic, ported from src/motion.cpp.
+// Motion state machine + StallGuard logic, ported from the original Arduino
+// firmware's motion logic.
 // *** UNVERIFIED ON HARDWARE - see main/stepper.h. This is the safety-critical
 // jam-detection/stop/backoff code; bench-verify before trusting on the press. ***
 void motion_init();

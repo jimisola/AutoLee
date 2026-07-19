@@ -1,6 +1,6 @@
 // ============================================================================
 //  AutoLee - motion.cpp (ESP-IDF port)
-//  Faithful port of src/motion.cpp's algorithm. Plumbing swapped
+//  Faithful port of the original Arduino firmware's motion algorithm. Plumbing swapped
 //  (TMCStepper->tmc5160::, FastAccelStepper->stepper::, Arduino
 //  millis()/delay()->esp_timer/vTaskDelay), safety logic unchanged.
 //
@@ -46,7 +46,8 @@ static inline void wdt_feed() {
 
 // Shared SPI bus is initialized by display_touch.cpp (SCK=1, MOSI=2, MISO=3);
 // this only adds the TMC5160 as a device on it and brings up the stepper.
-// Mirrors src/main.cpp's setup(): SPI.begin + driver.begin/toff/microsteps/... + engine.init.
+// Mirrors the original Arduino firmware's setup(): SPI.begin +
+// driver.begin/toff/microsteps/... + engine.init.
 void motion_init() {
   tmc5160::init(SPI2_HOST, R_SENSE);
   stepper::init((gpio_num_t)STEP_PIN, (gpio_num_t)DIR_PIN);
