@@ -73,6 +73,10 @@ Not a blocker for the port itself, but must be decided before the press is used 
 
 Note: PR #4 review finding #29 (squash the CI-debugging churn commits) is intentionally skipped — this branch will be **squash-merged**, which collapses the history anyway.
 
+Deferred low-priority cleanups from the PR #4 review (not blocking):
+- [ ] **#17:** split `buildUI()` (~510 lines) into per-screen `build_<name>_screen()` functions. Turned out NOT to be a mechanical extraction — a centralized event-wiring block at the tail references ~16 button handles created across many screen blocks, so a clean split forces either moving each screen's callback wiring inline or promoting those handles to globals (the latter conflicts with #8). Deferred: it's a cosmetic smell, and the result can't be visually verified without a display module attached. Revisit alongside the Phase 3 display bring-up.
+- [ ] **#24:** the `feat!` platform migration currently ships under an unchanged `FW_VERSION "1.8"` with no changelog row — decide whether to bump the version / add a history entry (deferred pending that product decision).
+
 ## Phase 5 — Web UI + WiFi + OTA
 - [x] **WiFi** (`main/wifi_mgr.*`): ported `wifi_ota.cpp`'s flow onto `esp_wifi` + `nvs` (STA with saved creds → AP fallback, network scan, credential save/clear). ArduinoOTA dropped (Arduino-only, contradicts staying off Arduino) - OTA is web-upload only, see below.
 - [x] **Captive portal DNS**: vendored ESP-IDF's official `dns_server` component (`lib/dns_server/`, from `examples/protocols/http_server/captive_portal`) verbatim rather than hand-writing DNS parsing. **Found and fixed a real bug during hardware testing**: the vendored code always set the DNS reply's answer-count to the *question* count, even for questions it didn't actually answer (non-A queries like AAAA/HTTPS-SVCB, or names with no matching rule) — producing a malformed response (reproduced as `FORMERR` against a real client). Fixed to only count/advance past answers actually written; added `ESP_LOGI` for every query/answer/skip decision.
