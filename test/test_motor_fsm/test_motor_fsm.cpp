@@ -46,6 +46,46 @@ void test_invalid_events_are_ignored() {
   TEST_ASSERT_FALSE(valid(MotorState::Homing, MotorEvent::Start));
 }
 
+// Exhaustive: every (state, event) pair that is NOT one of the 9 valid
+// transitions must be ignored (valid=false, state unchanged). This is a real
+// safety property - e.g. Start while Stopping/Calibrating/Homing must never
+// take effect - and covers the fall-through `break` in every case arm.
+void test_all_invalid_transitions_ignored() {
+  struct V {
+    MotorState s;
+    MotorEvent e;
+  };
+  // The complete valid-transition set (mirrors motorTransition()).
+  const V kValid[] = {
+      {MotorState::Idle, MotorEvent::Start},
+      {MotorState::Idle, MotorEvent::Calibrate},
+      {MotorState::Running, MotorEvent::GracefulStop},
+      {MotorState::Running, MotorEvent::Jam},
+      {MotorState::Stopping, MotorEvent::ReachedHome},
+      {MotorState::Stopping, MotorEvent::StopTimeout},
+      {MotorState::Calibrating, MotorEvent::CalibrationDone},
+      {MotorState::Stalled, MotorEvent::ReturnHome},
+      {MotorState::Homing, MotorEvent::HomeDone},
+  };
+  const MotorState states[] = {MotorState::Idle,        MotorState::Running, MotorState::Stopping,
+                               MotorState::Calibrating, MotorState::Stalled, MotorState::Homing};
+  for (MotorState s : states) {
+    for (uint8_t ei = 0; ei <= (uint8_t)MotorEvent::HomeDone; ei++) {
+      MotorEvent e = (MotorEvent)ei;
+      bool isValid = false;
+      for (const V &v : kValid) {
+        if (v.s == s && v.e == e) {
+          isValid = true;
+          break;
+        }
+      }
+      if (isValid) continue;
+      TEST_ASSERT_FALSE(valid(s, e));    // invalid combo => ignored
+      TEST_ASSERT_EQUAL(s, next(s, e));  // ...and state left unchanged
+    }
+  }
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_start_and_stop_cycle);
@@ -53,5 +93,6 @@ int main(int, char **) {
   RUN_TEST(test_calibration_cycle);
   RUN_TEST(test_cannot_start_while_stalled);
   RUN_TEST(test_invalid_events_are_ignored);
+  RUN_TEST(test_all_invalid_transitions_ignored);
   return UNITY_END();
 }

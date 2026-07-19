@@ -41,6 +41,18 @@ void test_offsets_are_clamped() {
   TEST_ASSERT_EQUAL_INT32(8000, e.endpointUp);
 }
 
+void test_offsets_clamped_low_side() {
+  // Mirror of test_offsets_are_clamped for the LOWER bound, with rawDown large
+  // enough that the guard never fires - so both endpoints reflect a clean
+  // clamp to OFFSET_MIN (the up-side test masks the down clamp behind the guard).
+  Endpoints e =
+      computeEffectiveEndpoints(true, 10000, 20000, -99999, -99999, OFFSET_MIN, OFFSET_MAX, GUARD);
+  TEST_ASSERT_EQUAL_INT32(OFFSET_MIN, e.upOffset);    // -99999 clamped to -8000
+  TEST_ASSERT_EQUAL_INT32(OFFSET_MIN, e.downOffset);  // -99999 clamped to -8000
+  TEST_ASSERT_EQUAL_INT32(2000, e.endpointUp);        // rawUp 10000 + (-8000)
+  TEST_ASSERT_EQUAL_INT32(12000, e.endpointDown);     // rawDown 20000 + (-8000), guard clear
+}
+
 void test_guard_enforced_and_downoffset_backcomputed() {
   // rawUp=0, rawDown=100, downOffset=-500 -> dnEff=-400 <= 50 -> forced to 50
   Endpoints e = computeEffectiveEndpoints(true, 0, 100, 0, -500, OFFSET_MIN, OFFSET_MAX, GUARD);
@@ -55,6 +67,7 @@ int main(int, char **) {
   RUN_TEST(test_not_calibrated_is_zero);
   RUN_TEST(test_nominal_endpoints);
   RUN_TEST(test_offsets_are_clamped);
+  RUN_TEST(test_offsets_clamped_low_side);
   RUN_TEST(test_guard_enforced_and_downoffset_backcomputed);
   return UNITY_END();
 }
