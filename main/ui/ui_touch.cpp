@@ -481,7 +481,7 @@ void buildUI() {
   lv_label_set_text_fmt(counter_label, "%ld", counter < COUNTER_MAX ? counter : COUNTER_MAX);
   lv_obj_set_style_text_font(counter_label, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_set_style_text_color(counter_label, lv_color_hex(0x00FF00), LV_PART_MAIN);
-  lv_obj_align(counter_label, LV_ALIGN_CENTER, 0, -10);
+  lv_obj_align(counter_label, LV_ALIGN_CENTER, 0, 8);
   lv_obj_add_flag(counter_label, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(
       counter_label,
@@ -502,7 +502,7 @@ void buildUI() {
   lv_obj_set_style_text_font(lbl_batch_remain, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_obj_set_style_text_color(lbl_batch_remain, lv_color_hex(0xFFD37C), LV_PART_MAIN);
   lv_obj_set_style_text_align(lbl_batch_remain, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-  lv_obj_align(lbl_batch_remain, LV_ALIGN_CENTER, 0, 26);
+  lv_obj_align(lbl_batch_remain, LV_ALIGN_CENTER, 0, 44);
   lv_obj_add_flag(lbl_batch_remain, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_t *btn_batch = make_btn(mc, "Batch Run", 140, 36, 0x1F6FEB, &lv_font_montserrat_16);

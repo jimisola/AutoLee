@@ -20,7 +20,19 @@ static void IRAM_ATTR touch_isr(void *) {
 }
 
 static bool i2c_read_reg(uint8_t reg_addr, uint8_t *data, size_t length) {
-  esp_err_t err = i2c_master_transmit_receive(s_dev, &reg_addr, 1, data, length, -1);
+  // The AXS5106L does NOT support I2C repeated-start: the register-pointer
+  // write must be terminated with a STOP before the read's START. Using
+  // i2c_master_transmit_receive() (which issues a repeated-start) makes the
+  // chip NACK every register read - the address-only probe still ACKs, which
+  // is why the controller looked present but its ID and touch registers all
+  // read back 0/garbage. Two separate transactions reproduce the original
+  // Arduino driver's write(reg)+endTransmission()  /  requestFrom() sequence.
+  esp_err_t err = i2c_master_transmit(s_dev, &reg_addr, 1, -1);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "I2C write reg 0x%02x failed: %s", reg_addr, esp_err_to_name(err));
+    return false;
+  }
+  err = i2c_master_receive(s_dev, data, length, -1);
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "I2C read reg 0x%02x failed: %s", reg_addr, esp_err_to_name(err));
     return false;
