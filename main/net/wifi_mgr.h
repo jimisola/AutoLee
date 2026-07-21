@@ -12,8 +12,9 @@ void start();  // load saved creds, try STA, fall back to AP + captive portal
 
 bool isConnected();
 bool isApMode();
-std::string ipAddress();  // STA or AP IP, whichever is active
-std::string ssid();       // connected STA SSID, or the AP's SSID in AP mode
+std::string ipAddress();   // STA or AP IP, whichever is active
+std::string ssid();        // connected STA SSID, or the AP's SSID in AP mode
+std::string apPassword();  // the setup AP's WPA2 key (per-device, persisted in NVS)
 
 void saveCredentials(const std::string &ssid, const std::string &pass);
 void clearCredentials();

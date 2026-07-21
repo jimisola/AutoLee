@@ -52,6 +52,11 @@ extern lv_obj_t *lbl_ep_up, *lbl_ep_dn, *lbl_travel;
 extern lv_obj_t *lbl_up_eff, *lbl_dn_eff;
 extern lv_obj_t *lbl_ep_up_val, *lbl_ep_dn_val;
 extern lv_obj_t *lbl_wifi_status;
+extern lv_obj_t *wifi_qr;         // WiFi-join QR code, shown in AP-setup mode
+extern lv_obj_t *lbl_wifi_key;    // the AP's WPA2 key, shown in AP-setup mode
+extern lv_obj_t *btn_wifi_reset;  // hidden in AP-setup mode (nothing to reset)
+extern lv_obj_t *btn_wifi_skip;   // AP-setup only: go to main UI without configuring WiFi
+extern lv_obj_t *btn_wifi_back;   // nav Back; hidden in AP-setup mode (Skip replaces it)
 extern lv_obj_t *btn_run_global;
 extern lv_obj_t *btn_calibrate;
 extern lv_obj_t *jam_scr;

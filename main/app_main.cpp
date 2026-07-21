@@ -90,14 +90,27 @@ extern "C" void app_main(void) {
   // already set up - must run after it.
   motion_init();
 
-  wifi_mgr::start();
-  setupWebServer();
-
+  // Build the UI BEFORE the (blocking, up to ~10s) WiFi connect, so the main
+  // screen is on the display immediately instead of leaving it blank for the
+  // whole connect. The AP-setup screen can only be selected once wifi_mgr::start()
+  // has decided AP vs STA, so that go() happens after start() below.
   if (disp) {
     buildUI();
     ESP_LOGI(TAG, "LVGL UI built");
   } else {
     ESP_LOGE(TAG, "display_touch_init() failed");
+  }
+
+  wifi_mgr::start();
+  setupWebServer();
+
+  // A fresh/unconfigured device boots into the WPA2 setup AP - jump straight to
+  // the WiFi screen so its join QR + key are the first thing shown, instead of
+  // making the user hunt through Config -> WiFi. (In STA mode we stay on the
+  // main screen buildUI() already showed.)
+  if (disp) {
+    ui_update_wifi_label();  // refresh QR/key/status now that WiFi state is known
+    if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) go(wifi_scr);
   }
 
   // Reaching this point (display, motion, WiFi, and the web server all

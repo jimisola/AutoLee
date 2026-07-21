@@ -256,6 +256,18 @@ void otaWatchdogTick() {
 void setupWebServer() {
   server.config.max_uri_handlers = 26;
 
+  // Default httpd config refuses a new connection outright once
+  // max_open_sockets is hit, rather than recycling the oldest one. On the
+  // setup AP that's easy to hit: a phone runs several background
+  // connectivity-check requests against different domains in parallel (all
+  // DNS-redirected to us), plus the dashboard's own long-lived SSE stream
+  // holds a socket open indefinitely. A refused/starved connection can
+  // surface as a truncated page load (e.g. cut off before </style>) -
+  // reproduced on hardware as "sometimes the page has no CSS". LRU purge
+  // makes a burst of setup-page traffic recycle old sockets instead of
+  // failing new ones.
+  server.config.lru_purge_enable = true;
+
   // Digest auth for every state-changing route (attached per-endpoint below).
   std::string webPass = loadWebPassword();
   s_auth.setUsername(WEB_AUTH_USER)
@@ -275,10 +287,26 @@ void setupWebServer() {
   server.addMiddleware(
       [](PsychicRequest *req, PsychicResponse *res, PsychicMiddlewareNext next) -> esp_err_t {
         if (req->method() == HTTP_GET) return next();
+        // Captive-portal setup endpoints are exempt while in AP-setup mode: a
+        // fresh user doesn't have the (digest) web password, and WPA2 on the AP
+        // is what gates access there instead. Only /save and /clear, and only
+        // when unconfigured - every /api/v1/* control route stays gated.
+        if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
+          std::string uri = req->uri();
+          uri = uri.substr(0, uri.find('?'));  // drop any query string
+          if (uri == "/save" || uri == "/clear") return next();
+        }
         return s_auth.run(req, res, next);
       });
 
   server.on("/", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
+    // Which page this route serves depends on live connection state (WiFi
+    // setup vs. dashboard) and, on the setup AP, changes across sessions
+    // (scanned network list, key). Without this, a phone that previously
+    // loaded the page (this AP, or a stale captive-portal load from earlier
+    // testing) can silently serve that cached copy on "refresh" instead of
+    // hitting the device - reproduced on hardware as a garbled/stale page.
+    res->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
       // PsychicResponse::setContent(const char*) stores the raw pointer, it
       // doesn't copy - a temporary std::string's buffer would already be

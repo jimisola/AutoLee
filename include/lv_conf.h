@@ -657,8 +657,8 @@
 /*GIF decoder library*/
 #define LV_USE_GIF 0
 
-/*QR code library*/
-#define LV_USE_QRCODE 0
+/*QR code library - used for the WiFi setup join code on the WiFi screen*/
+#define LV_USE_QRCODE 1
 
 /*FreeType library*/
 #define LV_USE_FREETYPE 0

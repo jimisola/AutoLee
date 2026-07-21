@@ -35,7 +35,14 @@ static inline int32_t clampi(int32_t v, int32_t lo, int32_t hi) {
 //  LVGL UI HELPERS
 // ==========================================================================
 void go(lv_obj_t *scr) {
+  // lv_scr_load touches LVGL internals, so it must hold the port lock. go() is
+  // called both from LVGL event callbacks (lock already held - the port mutex
+  // is recursive, so re-taking is fine) and from app_main's boot-time
+  // navigation on the main task (lock NOT held). Without this, that boot-time
+  // go(wifi_scr) races the LVGL render task and can freeze the display blank.
+  lvgl_port_lock(0);
   lv_scr_load(scr);
+  lvgl_port_unlock();
 }
 
 static void style_screen(lv_obj_t *scr) {
@@ -269,18 +276,78 @@ void ui_update_batch_remain() {
   lvgl_port_unlock();
 }
 
+// Escape a field for a WiFi-join QR payload: backslash-escape the reserved
+// characters. Our SSID and generated key never contain these, but the spec
+// requires it, so do it defensively.
+static std::string qrEscape(const std::string &in) {
+  std::string out;
+  out.reserve(in.size());
+  for (char c : in) {
+    if (c == '\\' || c == ';' || c == ',' || c == ':' || c == '"') out += '\\';
+    out += c;
+  }
+  return out;
+}
+
 void ui_update_wifi_label() {
   lvgl_port_lock(0);
-  if (lbl_wifi_status) {
-    if (wifi_mgr::isConnected()) {
-      lv_label_set_text_fmt(lbl_wifi_status, "%s\nIP: %s", wifi_mgr::ssid().c_str(),
-                            wifi_mgr::ipAddress().c_str());
-    } else if (wifi_mgr::isApMode()) {
-      lv_label_set_text_fmt(lbl_wifi_status, "AP: %s\n192.168.4.1\n(open, no password)",
-                            DEFAULT_AP_SSID);
+  const bool apSetup = wifi_mgr::isApMode() && !wifi_mgr::isConnected();
+
+  // AP-setup view: the join QR + the key text.
+  if (wifi_qr && lbl_wifi_key) {
+    if (apSetup) {
+      // Standard WiFi-join QR: WIFI:T:WPA;S:<ssid>;P:<key>;;  ("WPA" covers
+      // WPA2 and is what iOS/Android accept).
+      std::string payload = "WIFI:T:WPA;S:" + qrEscape(DEFAULT_AP_SSID) + ";P:" +
+                            qrEscape(wifi_mgr::apPassword()) + ";;";
+      lv_qrcode_update(wifi_qr, payload.c_str(), payload.length());
+      lv_obj_clear_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s", DEFAULT_AP_SSID,
+                            wifi_mgr::apPassword().c_str());
+      lv_obj_clear_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
     } else {
-      lv_label_set_text(lbl_wifi_status, "Disconnected");
+      lv_obj_add_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
     }
+  }
+
+  // Connected/disconnected view: the status card. Hidden during AP setup.
+  if (lbl_wifi_status) {
+    lv_obj_t *card = lv_obj_get_parent(lbl_wifi_status);
+    if (apSetup) {
+      if (card) lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      if (card) lv_obj_clear_flag(card, LV_OBJ_FLAG_HIDDEN);
+      if (wifi_mgr::isConnected()) {
+        lv_label_set_text_fmt(lbl_wifi_status, "%s\nIP: %s", wifi_mgr::ssid().c_str(),
+                              wifi_mgr::ipAddress().c_str());
+      } else {
+        lv_label_set_text(lbl_wifi_status, "Disconnected");
+      }
+    }
+  }
+
+  // Nothing to reset while unconfigured - hide the button in AP-setup mode.
+  if (btn_wifi_reset) {
+    if (apSetup)
+      lv_obj_add_flag(btn_wifi_reset, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_clear_flag(btn_wifi_reset, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  // Skip is only meaningful on the auto-shown AP-setup screen; it replaces the
+  // nav Back there (showing both is redundant), so they toggle inversely.
+  if (btn_wifi_skip) {
+    if (apSetup)
+      lv_obj_clear_flag(btn_wifi_skip, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(btn_wifi_skip, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (btn_wifi_back) {
+    if (apSetup)
+      lv_obj_add_flag(btn_wifi_back, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_clear_flag(btn_wifi_back, LV_OBJ_FLAG_HIDDEN);
   }
   lvgl_port_unlock();
 }
@@ -633,9 +700,29 @@ void buildUI() {
   wifi_scr = lv_obj_create(nullptr);
   style_screen(wifi_scr);
   lv_obj_t *wc = make_content(wifi_scr);
+  // Tighter row spacing than the default 10: the AP-setup view stacks title +
+  // 112px QR + key + Skip and needs to fit CONTENT_H (260) without scrolling.
+  lv_obj_set_style_pad_row(wc, 6, LV_PART_MAIN);
   lv_obj_t *wn = make_nav(wifi_scr);
   lv_obj_t *wt = make_title(wc, "WiFi");
   lv_obj_align(wt, LV_ALIGN_TOP_MID, 0, 2);
+
+  // AP-setup view: join QR + key + Skip. `wc` is a flex column, so hidden
+  // children collapse - only the QR+key+Skip (AP mode) OR the status card +
+  // reset button (connected mode) are visible at a time; visibility is set in
+  // ui_update_wifi_label(). Created before the card so it flows above it.
+  wifi_qr = lv_qrcode_create(wc, 112, lv_color_hex(0x000000), lv_color_hex(0xFFFFFF));
+  lv_obj_set_style_border_color(wifi_qr, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_border_width(wifi_qr, 4, LV_PART_MAIN);  // quiet zone for scanners
+  lv_obj_add_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
+  lbl_wifi_key = lv_label_create(wc);
+  lv_obj_set_style_text_color(lbl_wifi_key, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(lbl_wifi_key, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_label_set_long_mode(lbl_wifi_key, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(lbl_wifi_key, 150);
+  lv_obj_set_style_text_align(lbl_wifi_key, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_add_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
+
   lv_obj_t *wcard = make_card(wc, 150, 100);
   lbl_wifi_status = lv_label_create(wcard);
   lv_obj_set_style_text_color(lbl_wifi_status, lv_color_hex(0x00FF00), LV_PART_MAIN);
@@ -645,8 +732,18 @@ void buildUI() {
   lv_obj_set_style_text_align(lbl_wifi_status, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_center(lbl_wifi_status);
   lv_obj_t *b_wifi_reset = make_btn(wc, "Reset WiFi", 140, 44, 0xB42318, &lv_font_montserrat_20);
+  btn_wifi_reset = b_wifi_reset;  // for visibility toggling in ui_update_wifi_label
   lv_obj_t *b_back_w = make_btn(wn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_w, LV_ALIGN_CENTER, 0, 0);
+  btn_wifi_back = b_back_w;  // hidden in AP-setup mode; Skip takes its spot in the nav bar
+
+  // AP-setup only: let a user who doesn't want WiFi leave the auto-shown QR
+  // screen and use the press touch-only. Lives in the nav bar, in Back's spot,
+  // so the bar is never an empty rectangle (Back and Skip toggle inversely).
+  // The device stays in AP mode; WiFi can be configured later via Config -> WiFi.
+  btn_wifi_skip = make_btn(wn, "Skip", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
+  lv_obj_align(btn_wifi_skip, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_flag(btn_wifi_skip, LV_OBJ_FLAG_HIDDEN);
 
   // Jam screen
   jam_scr = lv_obj_create(nullptr);
@@ -898,6 +995,13 @@ void buildUI() {
       },
       LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(
+      btn_wifi_skip,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        go(main_scr);  // leave setup; device stays in AP mode, configurable later
+      },
+      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
       b_wifi_reset,
       [](lv_event_t *e) {
         LV_UNUSED(e);
@@ -948,6 +1052,7 @@ void buildUI() {
   ui_update_main_warning();
   ui_update_sg_val();
   ui_update_batch_val();
+  ui_update_wifi_label();  // sets the AP-setup QR/key vs connected view
 
   lvgl_port_unlock();
 }
