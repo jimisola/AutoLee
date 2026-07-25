@@ -127,6 +127,15 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
   gets host-test coverage (highest-value test investment; narrow seams already exist).
 - [ ] Add `/api/v1/info` diagnostics endpoint (`esp_app_get_description()`, reset reason, heap,
   uptime, running partition, coredump-present flag).
+- [ ] Add `GET /api/v1/coredump` — streams the raw `coredump` partition (already exists,
+  `partitions.csv`, verified end-to-end in Phase 6) as a file download, gated behind the same
+  Digest auth as other reads; skip/404 cleanly if no coredump is present (check via
+  `esp_core_dump_image_check()` or equivalent before reading). Add a "Download core dump" button
+  to the web Firmware page next to OTA upload. Today the only way to get a coredump off the
+  device is `idf.py coredump-info` over a USB serial connection — this makes it retrievable
+  remotely, which matters once the press is on Karl's network and not on a bench. Distinct from
+  the deferred "diagnostics ZIP" idea above (no filesystem involved — this reads one existing
+  raw partition directly via `esp_partition_read`, not multiple files bundled together).
 - [ ] OTA image identity check (`esp_ota_get_partition_description()` project-name compare)
   before `set_boot_partition` — one half of `#1c` above (the other half is the default-password fix).
 - [ ] SSE diff-and-heartbeat instead of unconditional full-state every 250ms.
