@@ -146,6 +146,16 @@ void recomputeEffectiveEndpoints() {
 // ==========================================================================
 void startRunBetweenEndpoints() {
   if (!g_motion.endpointsCalibrated) return;
+  // Calibrated, but the axis may not be where the endpoints assume: a restored
+  // calibration (settings_store) comes back with the stepper counter at 0 while
+  // the carriage sits wherever a power cut left it, so running would drive to
+  // targets offset from reality. Refuse until a Return Home (or a fresh
+  // calibration) re-zeroes against the UP hard stop. Bail out before touching
+  // the TMC or the stepper, like the rejected-transition path below.
+  if (g_motion.positionReferenceStale) {
+    webLog("Start refused: position reference unconfirmed - return home first");
+    return;
+  }
   const uint32_t now = millis();
   bool started;
   {
@@ -396,9 +406,11 @@ void safeCreepHome() {
     motion_state::Guard g;
     homing = applyMotorEventLocked(autolee::MotorEvent::ReturnHome);
   }
-  // Rejected => not STALLED. Bail out before re-currenting the TMC or creeping
-  // the press; the caller (motion_cmd) already gates on STALLED, this is the
-  // tested table enforcing the same rule at the point of no return.
+  // Rejected => neither STALLED nor IDLE (the two states the tested table
+  // accepts ReturnHome from - IDLE so a reboot-stale position reference can be
+  // re-established). Bail out before re-currenting the TMC or creeping the
+  // press; the caller (motion_cmd) gates on the same table, this is it being
+  // enforced at the point of no return.
   if (!homing) {
     webLog("Return home ignored in state %u", (unsigned)g_motion.runState);
     return;
@@ -440,6 +452,10 @@ void safeCreepHome() {
   {
     motion_state::Guard g;
     applyMotorEventLocked(autolee::MotorEvent::HomeDone);  // HOMING -> IDLE
+    // A confirmed UP hard stop + re-zero IS the position reference, so it goes
+    // live in the same transaction as the state change. Only on success: the
+    // "FAILED to find stop!" path never re-referenced anything.
+    if (found) g_motion.positionReferenceStale = false;
   }
 
   webLog("Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
@@ -687,6 +703,9 @@ bool calibrateEndpointsSensorless() {
     // The "calibrated" flag and the offsets it validates go live together.
     motion_state::Guard g;
     g_motion.endpointsCalibrated = true;
+    // Both hard stops were just found and the axis re-zeroed at UP, so the
+    // position reference is fresh by definition.
+    g_motion.positionReferenceStale = false;
     g_motion.upOffsetSteps = 0;
     g_motion.downOffsetSteps = DOWN_OFFSET_DEFAULT;
   }

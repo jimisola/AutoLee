@@ -121,6 +121,7 @@ static std::string buildStateJSON() {
   st.counter = ms.counter;
   st.speed = ms.profiles[ms.activeProfile].speed_hz;
   st.calibrated = ms.endpointsCalibrated;
+  st.positionStale = ms.positionReferenceStale;
   st.rawUp = ms.rawUp;
   st.rawDown = ms.rawDown;
   st.endpointUp = ms.endpointUp;

@@ -52,6 +52,14 @@ struct MotionState {
   long rawUp = 0, rawDown = 0;
   long endpointUp = 0, endpointDown = 0;
   bool endpointsCalibrated = false;
+  // The endpoints above are trusted, but where the carriage physically IS is
+  // not: the stepper's counter always comes up at 0 on boot while the carriage
+  // sits wherever a power cut or watchdog reset left it. Set when a stored
+  // calibration is restored (settings_store.h), cleared only by an action that
+  // re-establishes ground truth against the UP hard stop - a successful
+  // safeCreepHome() or a fresh calibration. While it is set,
+  // startRunBetweenEndpoints() refuses to start.
+  bool positionReferenceStale = false;
   long counter = 0;
 
   uint32_t lastDirectionChangeMs = 0;

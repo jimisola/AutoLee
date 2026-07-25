@@ -6,7 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "version", "state", "counter", "speed", "calibrated",
+    "version", "state", "counter", "speed", "calibrated", "positionStale",
     "rawUp", "rawDown", "endpointUp", "endpointDown",
     "upOffset", "downOffset", "position", "sgTrip", "workZone", "currentMa",
     "profileIdx", "profileName", "profiles",
@@ -22,6 +22,10 @@
     "counter": { "type": "integer", "minimum": 0, "maximum": 9999 },
     "speed": { "type": "integer", "minimum": 0 },
     "calibrated": { "type": "boolean" },
+    "positionStale": {
+      "type": "boolean",
+      "description": "Calibration was restored across a reboot but the axis has not been re-referenced against the UP hard stop since. The device refuses to start a run while this is true; a Return Home (or a fresh calibration) clears it."
+    },
     "rawUp": { "type": "integer" },
     "rawDown": { "type": "integer" },
     "endpointUp": { "type": "integer" },

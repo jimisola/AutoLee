@@ -20,7 +20,7 @@ enum class MotorEvent : uint8_t {
   StopTimeout,      // stopping timed out
   Calibrate,        // begin sensorless calibration
   CalibrationDone,  // calibration finished (ok or fail)
-  ReturnHome,       // jam-screen "return home" pressed
+  ReturnHome,       // "return home" pressed (jam screen, or to re-reference the axis)
   HomeDone          // creep-home finished
 };
 
@@ -36,6 +36,14 @@ inline Transition motorTransition(MotorState s, MotorEvent e) {
     case MotorState::Idle:
       if (e == MotorEvent::Start) return {true, MotorState::Running};
       if (e == MotorEvent::Calibrate) return {true, MotorState::Calibrating};
+      // Homing from Idle is legal too, and is the *only* way to re-establish the
+      // position reference after a reboot: the stepper's counter always comes up
+      // at 0 while the carriage sits wherever power was lost, so restored
+      // endpoints (settings_store) mean nothing until a real stall search has
+      // re-zeroed at the UP hard stop. Idle->Homing is strictly conservative -
+      // it is a slow, current-limited creep, and Start is refused meanwhile
+      // (MotionState::positionReferenceStale).
+      if (e == MotorEvent::ReturnHome) return {true, MotorState::Homing};
       break;
     case MotorState::Running:
       if (e == MotorEvent::GracefulStop) return {true, MotorState::Stopping};

@@ -146,13 +146,41 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
     knob costs one commit rather than one per step. An NVS commit is a few ms — three orders of
     magnitude inside the 8 s task-WDT budget, and pump_task resets the watchdog on the next
     iteration.
-  - **Known residual (not solvable inside this module):** the stepper's position counter starts at
-    0 every boot while the carriage sits wherever power was lost. 0 *is* the UP endpoint in the
-    normal case (a finished run, a stop and a home all park there), but after a mid-stroke power
-    cut or watchdog reset the restored endpoints are offset from reality. Load logs
-    "position reference unknown after reboot - return home before running"; a proper gate
-    (require Return Home before the first run after a restore) belongs in
-    `startRunBetweenEndpoints()` and is left as a follow-up.
+  - **Residual closed: a restored calibration now *requires* a Return Home before it will run.**
+    The stepper's position counter starts at 0 every boot while the carriage sits wherever power
+    was lost. 0 *is* the UP endpoint in the normal case (a finished run, a stop and a home all park
+    there), but after a mid-stroke power cut or watchdog reset the restored endpoints are offset
+    from reality — so the restore is no longer merely logged, it is gated:
+    - `MotionState::positionReferenceStale` (`main/motion/motion_state.h:62`) is latched by
+      `settings_store::apply()` (`main/settings_store.cpp:127`) whenever a calibration is restored,
+      and by `fallbackToDefaults()` (`:142`) for good measure. It is cleared *only* by something
+      that re-establishes ground truth against the UP hard stop: a successful `safeCreepHome()`
+      (`main/motion/motion.cpp:458`, inside the same guard as the `HomeDone` transition, and **not**
+      on the "FAILED to find stop!" path) or a fresh `calibrateEndpointsSensorless()`
+      (`main/motion/motion.cpp:708`, in the same transaction as `endpointsCalibrated = true`).
+    - `startRunBetweenEndpoints()` refuses while it is set (`main/motion/motion.cpp:155`), logging
+      "Start refused: position reference unconfirmed - return home first" and returning before it
+      touches the TMC or the stepper — same shape as the existing `!endpointsCalibrated` and
+      rejected-transition early-outs.
+    - The tested FSM gained a second source state for `ReturnHome`:
+      `Idle + ReturnHome -> Homing` (`lib/autolee_logic/motor_fsm.h:46`, alongside
+      `Stalled + ReturnHome -> Homing` at `:60`), so re-referencing does not require a full
+      recalibration — the DOWN search stays valid as long as UP is correctly re-zeroed.
+      `motion_cmd`'s `s_returnHome` handler already gates on
+      `motionEventAllowed(MotorEvent::ReturnHome)` (`main/motion/motion_cmd.cpp:73`), so it picked
+      the new source state up with no change.
+    - Operator affordance: the main-screen warning banner (`ui_update_main_warning()`,
+      `main/ui/ui_touch.cpp:188`) now shows "TAP: RETURN HOME" and becomes clickable in that state
+      (same object/style as "NOT CALIBRATED"; the tap defers to pump_task via
+      `motion_cmd::requestReturnHome()` exactly like the jam screen's button, which is otherwise the
+      only Return Home in the UI and is unreachable from IDLE). The state JSON gained
+      `positionStale` (`lib/autolee_logic/state_json.h:30`/`:74`,
+      `buildStateJSON()` `main/net/web_server.cpp:124`, `api/schemas/state.schema.json` +
+      `state.example.json`), and the web dashboard reuses the jam-alert panel to surface it
+      (`main/net/index_html.h:368`).
+    - Covered by `host_test/test_motor_fsm` (the exhaustive transition sweep knows the new valid
+      pair) and 4 new `host_test/test_motion_seq` cases: Start refused while stale, Return Home from
+      IDLE clears it and unblocks Start, a failed home keeps it, a fresh calibration clears it.
 - [ ] **Reset calibration/settings action** (depends on the item above — nothing to reset until
   persistence exists). Once calibration silently survives reboots, there needs to be a deliberate
   way to discard it (press moved, brass changed, just want a clean recalibration) without an NVS
@@ -164,7 +192,7 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
   accidentally lock the device off the network. Destructive, so require a confirm step in the UI
   before firing.
 - [x] **Faked the `stepper::`/`tmc5160::` seams — `motion.cpp`'s sequencing now has host-test
-  coverage** (`host_test/fakes/` + `host_test/test_motion_seq/`, 30 Unity tests, **100% line
+  coverage** (`host_test/fakes/` + `host_test/test_motion_seq/`, 34 Unity tests, **100% line
   coverage of `main/motion/motion.cpp`** per gcovr — note CI's coverage *gate* still filters on
   `lib/autolee_logic/` only, so this figure is informational, not enforced). `main/motion/`'s
   `motion.cpp` and `motion_state.cpp` are compiled **verbatim** into the new suite (not extracted,

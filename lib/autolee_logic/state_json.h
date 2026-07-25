@@ -24,6 +24,10 @@ struct DeviceState {
   long counter;
   uint32_t speed;
   bool calibrated;
+  // Calibration restored across a reboot but the axis not yet re-referenced
+  // against the UP hard stop: the firmware refuses to start a run until a
+  // Return Home clears it (see main/motion/motion_state.h).
+  bool positionStale;
   long rawUp, rawDown, endpointUp, endpointDown;
   int32_t upOffset, downOffset;
   long position;
@@ -67,6 +71,7 @@ inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
   return snprintf(
       out, n,
       "{\"version\":\"%s\",\"state\":\"%s\",\"counter\":%ld,\"speed\":%lu,\"calibrated\":%s,"
+      "\"positionStale\":%s,"
       "\"rawUp\":%ld,\"rawDown\":%ld,\"endpointUp\":%ld,\"endpointDown\":%ld,"
       "\"upOffset\":%ld,\"downOffset\":%ld,\"position\":%ld,\"sgTrip\":%u,"
       "\"workZone\":%ld,\"currentMa\":%u,"
@@ -77,12 +82,12 @@ inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
       "\"wifiStatus\":\"%s\",\"wifiSSID\":\"%s\",\"wifiIP\":\"%s\","
       "\"batchTarget\":%ld,\"batchCount\":%ld,\"batchActive\":%s}",
       s.version, s.state, s.counter, (unsigned long)s.speed, s.calibrated ? "true" : "false",
-      s.rawUp, s.rawDown, s.endpointUp, s.endpointDown, (long)s.upOffset, (long)s.downOffset,
-      s.position, s.sgTrip, (long)s.workZone, s.currentMa, s.profileIdx, s.profileName,
-      s.profiles[0].name, (unsigned long)s.profiles[0].hz, s.profiles[0].sg, s.profiles[1].name,
-      (unsigned long)s.profiles[1].hz, s.profiles[1].sg, s.profiles[2].name,
-      (unsigned long)s.profiles[2].hz, s.profiles[2].sg, s.wifiStatus, ssidEscaped, s.wifiIP,
-      s.batchTarget, s.batchCount, s.batchActive ? "true" : "false");
+      s.positionStale ? "true" : "false", s.rawUp, s.rawDown, s.endpointUp, s.endpointDown,
+      (long)s.upOffset, (long)s.downOffset, s.position, s.sgTrip, (long)s.workZone, s.currentMa,
+      s.profileIdx, s.profileName, s.profiles[0].name, (unsigned long)s.profiles[0].hz,
+      s.profiles[0].sg, s.profiles[1].name, (unsigned long)s.profiles[1].hz, s.profiles[1].sg,
+      s.profiles[2].name, (unsigned long)s.profiles[2].hz, s.profiles[2].sg, s.wifiStatus,
+      ssidEscaped, s.wifiIP, s.batchTarget, s.batchCount, s.batchActive ? "true" : "false");
 }
 
 }  // namespace autolee

@@ -118,6 +118,13 @@ void apply(const Persisted &p) {
   for (uint8_t i = 0; i < NUM_PROFILES; i++) g_motion.profiles[i].sg_trip = p.sgTrip[i];
   g_motion.activeProfile = p.activeProfile;
   g_motion.endpointsCalibrated = p.endpointsCalibrated != 0;
+  // Restoring endpoints can never restore the *position reference* they are
+  // measured against: the stepper counter starts at 0 while the carriage sits
+  // wherever power was lost. Latch it stale so startRunBetweenEndpoints()
+  // refuses until a Return Home (or a fresh calibration) re-zeroes at the UP
+  // hard stop. Same guard as the fields above so a snapshotting reader never
+  // sees "calibrated" without the matching staleness.
+  if (g_motion.endpointsCalibrated) g_motion.positionReferenceStale = true;
 }
 
 // Keep the compiled-in MotionState initializers, and make the "not calibrated"
@@ -129,6 +136,10 @@ void fallbackToDefaults(const char *why) {
     g_motion.endpointsCalibrated = false;
     g_motion.endpointUp = 0;
     g_motion.endpointDown = 0;
+    // Moot while endpointsCalibrated is false (a run is refused on that alone),
+    // but set anyway: after a reboot the position reference is unknown whatever
+    // else the load decided.
+    g_motion.positionReferenceStale = true;
   }
   webLog("Settings: %s - using defaults, calibration cleared", why);
 }
@@ -190,7 +201,9 @@ void load() {
       // endpoint (where a completed run, a stop and a home all park it), so it
       // is right in the normal case - but after a mid-stroke power loss or
       // watchdog reset it is not, and the restored endpoints are then offset
-      // from reality. Return home first to re-reference the axis.
+      // from reality. apply() therefore latched g_motion.positionReferenceStale,
+      // which startRunBetweenEndpoints() enforces: a Return Home (or a fresh
+      // calibration) must re-reference the axis before a run is allowed.
       webLog("Settings: position reference unknown after reboot - return home before running");
     }
   }

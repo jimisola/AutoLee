@@ -68,8 +68,8 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <div class="counter" id="ctr">0</div>
 <button class="btn btn-run" id="br" onclick="toggleRun()">RUN</button>
 <div class="jam-alert" id="jamAlert">
-<div style="color:#FF4444;font-weight:700;margin-bottom:4px">&#9888; JAM DETECTED</div>
-<div style="color:#aaa;font-size:.8em;margin-bottom:8px">Motor stalled and backed off.</div>
+<div style="color:#FF4444;font-weight:700;margin-bottom:4px" id="jamTitle">&#9888; JAM DETECTED</div>
+<div style="color:#aaa;font-size:.8em;margin-bottom:8px" id="jamMsg">Motor stalled and backed off.</div>
 <button class="btn btn-blue" onclick="doAct('return_home')" id="bh">Return Home</button>
 </div>
 <div class="row ctr" style="margin-top:10px;gap:8px">
@@ -362,9 +362,10 @@ function upd(d){
   const sb=document.getElementById('sb');
   sb.textContent=d.state;
   sb.className='badge '+(d.state==='RUNNING'?'run':d.state==='CALIBRATING'?'warn':d.state==='STALLED'||d.state==='HOMING'?'stall':'ok');
-  const ja=document.getElementById('jamAlert');
-  if(d.state==='STALLED'){ja.style.display='block';document.getElementById('bh').disabled=false;document.getElementById('bh').textContent='Return Home'}
-  else if(d.state==='HOMING'){ja.style.display='block';document.getElementById('bh').disabled=true;document.getElementById('bh').textContent='Returning...'}
+  const ja=document.getElementById('jamAlert'),jt=document.getElementById('jamTitle'),jm=document.getElementById('jamMsg'),bh=document.getElementById('bh');
+  if(d.state==='STALLED'){jt.textContent='\u26A0 JAM DETECTED';jm.textContent='Motor stalled and backed off.';ja.style.display='block';bh.disabled=false;bh.textContent='Return Home'}
+  else if(d.state==='HOMING'){ja.style.display='block';bh.disabled=true;bh.textContent='Returning...'}
+  else if(d.positionStale){jt.textContent='\u26A0 POSITION UNCONFIRMED';jm.textContent='Calibration restored after a reboot - return home to re-reference the axis before running.';ja.style.display='block';bh.disabled=false;bh.textContent='Return Home'}
   else{ja.style.display='none'}
   const br=document.getElementById('br');
   if(d.state==='RUNNING'){br.textContent='STOP';br.classList.add('active')}

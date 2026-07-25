@@ -165,14 +165,44 @@ static void onJamReturnHome(lv_event_t *e) {
 // ==========================================================================
 //  UI UPDATE FUNCTIONS
 // ==========================================================================
+// The main-screen warning banner has two reasons to appear, in priority order:
+//   1. no calibration at all      -> "NOT CALIBRATED" (inert, Calibrate is on
+//      the settings screen, as before)
+//   2. calibration restored from NVS but the axis has not been re-referenced
+//      since the reboot (MotionState::positionReferenceStale) -> the banner
+//      turns into the affordance for fixing it, because in that state
+//      startRunBetweenEndpoints() refuses to run and the only other Return Home
+//      button lives on the jam screen, which is unreachable from IDLE.
+// Same object, same style, same update entry point - only the text and whether
+// it is clickable change.
+static void onMainWarnReturnHome(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  // Re-check off a snapshot: the banner may still be clickable for one timer
+  // period after a home already cleared the flag.
+  if (!motion_state::snapshot().positionReferenceStale) return;
+  // Deferred to pump_task, exactly like the jam screen's button: safeCreepHome()
+  // drives the stepper + TMC SPI for seconds.
+  motion_cmd::requestReturnHome();
+}
+
 void ui_update_main_warning() {
-  const bool calibrated = motion_state::snapshot().endpointsCalibrated;
+  const MotionState ms = motion_state::snapshot();
+  const bool calibrated = ms.endpointsCalibrated;
+  const bool stale = ms.positionReferenceStale;
   lvgl_port_lock(0);
   if (main_warn) {
-    if (calibrated)
-      lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
-    else
+    if (!calibrated) {
+      if (main_warn_lbl) lv_label_set_text(main_warn_lbl, "NOT CALIBRATED");
+      lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+    } else if (stale) {
+      if (main_warn_lbl) lv_label_set_text(main_warn_lbl, "TAP: RETURN HOME");
+      lv_obj_add_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+    }
   }
   lvgl_port_unlock();
 }
@@ -192,10 +222,21 @@ static void ui_create_main_warning(lv_obj_t *parent) {
   lv_obj_set_style_text_color(main_warn_lbl, lv_color_hex(0xFFD37C), LV_PART_MAIN);
   lv_obj_set_style_text_align(main_warn_lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_center(main_warn_lbl);
-  if (motion_state::snapshot().endpointsCalibrated)
-    lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
-  else
+  // Registered once; the CLICKABLE flag (managed by ui_update_main_warning())
+  // decides whether taps can reach it at all, and the handler re-checks anyway.
+  lv_obj_add_event_cb(main_warn, onMainWarnReturnHome, LV_EVENT_CLICKED, nullptr);
+  const MotionState ms = motion_state::snapshot();
+  if (!ms.endpointsCalibrated) {
+    lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+  } else if (ms.positionReferenceStale) {
+    lv_label_set_text(main_warn_lbl, "TAP: RETURN HOME");
+    lv_obj_add_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 void ui_update_speed_val() {

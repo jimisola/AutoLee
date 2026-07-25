@@ -478,14 +478,88 @@ static void test_creep_home_reports_failure_when_no_stop_found(void) {
   TEST_ASSERT_TRUE(fake::saw("tmc5160::rms_current(3500)"));  // run current restored anyway
 }
 
-static void test_creep_home_ignored_unless_stalled(void) {
-  givenCalibrated(0, 20000, 9000);  // IDLE
+// ReturnHome is legal from IDLE as well as STALLED, but not from a state where
+// the press is already moving - that would fight the run in progress.
+static void test_creep_home_ignored_while_running(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  const int n = (int)fake::events.size();
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(n, (int)fake::events.size(), fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("Return home ignored"));
+}
+
+// --------------------------------------------------------------------------
+//  Position reference staleness (settings_store restores calibration, but the
+//  stepper counter always comes up at 0 wherever the carriage physically is)
+// --------------------------------------------------------------------------
+// Calibrated + IDLE is not enough: with the reference unconfirmed, Start must
+// refuse without touching the TMC or the stepper.
+static void test_start_refused_when_position_reference_stale(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.positionReferenceStale = true;
+
+  startRunBetweenEndpoints();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)fake::events.size(), fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("Start refused: position reference unconfirmed"));
+}
+
+// Return Home from IDLE is the way out of that state: a real stall search
+// re-zeroes at the UP hard stop, which re-establishes the reference - and only
+// then does Start work.
+static void test_creep_home_from_idle_clears_stale_reference(void) {
+  givenCalibrated(0, 20000, 9000);  // IDLE, as after a reboot with a restore
+  g_motion.positionReferenceStale = true;
+  givenPress(2000, 40000);
 
   safeCreepHome();
 
   TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
-  TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)fake::events.size(), fake::dump().c_str());
-  TEST_ASSERT_TRUE(fake::logContains("Return home ignored"));
+  TEST_ASSERT_TRUE(fake::logContains("Creep home: found stop"));
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.rawUp);
+  TEST_ASSERT_FALSE(g_motion.positionReferenceStale);
+
+  fake::events.clear();
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+}
+
+// A home that never found the stop re-referenced nothing: the flag must survive
+// so Start stays refused.
+static void test_failed_creep_home_keeps_stale_reference(void) {
+  givenCalibrated(0, 20000, 9000);
+  g_motion.positionReferenceStale = true;  // no hard stops configured
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("Creep home: FAILED to find stop!"));
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+
+  fake::events.clear();
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(0, (int)fake::events.size());
+}
+
+// A fresh calibration finds both stops and re-zeroes at UP, so it is not stale
+// by definition.
+static void test_calibration_clears_stale_reference(void) {
+  g_motion.runState = IDLE;
+  g_motion.positionReferenceStale = true;
+  givenPress(-2000, 40000);
+
+  TEST_ASSERT_TRUE_MESSAGE(calibrateEndpointsSensorless(), fake::dump().c_str());
+
+  TEST_ASSERT_TRUE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_FALSE(g_motion.positionReferenceStale);
 }
 
 // --------------------------------------------------------------------------
@@ -608,7 +682,11 @@ int main(void) {
   RUN_TEST(test_creep_home_finds_stop_rezeros_and_returns_idle);
   RUN_TEST(test_creep_home_early_trip_catches_an_immediate_stop);
   RUN_TEST(test_creep_home_reports_failure_when_no_stop_found);
-  RUN_TEST(test_creep_home_ignored_unless_stalled);
+  RUN_TEST(test_creep_home_ignored_while_running);
+  RUN_TEST(test_start_refused_when_position_reference_stale);
+  RUN_TEST(test_creep_home_from_idle_clears_stale_reference);
+  RUN_TEST(test_failed_creep_home_keeps_stale_reference);
+  RUN_TEST(test_calibration_clears_stale_reference);
   RUN_TEST(test_return_home_succeeds_when_travel_is_clear);
   RUN_TEST(test_return_home_retries_then_gives_up);
   RUN_TEST(test_return_home_times_out);
