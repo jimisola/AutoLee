@@ -123,6 +123,16 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
 - [ ] Persist settings/calibration to NVS as a versioned struct (endpoints, per-profile
   `sg_trip`, `RUN_CURRENT_MA`, `SG_WORK_ZONE_STEPS`, active profile, counter) — currently
   RAM-only in `main/globals.cpp`, lost every reboot.
+- [ ] **Reset calibration/settings action** (depends on the item above — nothing to reset until
+  persistence exists). Once calibration silently survives reboots, there needs to be a deliberate
+  way to discard it (press moved, brass changed, just want a clean recalibration) without an NVS
+  erase over serial. Add a "Reset calibration" action, mirroring the existing "Reset WiFi"
+  pattern, on both the touch UI and web UI (`POST /api/v1/action` with a new `reset_settings` (or
+  similar) value, gated behind Digest auth like other writes). Scope it **narrowly**: clears only
+  the settings/calibration NVS namespace (forces `endpointsCalibrated = false`, restores tuning
+  defaults) — must NOT touch WiFi credentials, the AP key, or the web password, so a reset can't
+  accidentally lock the device off the network. Destructive, so require a confirm step in the UI
+  before firing.
 - [ ] Fake the `stepper::`/`tmc5160::` seams so `motion.cpp`'s jam/backoff/homing sequencing
   gets host-test coverage (highest-value test investment; narrow seams already exist).
 - [ ] Add `/api/v1/info` diagnostics endpoint (`esp_app_get_description()`, reset reason, heap,
