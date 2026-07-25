@@ -16,6 +16,16 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # option enabled for httpd_ws_frame_t etc. to be declared.
 CONFIG_HTTPD_WS_SUPPORT=y
 
+# ESP-IDF's default request header budget (512 bytes) is too small for a real
+# browser's Digest-auth retry: the Authorization header alone (username, realm,
+# nonce, response hash, qop, nc, cnonce) is often 300-400 bytes, and a real
+# browser adds its own User-Agent/Accept/Sec-Fetch-*/etc. on top - together
+# routinely over 512. Reproduced on hardware as a raw "Header fields are too
+# long" rejection (HTTP 431) on /api/v1/coredump once it became Digest-gated;
+# curl-based auth testing never hit this because curl sends much leaner
+# headers. Applies to every Digest-gated route, not just this one.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+
 # Use our own include/lv_conf.h instead of the LVGL component's Kconfig-
 # generated defaults. Misleadingly named: LV_CONF_SKIP=y (the component's
 # own default) means "skip lv_conf.h", not "skip Kconfig" - found the hard
