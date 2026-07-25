@@ -6,6 +6,7 @@
 #include "globals.h"
 #include "motion.h"
 #include "motion_state.h"
+#include "settings_store.h"
 #include "tmc5160_ctrl.h"
 #include "ui_touch.h"
 
@@ -145,6 +146,14 @@ void processPendingCommands() {
     ui_update_tuning_numbers();
     ui_update_main_warning();
   }
+
+  // Persist calibration/tuning changes. Self-throttling (a few seconds) and a
+  // no-op unless something in the persisted set actually differs from the last
+  // write, so the common path is one snapshot + one memcmp per pump iteration.
+  // An actual NVS commit costs a few ms - three orders of magnitude inside the
+  // 8s task-watchdog budget, and pump_task resets the watchdog on the very next
+  // iteration.
+  settings_store::tick();
 }
 
 }  // namespace motion_cmd

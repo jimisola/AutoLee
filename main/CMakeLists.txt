@@ -3,7 +3,7 @@
 # regardless of which group the including file lives in - the grouping is for
 # humans navigating the tree, not a module boundary the compiler enforces.
 idf_component_register(
-    SRCS "app_main.cpp" "globals.cpp"
+    SRCS "app_main.cpp" "globals.cpp" "settings_store.cpp"
          "drivers/display_touch.cpp" "drivers/axs5106l_touch.cpp"
          "drivers/tmc5160_hal.cpp" "drivers/tmc5160_ctrl.cpp"
          "drivers/stepper.cpp" "drivers/stepper_motor_encoder.c"

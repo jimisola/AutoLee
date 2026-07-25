@@ -16,6 +16,7 @@
 #include "web_server.h"
 #include "ui_touch.h"
 #include "globals.h"
+#include "settings_store.h"
 #include "config.h"  // FW_VERSION single source of truth
 
 static const char *TAG = "autolee";
@@ -83,6 +84,13 @@ extern "C" void app_main(void) {
   ESP_ERROR_CHECK(ret);
 
   ESP_LOGI(TAG, "AutoLee firmware v%s (ESP-IDF)", FW_VERSION);
+
+  // Restore the persisted calibration/tuning subset of g_motion BEFORE
+  // motion_init(), so the run current it pushes to the TMC5160 is the saved one
+  // rather than the compiled-in default. Fails safe (defaults +
+  // endpointsCalibrated=false) on a missing/old/invalid blob - see
+  // settings_store.h.
+  settings_store::load();
 
   lv_display_t *disp = display_touch_init();
 
