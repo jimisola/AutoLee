@@ -103,17 +103,21 @@ configurable.
 - The firmware version is **derived from git** — ESP-IDF populates `esp_app_desc_t.version` at
   build time from `git describe --always --tags --dirty`. The firmware reads it via
   `esp_app_get_description()->version`, so the serial boot banner, `/api/v1/state`'s `version`
-  and `/api/v1/info`'s `version` all report the same string (`v2.0.0` at a tag, otherwise a commit
+  and `/api/v1/info`'s `version` all report the same string (`2.0.0` at a tag, otherwise a commit
   hash, `-dirty` when the tree is modified). There is no version constant in the source.
-- **Tags are always full three-part semver, `vX.Y.Z`** — never the `vX.Y` shorthand (e.g. `v2.0.0`,
-  not `v2.0`). Worth noting: ESP-IDF's own releases don't follow this consistently — they tag the
-  first release of a minor line as two-part (`v5.5`, `v6.0`) and only add the patch digit for
-  subsequent point releases (`v5.5.1`...`v5.5.5`) — so this is a deliberate stricter choice for
-  this project, not something to defer to the framework's own precedent for. The dashboard's
-  rendering (`main/net/index_html.h`) and the release workflow don't care about the digit count
-  either way (they just echo whatever the tag says), so this is a convention to hold ourselves to,
-  not something enforced in code.
-- Cutting a release is therefore just `git tag vX.Y.Z && git push --tags` plus publishing a GitHub
+- **Tags are bare, full three-part semver, `X.Y.Z`** — no `v` prefix, and never the `X.Y` shorthand
+  (e.g. `2.0.0`, not `2.0` or `v2.0.0`). Semver.org's own FAQ is explicit that `v1.2.3` "is not a
+  semantic version" — the tag *contains* a version, it isn't one. Since this project's tag string
+  is the literal reported version (in `esp_app_desc_t.version`, the API JSON, and the OTA identity
+  check), a bare tag keeps that reported string an actual semver value with nothing to strip.
+  Consistent with this project's other repos (`git-dyn-semver-gradle-plugin`, `reqstool-*`, all
+  bare) rather than ESP-IDF's own releases, which use a `v` prefix but are inconsistent on digit
+  count (`v5.5`, then `v5.5.1`...`v5.5.5`) — a precedent this project already rejects on the digit
+  count, so it isn't one to defer to on the prefix either. The **web UI adds a display-only `v`
+  prefix when rendering** (`main/net/index_html.h`) — the underlying tag/version string never has
+  one; release artifact filenames also keep a literal `v` (`AutoLee_v2.0.0_merged.bin`) since a
+  filename is prose, not the version identifier.
+- Cutting a release is therefore just `git tag X.Y.Z && git push --tags` plus publishing a GitHub
   Release — no source file to bump.
 - The CI release pipeline (build + `idf.py merge-bin` + GitHub Release) lives in
   `.github/workflows/release.yml` and fires on `release: published`. It uses the tag name only to

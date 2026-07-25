@@ -15,15 +15,15 @@ jobs:
 
       # The firmware version is derived from git at build time
       # (esp_app_desc_t.version <- `git describe --always --tags --dirty`), so a
-      # clean checkout of tag vX.Y.Z (always full three-part semver) always
-      # reports exactly that tag - there is no
-      # source file to cross-check. This step only strips the leading "v" for use
-      # in the artifact filenames below.
+      # clean checkout of tag X.Y.Z (bare, always full three-part semver - no "v"
+      # prefix, see CONTRIBUTING.md) always reports exactly that tag - there is
+      # no source file to cross-check. The literal "v" in the artifact filenames
+      # below is prose, not the version string - it stays even though the tag
+      # itself is bare.
       - name: Release version
         id: ver
         run: |
-          VER="${GITHUB_REF_NAME#v}"
-          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "ver=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
       - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
         with:

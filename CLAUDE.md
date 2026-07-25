@@ -101,9 +101,10 @@ every StallGuard SPI read** to prevent bus contention — preserve this when tou
   `version.txt`, no `VERSION` in `project()`, no `PROJECT_VER`). The firmware reads it via
   `esp_app_get_description()->version` — the boot banner in `app_main.cpp`, `/api/v1/state`'s
   `version`, and `/api/v1/info`'s `version` all report that same string. Never add a version
-  macro/constant to the source; releasing is just `git tag vX.Y.Z && git push --tags` plus a GitHub
-  Release. Tags are always full three-part semver (`v2.0.0`, never `v2.0`) — a deliberate choice
-  stricter than ESP-IDF's own release tags, which mix two- and three-part. Two caveats:
+  macro/constant to the source; releasing is just `git tag X.Y.Z && git push --tags` plus a GitHub
+  Release. Tags are **bare** full three-part semver (`2.0.0`, never `2.0` or `v2.0.0` — semver.org:
+  "v1.2.3 is not a semantic version") — the web UI adds a display-only `v` when rendering
+  (`main/net/index_html.h`), the tag/reported version itself never has one. Two caveats:
   `PROJECT_VER` is cached at CMake *configure* time, not recomputed per
   build (`idf.py reconfigure` if you need a stale embedded version refreshed); and `git describe`
   picks the nearest tag by commit-graph distance, not the highest semver tag, which only matters
