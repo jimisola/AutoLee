@@ -208,6 +208,7 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <input type="file" id="fw" accept=".bin" style="display:none" onchange="upFW(this.files[0])">
 <div class="pbar" id="pb"><div class="fill" id="pf"></div></div>
 <div id="otaS"></div>
+<a class="btn btn-dark btn-sm" href="/api/v1/coredump" style="display:block;margin-top:10px;text-align:center;text-decoration:none">Download Core Dump</a>
 </div>
 
 <!-- NAV FOOTER -->

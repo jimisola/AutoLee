@@ -3,10 +3,14 @@ info:
   title: AutoLee event stream (SSE)
   version: "1.0"
   description: >
-    Server-Sent Events pushed by the AutoLee firmware on `GET /api/v1/events`. Two event
+    Server-Sent Events pushed by the AutoLee firmware on `GET /api/v1/events`. Three event
     types share the channel: the default `message` event carries the full device
-    state (same schema as `GET /api/v1/state`, see openapi.yaml) roughly every
-    250 ms; the named `log` event carries newly appended log lines.
+    state (same schema as `GET /api/v1/state`, see openapi.yaml), sent only when the
+    state actually changed since the last send (checked at most every 250 ms, the
+    server's poll cadence - not every poll produces a send); the named `log` event
+    carries newly appended log lines; the named `heartbeat` event is sent at a fixed
+    ~8 s cadence whenever no `message` went out in that window, so a client can tell
+    "still connected, nothing changed" apart from a dead connection.
   license:
     name: CC BY-NC 4.0
     url: https://creativecommons.org/licenses/by-nc/4.0/
@@ -26,6 +30,8 @@ channels:
         $ref: "#/components/messages/state"
       log:
         $ref: "#/components/messages/log"
+      heartbeat:
+        $ref: "#/components/messages/heartbeat"
 
 operations:
   receiveEvents:
@@ -36,6 +42,7 @@ operations:
     messages:
       - $ref: "#/channels/events/messages/state"
       - $ref: "#/channels/events/messages/log"
+      - $ref: "#/channels/events/messages/heartbeat"
 
 components:
   messages:
@@ -60,3 +67,15 @@ components:
             type: array
             items:
               type: string
+    heartbeat:
+      name: heartbeat
+      title: Heartbeat
+      summary: >
+        Named SSE 'heartbeat' event, sent every ~8 s when no state change occurred in that
+        window (state changes reset the heartbeat clock instead of stacking a heartbeat on
+        top). Distinguishes an idle-but-connected client from a dead one without resending
+        the full state on every tick. Payload is a fixed empty object.
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false

@@ -144,6 +144,11 @@ static constexpr uint16_t LOG_LINE_LEN = 140;
 //  SSE / BROADCAST
 // ==========================================================================
 static constexpr uint32_t SSE_INTERVAL_MS = 250;
+// broadcastState() only actually sends the state payload when it differs from
+// the last one sent (see web_server.cpp) - this is the fallback cadence for a
+// heartbeat event sent even when nothing changed, so a client stuck on an
+// unchanged state can still tell the connection is alive vs. dead.
+static constexpr uint32_t SSE_HEARTBEAT_MS = 8000;
 
 // ==========================================================================
 //  WEB AUTHENTICATION

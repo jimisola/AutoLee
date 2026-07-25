@@ -152,6 +152,68 @@ paths:
         "400": { description: Missing or over-long password }
         "500": { description: Could not persist the password to NVS }
 
+  /api/v1/info:
+    get:
+      summary: Firmware/hardware diagnostics
+      description: >
+        Build identity (version, IDF version, compile date/time, truncated ELF SHA-256),
+        last reset reason, heap stats, uptime, the currently-running OTA partition label,
+        and whether a valid coredump is waiting in the `coredump` partition. A GET, so -
+        like every other read on this device - it is left open, not Digest-gated.
+      operationId: getInfo
+      responses:
+        "200":
+          description: Diagnostics snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - version
+                  - idfVersion
+                  - compileDate
+                  - compileTime
+                  - elfSha256
+                  - resetReason
+                  - freeHeap
+                  - minFreeHeap
+                  - uptimeMs
+                  - runningPartition
+                  - coredumpPresent
+                properties:
+                  version: { type: string, description: "esp_app_desc_t.version" }
+                  idfVersion: { type: string, description: "esp_app_desc_t.idf_ver" }
+                  compileDate: { type: string }
+                  compileTime: { type: string }
+                  elfSha256: { type: string, description: "First 8 bytes of the ELF SHA-256, hex" }
+                  resetReason: { type: string, description: "esp_reset_reason(), e.g. POWERON, PANIC, TASK_WDT" }
+                  freeHeap: { type: integer, description: "esp_get_free_heap_size(), bytes" }
+                  minFreeHeap: { type: integer, description: "esp_get_minimum_free_heap_size(), bytes" }
+                  uptimeMs: { type: integer, description: "esp_timer_get_time() / 1000" }
+                  runningPartition: { type: string, description: "Label of the running OTA slot, e.g. ota_0" }
+                  coredumpPresent: { type: boolean, description: "esp_core_dump_image_check() == ESP_OK" }
+
+  /api/v1/coredump:
+    get:
+      summary: Download the stored core dump, if any
+      description: >
+        Streams the raw `coredump` partition (ELF format) as a file download. Validated via
+        `esp_core_dump_image_check()` before streaming - returns 404 rather than any bytes if
+        no valid coredump is present. Decode with `idf.py coredump-info` against the matching
+        firmware ELF. **Digest-gated despite being a GET** - unlike every other read on this
+        device, a coredump is a raw RAM snapshot and can contain the WiFi or web password in
+        plaintext (both are held in local C buffers at runtime).
+      operationId: getCoredump
+      responses:
+        "200":
+          description: Raw coredump partition contents
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404":
+          description: No valid core dump present
+
   /api/v1/ota:
     post:
       summary: Upload firmware (OTA)

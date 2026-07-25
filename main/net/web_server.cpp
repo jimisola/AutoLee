@@ -16,8 +16,12 @@
 
 #include <PsychicHttp.h>
 #include "esp_ota_ops.h"
+#include "esp_app_desc.h"
+#include "esp_partition.h"
+#include "esp_core_dump.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "nvs.h"
 
 #include "state_json.h"
@@ -60,6 +64,30 @@ static bool saveWebPassword(const std::string &pass) {
 
 static inline uint32_t millis() {
   return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+// ==========================================================================
+//  DIAGNOSTICS (/api/v1/info, /api/v1/coredump)
+// ==========================================================================
+static const char *resetReasonStr(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "POWERON";
+    case ESP_RST_EXT: return "EXT";
+    case ESP_RST_SW: return "SW";
+    case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT: return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO: return "SDIO";
+    case ESP_RST_USB: return "USB";
+    case ESP_RST_JTAG: return "JTAG";
+    case ESP_RST_EFUSE: return "EFUSE";
+    case ESP_RST_PWR_GLITCH: return "PWR_GLITCH";
+    case ESP_RST_CPU_LOCKUP: return "CPU_LOCKUP";
+    default: return "UNKNOWN";
+  }
 }
 
 // ==========================================================================
@@ -230,11 +258,37 @@ static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_
     return ESP_FAIL;
   }
   if (final) {
+    // Identity check runs before esp_ota_end, while the handle is still
+    // open, so a mismatch can be rejected via esp_ota_abort rather than
+    // finalized first: reject an image from a different project before it
+    // can ever be set as the boot partition, even transiently. This is one
+    // half of the #1c hardening item (docs/PLAN.md) - a leaked/default web
+    // password is otherwise enough to flash arbitrary firmware since secure
+    // boot is off; this at least stops a wrong/foreign .bin from being
+    // accepted as a same-project update.
+    esp_app_desc_t written_desc{};
+    esp_app_desc_t running_desc{};
+    bool identity_ok = false;
+    if (esp_ota_get_partition_description(s_ota_partition, &written_desc) == ESP_OK) {
+      running_desc = *esp_app_get_description();
+      identity_ok = (strncmp(written_desc.project_name, running_desc.project_name,
+                             sizeof(written_desc.project_name)) == 0);
+    }
+    if (!identity_ok) {
+      ESP_LOGE(TAG, "OTA: rejected - project name mismatch (image='%s', running='%s')",
+               written_desc.project_name, running_desc.project_name);
+      webLog("OTA rejected: firmware image identity mismatch");
+      otaAbort("project name mismatch");  // handle still open - abort, not end
+      return ESP_FAIL;
+    }
+
     // esp_ota_end frees the handle on both success and failure, so neither
     // branch below may call esp_ota_abort - just clear the bookkeeping.
     bool ended = (esp_ota_end(s_ota_handle) == ESP_OK);
     if (ended && esp_ota_set_boot_partition(s_ota_partition) == ESP_OK) {
-      ESP_LOGI(TAG, "OTA: success, %llu bytes", index + len);
+      ESP_LOGI(TAG, "OTA: success, %llu bytes, project='%s' version='%s'", index + len,
+               written_desc.project_name, written_desc.version);
+      webLog("OTA: new firmware verified and set to boot");
       rebootRequested = true;
       rebootRequestMs = millis();
       otaClear();
@@ -295,14 +349,21 @@ void setupWebServer() {
   // digest challenge/nonce handling stays the library's, not hand-rolled.
   server.addMiddleware(
       [](PsychicRequest *req, PsychicResponse *res, PsychicMiddlewareNext next) -> esp_err_t {
-        if (req->method() == HTTP_GET) return next();
+        // GET is open by default (dashboard, /api/v1/state, /api/v1/info, SSE -
+        // none of it is more sensitive than what's already on-screen). Coredump
+        // is the one GET exception: a crash dump is a raw RAM snapshot and can
+        // contain the WiFi password or web password in plaintext (both are held
+        // in local C buffers - wifi_mgr.cpp's wifi_config.sta/ap.password,
+        // s_auth's stored password) - "GET is harmless" doesn't hold for it, so
+        // it's gated like a write despite being a read.
+        std::string uri = req->uri();
+        uri = uri.substr(0, uri.find('?'));  // drop any query string
+        if (req->method() == HTTP_GET && uri != "/api/v1/coredump") return next();
         // Captive-portal setup endpoints are exempt while in AP-setup mode: a
         // fresh user doesn't have the (digest) web password, and WPA2 on the AP
         // is what gates access there instead. Only /save and /clear, and only
         // when unconfigured - every /api/v1/* control route stays gated.
         if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
-          std::string uri = req->uri();
-          uri = uri.substr(0, uri.find('?'));  // drop any query string
           if (uri == "/save" || uri == "/clear") return next();
         }
         return s_auth.run(req, res, next);
@@ -381,6 +442,82 @@ void setupWebServer() {
   server.on("/api/v1/state", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
     std::string state = buildStateJSON();
     return res->send(200, "application/json", state.c_str());
+  });
+
+  // Diagnostics: firmware identity, reset cause, heap, uptime, running OTA
+  // slot and whether a coredump is waiting to be pulled. A GET, so - like
+  // every other read in this file - it's left open (no Digest challenge);
+  // see the middleware comment above for the read/write auth split.
+  server.on("/api/v1/info", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
+    const esp_app_desc_t *desc = esp_app_get_description();
+    const esp_partition_t *running = esp_ota_get_running_partition();
+
+    // Truncated hex (first 8 bytes / 16 hex chars) - matches the short SHA
+    // ESP-IDF itself prints in the boot log, plenty to correlate against a
+    // build without dumping the full 64-char digest.
+    char sha[17];
+    for (int i = 0; i < 8; i++) snprintf(sha + i * 2, 3, "%02x", desc->app_elf_sha256[i]);
+
+    bool coredumpPresent = (esp_core_dump_image_check() == ESP_OK);
+
+    char buf[640];
+    snprintf(buf, sizeof(buf),
+             "{\"version\":\"%s\",\"idfVersion\":\"%s\",\"compileDate\":\"%s\","
+             "\"compileTime\":\"%s\",\"elfSha256\":\"%s\",\"resetReason\":\"%s\","
+             "\"freeHeap\":%u,\"minFreeHeap\":%u,\"uptimeMs\":%llu,"
+             "\"runningPartition\":\"%s\",\"coredumpPresent\":%s}",
+             desc->version, desc->idf_ver, desc->date, desc->time, sha,
+             resetReasonStr(esp_reset_reason()), (unsigned)esp_get_free_heap_size(),
+             (unsigned)esp_get_minimum_free_heap_size(),
+             (unsigned long long)(esp_timer_get_time() / 1000),
+             running ? running->label : "?", coredumpPresent ? "true" : "false");
+    return res->send(200, "application/json", buf);
+  });
+
+  // Streams the raw `coredump` partition as a file download so it's
+  // retrievable over the network instead of only via `idf.py coredump-info`
+  // over USB serial. esp_core_dump_image_check() validates the stored
+  // checksum first - a corrupt/blank partition 404s instead of streaming
+  // garbage. Unlike every other GET in this file, this one IS auth-gated (see
+  // the middleware above) - a coredump is a raw RAM snapshot and can contain
+  // the WiFi/web password in plaintext.
+  server.on("/api/v1/coredump", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) -> esp_err_t {
+    if (esp_core_dump_image_check() != ESP_OK) {
+      return res->send(404, "text/plain", "no core dump present");
+    }
+    size_t addr = 0, size = 0;
+    if (esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) {
+      return res->send(404, "text/plain", "no core dump present");
+    }
+    const esp_partition_t *part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+    if (!part) {
+      return res->send(404, "text/plain", "no coredump partition");
+    }
+
+    res->setCode(200);
+    res->setContentType("application/octet-stream");
+    res->addHeader("Content-Disposition", "attachment; filename=\"autolee_coredump.bin\"");
+    res->sendHeaders();
+
+    uint8_t chunk[512];
+    size_t offset = 0, remaining = size;
+    esp_err_t err = ESP_OK;
+    while (remaining > 0) {
+      size_t n = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
+      err = esp_partition_read(part, offset, chunk, n);
+      if (err != ESP_OK) {
+        ESP_LOGE(TAG, "coredump: partition read failed at offset %u (%s)", (unsigned)offset,
+                 esp_err_to_name(err));
+        break;
+      }
+      err = res->sendChunk(chunk, n);
+      if (err != ESP_OK) break;  // client likely gone; sendChunk already aborted the stream
+      offset += n;
+      remaining -= n;
+    }
+    if (err == ESP_OK) res->finishChunking();
+    return err;
   });
 
   server.on("/api/v1/toggle_run", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
@@ -584,6 +721,14 @@ void setupWebServer() {
 }
 
 static uint32_t s_lastSSEMs = 0;
+// Last state payload actually sent (empty until the first send) and when a
+// message last went out (state or heartbeat) - see below: broadcastState()
+// only pushes the full state when it changed, plus a heartbeat at a longer
+// fixed cadence so a client can tell "nothing changed" apart from "connection
+// died" without a full-state message every SSE_INTERVAL_MS regardless of
+// whether anything moved.
+static std::string s_lastSentState;
+static uint32_t s_lastSSESendMs = 0;
 
 void broadcastState() {
   if (s_ota_in_progress) return;
@@ -592,7 +737,17 @@ void broadcastState() {
   s_lastSSEMs = now;
 
   std::string state = buildStateJSON();
-  events.send(state.c_str(), nullptr, millis());
+  if (state != s_lastSentState) {
+    events.send(state.c_str(), nullptr, millis());
+    s_lastSentState = state;
+    s_lastSSESendMs = now;
+  } else if ((now - s_lastSSESendMs) >= SSE_HEARTBEAT_MS) {
+    // Named event, not the default "message" - the dashboard's onmessage
+    // handler only fires for the unnamed event, so this is inert to it
+    // unless a client explicitly listens for "heartbeat".
+    events.send("{}", "heartbeat", millis());
+    s_lastSSESendMs = now;
+  }
 
   uint32_t serial = g_log.serial();
   if (serial > logSentSerial) {
