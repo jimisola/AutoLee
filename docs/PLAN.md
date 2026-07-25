@@ -84,7 +84,7 @@ Note: PR #4 review finding #29 (squash the CI-debugging churn commits) is intent
 
 Deferred low-priority cleanups from the PR #4 review (not blocking):
 - [ ] **#17:** split `buildUI()` (~510 lines) into per-screen `build_<name>_screen()` functions. Turned out NOT to be a mechanical extraction — a centralized event-wiring block at the tail references ~16 button handles created across many screen blocks, so a clean split forces either moving each screen's callback wiring inline or promoting those handles to globals (the latter conflicts with #8). Deferred: it's a cosmetic smell, and the result can't be visually verified without a display module attached. Revisit alongside the Phase 3 display bring-up.
-- [ ] **#24:** the `feat!` platform migration currently ships under an unchanged `FW_VERSION "1.8"` with no changelog row — decide whether to bump the version / add a history entry (deferred pending that product decision).
+- [x] **#24:** decided — next release is **v2.0** (`main/config.h`'s `FW_VERSION`, single source of truth, bumped from `"1.8"`). `CHANGELOG.md`'s `[Unreleased]` section already covers this migration in full; it gets renamed to `## [2.0] - <date>` at actual release time per Keep a Changelog convention, once the release tag is cut.
 
 ## Phase 5 — Web UI + WiFi + OTA
 - [x] **WiFi** (`main/wifi_mgr.*`): ported `wifi_ota.cpp`'s flow onto `esp_wifi` + `nvs` (STA with saved creds → AP fallback, network scan, credential save/clear). ArduinoOTA dropped (Arduino-only, contradicts staying off Arduino) - OTA is web-upload only, see below.
@@ -278,7 +278,7 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
 - [x] Fixed the stale `.pre-commit-config.yaml` exclude path — was
   `^main/stepper_motor_encoder\.[ch]$`, now `^main/drivers/stepper_motor_encoder\.[ch]$` matching
   where the file actually lives.
-- [ ] `FW_VERSION` still `"1.8"` for what is a `feat!` platform migration (see `#24` above).
+- [x] `FW_VERSION` bumped to `"2.0"` (see `#24` above).
 
 Explicitly deferred (rationale in `docs/review-2026-07-25.md`'s Copilot-comparison section, not
 repeated here): splitting `main/` into ESP-IDF `components/` (already native), `esp_event`
