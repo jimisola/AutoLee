@@ -167,6 +167,13 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <button class="btn btn-blue btn-sm" onclick="setWz(500)">+500</button></div>
 </div>
 
+<!-- RESET CALIBRATION -->
+<div class="sec">
+<h2>Reset Calibration</h2>
+<div class="hint" style="margin-bottom:8px">Discards the stored endpoint calibration and all tuning above (offsets, StallGuard trips, motor current, work zone, speed profile, counter) and restores the factory defaults. WiFi and the web password are not affected. Only works while the press is idle; recalibrate before running.</div>
+<button class="btn btn-red btn-sm" onclick="resetSettings()" style="width:100%">Reset Calibration &amp; Tuning</button>
+</div>
+
 <!-- NAV FOOTER -->
 <div class="nav-footer">
 <a onclick="showPage('pageMain')">Main</a>
@@ -391,6 +398,9 @@ function setProfile(i){fetch('/api/v1/profile?idx='+i,{method:'POST'})}
 function setCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none';fetch('/api/v1/current?ma='+v,{method:'POST'})}
 function adj(w,d){fetch('/api/v1/endpoint?which='+w+'&delta='+d,{method:'POST'})}
 function doAct(a){fetch('/api/v1/action?do='+a,{method:'POST'})}
+function resetSettings(){
+  if(!confirm('Discard the stored calibration and all tuning, and restore factory defaults?\n\nThe press will be UNCALIBRATED and must be recalibrated before it can run. WiFi and the web password are not affected.'))return;
+  doAct('reset_settings')}
 function saveWifi(){
   const s=document.getElementById('ns').value,p=document.getElementById('np').value;
   if(!s){alert('SSID required');return}

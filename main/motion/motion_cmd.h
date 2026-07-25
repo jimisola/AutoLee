@@ -34,6 +34,7 @@ void requestProfile(uint8_t idx);   // switch speed profile
 void requestCurrentMa(int32_t ma);  // set motor run current (SPI write)
 void requestUiRefresh();            // refresh LVGL labels from pump_task
 void requestLogClear();             // clear the log ring
+void requestResetSettings();        // discard stored calibration/tuning (IDLE only)
 
 // --- Consumer: pump_task ONLY --------------------------------------------
 // Executes whatever was requested since the last call. Must not be called

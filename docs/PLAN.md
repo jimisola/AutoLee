@@ -182,16 +182,55 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
     - Covered by `host_test/test_motor_fsm` (the exhaustive transition sweep knows the new valid
       pair) and 4 new `host_test/test_motion_seq` cases: Start refused while stale, Return Home from
       IDLE clears it and unblocks Start, a failed home keeps it, a fresh calibration clears it.
-- [ ] **Reset calibration/settings action** (depends on the item above — nothing to reset until
-  persistence exists). Once calibration silently survives reboots, there needs to be a deliberate
-  way to discard it (press moved, brass changed, just want a clean recalibration) without an NVS
-  erase over serial. Add a "Reset calibration" action, mirroring the existing "Reset WiFi"
-  pattern, on both the touch UI and web UI (`POST /api/v1/action` with a new `reset_settings` (or
-  similar) value, gated behind Digest auth like other writes). Scope it **narrowly**: clears only
-  the settings/calibration NVS namespace (forces `endpointsCalibrated = false`, restores tuning
-  defaults) — must NOT touch WiFi credentials, the AP key, or the web password, so a reset can't
-  accidentally lock the device off the network. Destructive, so require a confirm step in the UI
-  before firing.
+- [x] **Reset calibration/settings action** — a deliberate way to discard a stored calibration
+  (press moved, brass changed, a clean recalibration wanted) without an NVS erase over serial.
+  - **Core:** `settings_store::resetToDefaults()` (`main/settings_store.h:64`,
+    `main/settings_store.cpp:284`). Erases the blob with **`nvs_erase_key`, never
+    `nvs_erase_all`** — the `autolee` namespace is *shared*: `wifi_mgr.cpp` keeps `ssid`/`pass`/
+    `apkey` and `web_server.cpp` keeps `webpass` in it, so only the `settings` key is ours to
+    delete and a reset can never lock the device off the network (the misleading "own namespace,
+    not wifi_mgr's" comment at `main/settings_store.cpp:16` was corrected to say this).
+  - **Defaults come from `MotionState` itself**, not from literals: `applyCompiledDefaults()`
+    (`main/settings_store.cpp:148`) copies the persisted subset out of a default-constructed
+    `MotionState`, so `motion_state.h` stays the single source of truth and a new persisted field
+    cannot be silently left behind. `fallbackToDefaults()` (`:170`) now just calls it plus logs —
+    the rejected-load and the deliberate-reset paths share one field list. Calibration is forced
+    off, the effective endpoints zeroed and `positionReferenceStale` latched, then
+    `recomputeEffectiveEndpoints()` runs, exactly as at the end of `load()`.
+  - **Dirty-check bookkeeping is defined, not accidental** (`main/settings_store.cpp:284`): on a
+    successful erase, `s_lastSaved` is re-baselined to the *defaults* and `s_lastCheckMs` reset,
+    so the `tick()` call at the very end of the same `processPendingCommands()` pass sees no diff
+    and does **not** immediately re-create the blob — the next boot takes the same "no stored
+    settings" path as a factory-fresh device. If the erase fails, the defaults are written over
+    the stale blob instead (RAM and flash must not disagree, or the old calibration would come
+    back on the next boot); if that write also fails, `s_lastSaved` is deliberately left at the
+    pre-reset copy so `tick()`'s dirty check keeps retrying.
+  - **Routing:** `motion_cmd::requestResetSettings()` (`main/motion/motion_cmd.h:37`,
+    `main/motion/motion_cmd.cpp:53`) — one more atomic flag, executed on pump_task only
+    (`:144`). Gated on the literal `g_motion.runState == IDLE` rather than
+    `canStart()`/`motionEventAllowed()`: this is not a motion command, and coupling it to the
+    motion-permission table would silently widen the gate if that table ever gains a state.
+    pump_task then re-programs the hardware from the restored defaults (`tmc5160::rms_current()`
+    on the display-shared SPI bus, `setActiveProfile()` for the stepper speed) and refreshes the
+    UI. A non-IDLE request is logged and dropped.
+  - **API:** `POST /api/v1/action?do=reset_settings` (`main/net/web_server.cpp:654`), already
+    covered by the existing Digest-auth middleware like every other write; documented with the
+    other action values in `api/openapi.yaml:104`.
+  - **Web UI:** a "Reset Calibration" section at the end of the Configuration page
+    (`main/net/index_html.h:171`) with a `confirm()` guard in `resetSettings()` (`:401`), the
+    same client-side pattern `resetWifi()` uses.
+  - **Touch UI:** a red "Reset Cal" button, last on the (scrollable) Config screen
+    (`main/ui/ui_touch.cpp:746`) — deliberately off the main/settings screens and out of the way
+    of normal operation. **Confirm step: two-tap arming** (`on_reset_cal()`, `:599`), because
+    this UI has no modal-dialog pattern to reuse (the existing destructive buttons, "Reset WiFi"
+    and "Reset Count", fire on the first tap) and a dedicated confirm *screen* would be a lot of
+    machinery plus another navigation dead-end on a 172x320 display. The first tap turns the
+    button amber and relabels it "Sure? Tap" and starts a one-shot `UI_CONFIRM_ARM_MS` (5 s,
+    `main/config.h:141`) timer; only a second tap inside that window fires. The timeout, entering
+    the screen and leaving it all disarm (`:1107`, `:1166`), so a stray tap can never wipe a
+    calibration and the operator is told what the next tap will do.
+  - Verified: `idf.py build` clean, and all 10 `host_test/` suites still pass (this touches no
+    `lib/autolee_logic/` code; `main/motion/motion.cpp`'s host-tested sequencing is unchanged).
 - [x] **Faked the `stepper::`/`tmc5160::` seams — `motion.cpp`'s sequencing now has host-test
   coverage** (`host_test/fakes/` + `host_test/test_motion_seq/`, 34 Unity tests, **100% line
   coverage of `main/motion/motion.cpp`** per gcovr — note CI's coverage *gate* still filters on

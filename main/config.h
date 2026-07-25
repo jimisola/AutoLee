@@ -134,6 +134,12 @@ static constexpr uint32_t CREEP_HOME_ACCEL = CAL_ACCEL;
 // ==========================================================================
 static constexpr int SCR_W = 172, SCR_H = 320, NAV_H = 60, CONTENT_H = SCR_H - NAV_H;
 
+// How long the destructive "Reset Cal" button on the Config screen stays armed
+// after the first tap. A second tap inside this window commits; anything else
+// (or the timeout) disarms it - the touch UI has no modal dialog, and a
+// stray/curious tap must never wipe a calibration on its own.
+static constexpr uint32_t UI_CONFIRM_ARM_MS = 5000;
+
 // ==========================================================================
 //  LOG RING BUFFER
 // ==========================================================================

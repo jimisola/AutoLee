@@ -104,12 +104,24 @@ paths:
   /api/v1/action:
     post:
       summary: Trigger a device action
+      description: >
+        `calibrate` starts a sensorless endpoint calibration, `return_home`
+        creeps to the UP hard stop and re-references the axis, `reset_counter`
+        zeroes the piece counter, and `reset_settings` discards the stored
+        calibration/tuning: it erases this firmware's settings blob in NVS and
+        restores the compiled-in defaults (endpoints cleared, offsets, per-profile
+        StallGuard trips, run current, work zone, active profile and counter),
+        leaving the device uncalibrated. It does NOT touch the WiFi credentials,
+        the AP key or the web password. Destructive - confirm in the UI first.
+        All actions are deferred to the motion task and re-checked there;
+        `reset_settings` is applied only while the machine is IDLE and is
+        silently ignored otherwise (the response is 200 either way).
       operationId: action
       parameters:
         - name: do
           in: query
           required: true
-          schema: { type: string, enum: [calibrate, return_home, reset_counter] }
+          schema: { type: string, enum: [calibrate, return_home, reset_counter, reset_settings] }
       responses: { "200": { $ref: "#/components/responses/Ok" } }
 
   /api/v1/wifi:

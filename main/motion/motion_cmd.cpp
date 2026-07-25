@@ -23,6 +23,7 @@ std::atomic<bool> s_returnHome{false};
 std::atomic<bool> s_batchStart{false};
 std::atomic<bool> s_uiRefresh{false};
 std::atomic<bool> s_logClear{false};
+std::atomic<bool> s_resetSettings{false};
 std::atomic<int32_t> s_profile{-1};    // -1 = none pending
 std::atomic<int32_t> s_currentMa{-1};  // -1 = none pending
 
@@ -48,6 +49,9 @@ void requestUiRefresh() {
 }
 void requestLogClear() {
   s_logClear.store(true);
+}
+void requestResetSettings() {
+  s_resetSettings.store(true);
 }
 void requestProfile(uint8_t idx) {
   s_profile.store((int32_t)idx);
@@ -135,6 +139,30 @@ void processPendingCommands() {
     // though webLog() may be pushing concurrently from another task.
     g_log.clear();
     logSentSerial = 0;
+  }
+
+  if (s_resetSettings.exchange(false)) {
+    // Deliberately NOT gated through motionEventAllowed()/canStart(): this is
+    // not a motion command, and coupling it to the motion-permission table
+    // would silently widen the gate if that table ever gains a state. The
+    // condition we actually need is the literal one - the machine must be fully
+    // idle, so a run/home/calibration can never have the endpoints, the run
+    // current or the active profile pulled out from under it mid-stroke.
+    if (g_motion.runState == IDLE) {
+      // Erases the NVS blob and restores the compiled-in defaults (calibration
+      // cleared, positionReferenceStale latched). WiFi credentials, the AP key
+      // and the web password are in other NVS keys and are not touched.
+      settings_store::resetToDefaults();
+      // Push the restored values down to the hardware from pump_task: the TMC
+      // write shares the SPI bus with the display, and re-applying the profile
+      // is what feeds stepper::setSpeedInHz() the default profile's speed.
+      tmc5160::rms_current(g_motion.runCurrentMa);
+      setActiveProfile(g_motion.activeProfile);
+      ui_update_speed_val();
+      s_uiRefresh.store(true);  // handled by the block below, same pass
+    } else {
+      webLog("Settings reset ignored in state %u", (unsigned)g_motion.runState);
+    }
   }
 
   if (s_uiRefresh.exchange(false)) {

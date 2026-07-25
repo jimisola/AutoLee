@@ -47,4 +47,20 @@ void tick();
 // Safe to call from any task.
 void saveNow();
 
+// Deliberate "reset calibration": erase the persisted blob and restore every
+// field this module persists (endpoints/offsets, per-profile sg_trip,
+// runCurrentMa, sgWorkZoneSteps, activeProfile, counter) to MotionState's
+// compiled-in defaults, forcing `endpointsCalibrated = false` and latching
+// `positionReferenceStale`. Finishes with recomputeEffectiveEndpoints().
+//
+// Narrowly scoped: it erases ONLY this module's key, so the WiFi credentials,
+// the AP key and the web password - which share the `autolee` NVS namespace
+// under their own keys (wifi_mgr.cpp, web_server.cpp) - are untouched and a
+// reset can never lock the device off the network.
+//
+// pump_task ONLY (via motion_cmd::requestResetSettings()): it rewrites motion
+// state that pump_task owns, and its caller re-programs the TMC5160 over the
+// SPI bus shared with the display. Never call it from an HTTP or LVGL handler.
+void resetToDefaults();
+
 }  // namespace settings_store

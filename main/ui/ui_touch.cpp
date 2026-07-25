@@ -559,6 +559,63 @@ static void on_calibrate(lv_event_t *e) {
   motion_cmd::requestCalibrate();
 }
 
+// ==========================================================================
+//  "Reset Cal" - destructive, so it needs a confirm step
+// ==========================================================================
+// There is no modal-dialog pattern anywhere in this UI (the only other
+// destructive buttons, "Reset WiFi" and "Reset Count", fire on the first tap),
+// and a whole extra confirm SCREEN for one rarely-used action would be a lot of
+// machinery plus another navigation dead-end on a 172x320 display. So the
+// button arms itself instead: the first tap turns it amber and relabels it
+// "Sure? Tap", the second tap within UI_CONFIRM_ARM_MS commits, and the
+// timeout disarms it. A single stray tap can therefore never wipe a
+// calibration, and the operator is told what the next tap will do.
+static lv_obj_t *btn_reset_cal = nullptr;
+static lv_timer_t *reset_cal_timer = nullptr;  // non-null == armed
+
+static void reset_cal_show_idle() {
+  if (!btn_reset_cal) return;
+  lv_obj_t *lbl = lv_obj_get_child(btn_reset_cal, 0);
+  if (lbl) lv_label_set_text(lbl, "Reset Cal");
+  lv_obj_set_style_bg_color(btn_reset_cal, lv_color_hex(0xB42318), LV_PART_MAIN);
+}
+
+// The arming timer is one-shot: LVGL deletes it right after this returns, so
+// only clear the handle here - deleting it again would be a double free.
+static void reset_cal_timeout_cb(lv_timer_t *t) {
+  LV_UNUSED(t);
+  reset_cal_timer = nullptr;
+  reset_cal_show_idle();
+}
+
+static void reset_cal_disarm() {
+  if (reset_cal_timer) {
+    lv_timer_del(reset_cal_timer);
+    reset_cal_timer = nullptr;
+  }
+  reset_cal_show_idle();
+}
+
+static void on_reset_cal(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  if (!reset_cal_timer) {  // first tap: arm, change nothing else
+    if (btn_reset_cal) {
+      lv_obj_t *lbl = lv_obj_get_child(btn_reset_cal, 0);
+      if (lbl) lv_label_set_text(lbl, "Sure? Tap");
+      lv_obj_set_style_bg_color(btn_reset_cal, lv_color_hex(0xB4540A), LV_PART_MAIN);
+    }
+    reset_cal_timer = lv_timer_create(reset_cal_timeout_cb, UI_CONFIRM_ARM_MS, nullptr);
+    if (reset_cal_timer) lv_timer_set_repeat_count(reset_cal_timer, 1);
+    return;
+  }
+  reset_cal_disarm();
+  // Deferred to pump_task like every other state-changing button: the reset
+  // erases NVS and re-programs the TMC5160 over the SPI bus shared with this
+  // display. pump_task also re-checks that the machine is IDLE before applying
+  // it, so a run started between the two taps is not affected.
+  motion_cmd::requestResetSettings();
+}
+
 static void counter_timer_cb(lv_timer_t *t) {
   LV_UNUSED(t);
   const MotionState ms = motion_state::snapshot();
@@ -683,6 +740,10 @@ void buildUI() {
   lv_obj_t *b_tuning = make_btn(cfgc, "Endpoints", 140, 44, 0x1F6FEB, &lv_font_montserrat_20);
   lv_obj_t *b_stall = make_btn(cfgc, "Stall Guard", 140, 44, 0x1F6FEB, &lv_font_montserrat_20);
   lv_obj_t *b_wifi = make_btn(cfgc, "WiFi Info", 140, 44, 0x1F6FEB, &lv_font_montserrat_20);
+  // Last on the (scrollable) Config screen, deliberately out of the way of
+  // normal operation: it discards the calibration + tuning. Two-tap confirm,
+  // see on_reset_cal().
+  btn_reset_cal = make_btn(cfgc, "Reset Cal", 140, 44, 0xB42318, &lv_font_montserrat_20);
   lv_obj_t *b_back_cfg = make_btn(cfgn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_cfg, LV_ALIGN_CENTER, 0, 0);
 
@@ -1043,6 +1104,7 @@ void buildUI() {
       b_config,
       [](lv_event_t *e) {
         LV_UNUSED(e);
+        reset_cal_disarm();  // never enter the screen with Reset Cal pre-armed
         go(config_scr);
       },
       LV_EVENT_CLICKED, nullptr);
@@ -1101,6 +1163,7 @@ void buildUI() {
       b_back_cfg,
       [](lv_event_t *e) {
         LV_UNUSED(e);
+        reset_cal_disarm();  // leaving the screen cancels a pending confirm
         go(settings_scr);
       },
       LV_EVENT_CLICKED, nullptr);
@@ -1111,6 +1174,7 @@ void buildUI() {
         go(config_scr);
       },
       LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(btn_reset_cal, on_reset_cal, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(btn_eu, on_go_ep_up, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(btn_ed, on_go_ep_dn, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(

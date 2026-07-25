@@ -13,8 +13,12 @@
 namespace settings_store {
 namespace {
 
-// Own namespace, not wifi_mgr's "wifi": the two stores have independent
-// lifetimes (clearing WiFi credentials must not touch the calibration).
+// NOTE: this namespace is SHARED with wifi_mgr.cpp ("ssid"/"pass"/"apkey") and
+// web_server.cpp ("webpass"). Only the key below belongs to this module, so
+// every destructive operation here must be key-scoped (nvs_erase_key), never
+// namespace-scoped (nvs_erase_all) - see resetToDefaults(). The two stores have
+// independent lifetimes: clearing WiFi must not touch the calibration, and
+// resetting the calibration must not lock the device off the network.
 constexpr char kNamespace[] = "autolee";
 constexpr char kKey[] = "settings";
 
@@ -127,20 +131,43 @@ void apply(const Persisted &p) {
   if (g_motion.endpointsCalibrated) g_motion.positionReferenceStale = true;
 }
 
-// Keep the compiled-in MotionState initializers, and make the "not calibrated"
-// half explicit rather than merely inherited: whatever else a rejected load
-// leaves behind, the machine must not think it knows its endpoints.
+// Restore exactly the fields capture()/apply() cover to MotionState's
+// compiled-in initializers, plus the derived "not calibrated" half. The
+// defaults come from a default-constructed MotionState rather than from
+// literals repeated here, so motion_state.h stays the single source of truth
+// and adding a persisted field cannot leave this list quietly behind.
+//
+// Shared by the rejected-load path (fallbackToDefaults(), where the assignments
+// are a no-op because nothing has touched g_motion yet at boot - they just make
+// the guarantee explicit instead of merely inherited) and by resetToDefaults(),
+// where they are the whole point: at runtime the live values ARE dirty.
+//
+// Callers must not already hold the guard, and must call
+// recomputeEffectiveEndpoints() afterwards if they need the derived endpoints
+// re-derived (this function only zeroes them).
+void applyCompiledDefaults() {
+  const MotionState def{};  // constructed outside the critical section
+  motion_state::Guard g;
+  g_motion.runCurrentMa = def.runCurrentMa;
+  g_motion.rawUp = def.rawUp;
+  g_motion.rawDown = def.rawDown;
+  g_motion.upOffsetSteps = def.upOffsetSteps;
+  g_motion.downOffsetSteps = def.downOffsetSteps;
+  g_motion.sgWorkZoneSteps = def.sgWorkZoneSteps;
+  g_motion.counter = def.counter;
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) g_motion.profiles[i].sg_trip = def.profiles[i].sg_trip;
+  g_motion.activeProfile = def.activeProfile;
+  // Whatever else happened, the machine must not think it knows its endpoints.
+  g_motion.endpointsCalibrated = false;
+  g_motion.endpointUp = 0;
+  g_motion.endpointDown = 0;
+  // Moot while endpointsCalibrated is false (a run is refused on that alone),
+  // but set anyway: the position reference is unknown whatever else we decided.
+  g_motion.positionReferenceStale = true;
+}
+
 void fallbackToDefaults(const char *why) {
-  {
-    motion_state::Guard g;
-    g_motion.endpointsCalibrated = false;
-    g_motion.endpointUp = 0;
-    g_motion.endpointDown = 0;
-    // Moot while endpointsCalibrated is false (a run is refused on that alone),
-    // but set anyway: after a reboot the position reference is unknown whatever
-    // else the load decided.
-    g_motion.positionReferenceStale = true;
-  }
+  applyCompiledDefaults();
   webLog("Settings: %s - using defaults, calibration cleared", why);
 }
 
@@ -156,6 +183,27 @@ bool writeBlob(const Persisted &p) {
   nvs_close(h);
   if (err != ESP_OK) {
     webLog("Settings: NVS write failed (%d)", (int)err);
+    return false;
+  }
+  return true;
+}
+
+// Key-scoped on purpose (see kNamespace): nvs_erase_all() here would also wipe
+// the WiFi credentials, the AP key and the web password, which live in the same
+// namespace under their own keys.
+bool eraseBlob() {
+  nvs_handle_t h;
+  esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &h);
+  if (err != ESP_OK) {
+    webLog("Settings: NVS open failed (%d)", (int)err);
+    return false;
+  }
+  err = nvs_erase_key(h, kKey);
+  if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;  // nothing stored: already reset
+  if (err == ESP_OK) err = nvs_commit(h);
+  nvs_close(h);
+  if (err != ESP_OK) {
+    webLog("Settings: NVS erase failed (%d)", (int)err);
     return false;
   }
   return true;
@@ -231,6 +279,41 @@ void saveNow() {
   s_lastCheckMs = now_ms();
   if (memcmp(&cur, &s_lastSaved, sizeof(cur)) == 0) return;
   if (writeBlob(cur)) s_lastSaved = cur;
+}
+
+void resetToDefaults() {
+  applyCompiledDefaults();
+  // Derived state, exactly as at the end of load(): zeroes the effective
+  // endpoints now that endpointsCalibrated is false.
+  recomputeEffectiveEndpoints();
+
+  const Persisted def = capture();
+  s_lastCheckMs = now_ms();  // restart the throttle window either way
+
+  if (eraseBlob()) {
+    // Flash holds nothing and RAM holds exactly the compiled-in defaults, so
+    // there is nothing left to write. Re-baselining the dirty check to those
+    // defaults is what stops tick() from immediately re-creating the blob two
+    // lines later and undoing half the reset: the next boot then takes the same
+    // "no stored settings" path as a factory-fresh device. Any genuine change
+    // an operator makes afterwards still differs from this baseline, so normal
+    // persistence resumes with the very next tick().
+    s_lastSaved = def;
+    webLog("Settings: calibration and tuning reset to defaults (WiFi/password untouched)");
+  } else {
+    // Erase failed, so RAM and flash disagree and the stale blob would come
+    // back on the next boot - which is the one outcome a reset must not have.
+    // Overwrite it with the defaults instead. If that fails too, deliberately
+    // leave s_lastSaved as the pre-reset copy: it now differs from the live
+    // state, so tick()'s dirty check retries the write every kSaveIntervalMs
+    // until one succeeds.
+    if (writeBlob(def)) {
+      s_lastSaved = def;
+      webLog("Settings: reset to defaults (erase failed, defaults written instead)");
+    } else {
+      webLog("Settings: reset applied in RAM but NVS write failed - will retry");
+    }
+  }
 }
 
 }  // namespace settings_store

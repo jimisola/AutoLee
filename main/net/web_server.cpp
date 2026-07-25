@@ -651,6 +651,11 @@ void setupWebServer() {
       } else if (action == "reset_counter") {
         motion_state::Guard g;
         g_motion.counter = 0;
+      } else if (action == "reset_settings") {
+        // Deferred: erases the calibration/tuning NVS blob and re-programs the
+        // TMC5160 over the display's SPI bus - pump_task work, not HTTP-task
+        // work. Gated on IDLE at execution time (motion_cmd.cpp), not here.
+        motion_cmd::requestResetSettings();
       }
     }
     return res->send(200, "text/plain", "ok");
