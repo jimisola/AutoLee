@@ -5,8 +5,9 @@ All notable changes to AutoLee firmware.
 The firmware version is derived from git: ESP-IDF fills `esp_app_desc_t.version`
 at build time from `git describe --always --tags --dirty`, surfaced identically by
 the boot banner, `/api/v1/state` and `/api/v1/info`. There is no version constant
-in the source to bump — a release is just a `vX.Y` tag plus a GitHub Release, and
-the release workflow uses the tag only to name its artifacts.
+in the source to bump — a release is just a `vX.Y.Z` tag (always full three-part
+semver, e.g. `v2.0.0` not `v2.0`) plus a GitHub Release, and the release workflow
+uses the tag only to name its artifacts.
 
 ---
 

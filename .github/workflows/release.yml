@@ -15,7 +15,8 @@ jobs:
 
       # The firmware version is derived from git at build time
       # (esp_app_desc_t.version <- `git describe --always --tags --dirty`), so a
-      # clean checkout of tag vX.Y always reports exactly that tag - there is no
+      # clean checkout of tag vX.Y.Z (always full three-part semver) always
+      # reports exactly that tag - there is no
       # source file to cross-check. This step only strips the leading "v" for use
       # in the artifact filenames below.
       - name: Release version
