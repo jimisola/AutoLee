@@ -100,11 +100,40 @@ configurable.
 
 ## Versioning & releases
 
-- The firmware version lives in `main/config.h` as `FW_VERSION` (single source of truth; read by
-  the serial banner). Keep the README version history consistent when bumping.
+- The firmware version is **derived from git** — ESP-IDF populates `esp_app_desc_t.version` at
+  build time from `git describe --always --tags --dirty`. The firmware reads it via
+  `esp_app_get_description()->version`, so the serial boot banner, `/api/v1/state`'s `version`
+  and `/api/v1/info`'s `version` all report the same string (`v2.0` at a tag, otherwise a commit
+  hash, `-dirty` when the tree is modified). There is no version constant in the source.
+- Cutting a release is therefore just `git tag vX.Y && git push --tags` plus publishing a GitHub
+  Release — no source file to bump.
 - The CI release pipeline (build + `idf.py merge-bin` + GitHub Release) lives in
-  `.github/workflows/release.yml` and fires on `release: published`. A version guard fails the
-  build if the tag doesn't match `FW_VERSION`.
+  `.github/workflows/release.yml` and fires on `release: published`. It uses the tag name only to
+  name the attached artifacts.
+
+### Two caveats worth knowing about this mechanism
+
+- **Local builds can embed a stale version — reconfigure after pulling/checking out a tag.**
+  `PROJECT_VER` is computed once at CMake *configure* time and then cached; it is NOT
+  recomputed on every `idf.py build`. In the normal edit→build→flash loop this is invisible
+  (the C/C++ sources you're iterating on aren't what changes the version string), but if you
+  check out a different tag/branch, or want the version to reflect a git state that changed
+  *since* the last configure, a plain `idf.py build` can silently embed the old string. Run
+  `idf.py reconfigure` (or delete `build/`) first if the embedded version needs to be trusted —
+  don't assume a rebuild alone refreshes it. This is a real difference from tools like
+  setuptools-scm/hatch-vcs (Python) or axion-release (Gradle), which recompute from git on
+  every invocation rather than caching at a separate "configure" step.
+- **`git describe` finds the nearest reachable tag by commit-graph distance, not the highest
+  semver tag.** hatch-vcs/setuptools-scm and axion-release explicitly parse all reachable tags
+  as semver and pick the highest one, specifically to stay correct across out-of-order tagging
+  or diverging branches (e.g. a hotfix tagged on an older line after a newer major tag already
+  exists elsewhere). Plain `git describe --tags` has no semver awareness at all — it just walks
+  first-parent history from `HEAD` and reports the most recent tag it hits. For this repo's
+  current simple, linear, single-branch history the two approaches always agree in practice, but
+  they are not the same guarantee. If AutoLee ever grows release branches or retroactive
+  hotfix tags, this could produce a surprising version string — there is no ESP-IDF flag to make
+  `git_describe()` semver-aware; matching that behavior would mean replacing the built-in
+  `PROJECT_VER` fallback with a custom script.
 
 ## Local hooks (optional)
 
@@ -126,5 +155,5 @@ Why ESP-IDF (and what it costs vs. the earlier PlatformIO/Arduino attempt) is re
 
 - [Conventional Commits](https://www.conventionalcommits.org/) for commits and PR titles.
 - Work on a branch and open a PR; don't push directly to `main`.
-- Don't hardcode the version anywhere except `FW_VERSION`; keep the README version history
-  consistent when bumping.
+- Never hardcode the firmware version anywhere — it comes from `git describe` via
+  `esp_app_get_description()->version` (see "Versioning & releases" above).

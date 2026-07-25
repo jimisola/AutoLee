@@ -6,8 +6,6 @@
 
 #include <cstdint>
 
-#define FW_VERSION "2.0"
-
 static const char *DEFAULT_AP_SSID = "AutoLee-Setup";
 
 // ==========================================================================

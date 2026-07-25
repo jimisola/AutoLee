@@ -124,7 +124,8 @@ static std::string buildStateJSON() {
                                                       : "IDLE";
 
   autolee::DeviceState st{};
-  st.version = FW_VERSION;
+  // Same git-derived string /api/v1/info reports (esp_app_desc_t.version).
+  st.version = esp_app_get_description()->version;
   st.state = stateStr;
   st.counter = ms.counter;
   st.speed = ms.profiles[ms.activeProfile].speed_hz;

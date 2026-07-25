@@ -2,9 +2,11 @@
 
 All notable changes to AutoLee firmware.
 
-Versions are tracked in `main/config.h` as `FW_VERSION` (single source of truth).
-Release tags are `vX.Y` and the release workflow fails the build if a tag doesn't
-match `FW_VERSION`.
+The firmware version is derived from git: ESP-IDF fills `esp_app_desc_t.version`
+at build time from `git describe --always --tags --dirty`, surfaced identically by
+the boot banner, `/api/v1/state` and `/api/v1/info`. There is no version constant
+in the source to bump — a release is just a `vX.Y` tag plus a GitHub Release, and
+the release workflow uses the tag only to name its artifacts.
 
 ---
 

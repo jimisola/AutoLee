@@ -5,6 +5,7 @@
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_ota_ops.h"
+#include "esp_app_desc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -17,7 +18,7 @@
 #include "ui_touch.h"
 #include "globals.h"
 #include "settings_store.h"
-#include "config.h"  // FW_VERSION single source of truth
+#include "config.h"
 
 static const char *TAG = "autolee";
 
@@ -83,7 +84,9 @@ extern "C" void app_main(void) {
   }
   ESP_ERROR_CHECK(ret);
 
-  ESP_LOGI(TAG, "AutoLee firmware v%s (ESP-IDF)", FW_VERSION);
+  // Version comes from esp_app_desc_t, auto-populated at build time from
+  // `git describe --always --tags --dirty` - no source file to bump.
+  ESP_LOGI(TAG, "AutoLee firmware %s (ESP-IDF)", esp_app_get_description()->version);
 
   // Restore the persisted calibration/tuning subset of g_motion BEFORE
   // motion_init(), so the run current it pushes to the TMC5160 is the saved one

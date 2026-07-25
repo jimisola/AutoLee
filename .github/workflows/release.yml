@@ -13,16 +13,15 @@ jobs:
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
 
-      # Fails fast: the release tag must be vX.Y matching FW_VERSION in main/config.h.
-      - name: Version guard
+      # The firmware version is derived from git at build time
+      # (esp_app_desc_t.version <- `git describe --always --tags --dirty`), so a
+      # clean checkout of tag vX.Y always reports exactly that tag - there is no
+      # source file to cross-check. This step only strips the leading "v" for use
+      # in the artifact filenames below.
+      - name: Release version
         id: ver
         run: |
           VER="${GITHUB_REF_NAME#v}"
-          FW="$(grep -oP '#define\s+FW_VERSION\s+"\K[^"]+' main/config.h)"
-          if [ "$VER" != "$FW" ]; then
-            echo "::error::Release tag v$VER does not match FW_VERSION \"$FW\" in main/config.h"
-            exit 1
-          fi
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
 
       - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1

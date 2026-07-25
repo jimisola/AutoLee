@@ -71,8 +71,7 @@ module boundary the compiler enforces:
 | `main/ui/` | `ui_touch` — the on-device LVGL UI |
 
 - **`main/config.h`** — pins, `SpeedProfile profiles[3]` (Slow/Normal/Fast, each with its own
-  `sg_trip`), and all tuning constants. `FW_VERSION` here is the single source of truth for the
-  firmware version (read by `app_main`'s log banner).
+  `sg_trip`), and all tuning constants. It holds no version macro — see Conventions below.
 - **`main/drivers/display_touch.{h,cpp}`** — SPI bus + `esp_lcd` panel bring-up and I2C touch bus
   bring-up, LVGL display registration via `esp_lvgl_port`. The panel is a **JD9853**
   (ST7789-command-compatible but needs its own vendor init sequence — `jd9853_send_init_sequence()`
@@ -97,8 +96,16 @@ every StallGuard SPI read** to prevent bus contention — preserve this when tou
 
 ## Conventions
 
-- Version lives in `main/config.h` as `FW_VERSION` (single source of truth). Keep the README
-  version history consistent when bumping; don't hardcode the version anywhere else.
+- **Version is derived from git, never hand-maintained.** ESP-IDF populates
+  `esp_app_desc_t.version` at build time from `git describe --always --tags --dirty` (no
+  `version.txt`, no `VERSION` in `project()`, no `PROJECT_VER`). The firmware reads it via
+  `esp_app_get_description()->version` — the boot banner in `app_main.cpp`, `/api/v1/state`'s
+  `version`, and `/api/v1/info`'s `version` all report that same string. Never add a version
+  macro/constant to the source; releasing is just `git tag vX.Y && git push --tags` plus a GitHub
+  Release. Two caveats: `PROJECT_VER` is cached at CMake *configure* time, not recomputed per
+  build (`idf.py reconfigure` if you need a stale embedded version refreshed); and `git describe`
+  picks the nearest tag by commit-graph distance, not the highest semver tag, which only matters
+  if history stops being linear — see CONTRIBUTING.md's "Versioning & releases" for both in full.
 - Constants are centralized in `main/config.h` — prefer adding a named `constexpr` there over
   hardcoding tuning values in module logic.
 - The web `/api/v1/*` endpoints and the SSE `/api/v1/events` stream are the documented external
