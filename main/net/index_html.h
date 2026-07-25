@@ -359,7 +359,12 @@ function buildSgControls(profiles,activeIdx){
 }
 
 function upd(d){
-  if(d.version)document.getElementById('ver').textContent='v'+d.version;
+  // No added prefix: d.version is esp_app_desc_t.version (git describe). At a
+  // release tag it's already "vX.Y" (tags are created as "vX.Y" - see
+  // CONTRIBUTING.md); prepending another "v" would render "vv2.0". Untagged
+  // dev builds report a bare commit hash instead, which is correctly shown
+  // without a "v" - it isn't a version number.
+  if(d.version)document.getElementById('ver').textContent=d.version;
   document.getElementById('pwAlert').style.display=d.defaultPassword?'block':'none';
   document.getElementById('ctr').textContent=d.counter;
   document.getElementById('sv').textContent=d.profileName+' \u2014 '+d.speed+'Hz (SG='+d.sgTrip+')';
