@@ -110,7 +110,7 @@ Read the safety warning above first.
 
 ### Dependencies
 
-Built with **ESP-IDF** (native `idf.py`, no Arduino IDE or PlatformIO). LVGL and
+Built with **ESP-IDF** (native `idf.py`). LVGL and
 `esp_lvgl_port` are fetched automatically by the ESP-IDF Component Manager
 (pinned in `main/idf_component.yml`); the TMC5160 and AXS5106L touch drivers
 are implemented directly under `main/drivers/` against ESP-IDF's SPI/I2C APIs — no
@@ -129,19 +129,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full toolchain setup, host-test
 instructions, and repo layout, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 for how the firmware fits together (task model, shared SPI bus, motion FSM).
 
-## Flash Pre-Compiled Binary (No Arduino IDE Required)
+## Flash Pre-Compiled Binary
 
-If you don't want to set up the Arduino IDE and compile the firmware yourself, you can flash a pre-built binary directly to the ESP32-C6 using a web browser.
+If you don't want to build the firmware yourself, you can flash a pre-built binary directly to the ESP32-C6 using a web browser.
 
 ### What You Need
 
 - A **Chrome** or **Edge** browser (Web Serial is not supported in Firefox or Safari)
 - A **USB-C cable** connected to the Waveshare ESP32-C6 board
-- The merged firmware `.bin` file from the [`/Firmware`](Firmware/) folder in this repo
+- The merged firmware `.bin` file from the latest [GitHub Release](https://github.com/jimisola/AutoLee/releases)
 
 ### Steps
 
-1. Download the latest `AutoLee_vX.X_merged.bin` from the [`/Firmware`](Firmware/) folder
+1. Download the latest `AutoLee_<version>_merged.bin` from [GitHub Releases](https://github.com/jimisola/AutoLee/releases)
 2. Open the [**Espressif Web Flasher**](https://espressif.github.io/esptool-js/) in Chrome or Edge
 3. Click **Connect** and select the port for your ESP32-C6
 4. In the **Program** section, enter **`0x0`** in the Flash Address field
