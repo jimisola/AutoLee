@@ -4,7 +4,7 @@
 # Vendored third-party code (TMC-API, PsychicHttp, ESP-IDF's dns_server and
 # rmt/stepper_motor examples) - kept verbatim from upstream, not ours to
 # reformat.
-exclude: ^lib/(tmc_api|psychic_http|dns_server)/|^main/stepper_motor_encoder\.[ch]$
+exclude: ^lib/(tmc_api|psychic_http|dns_server)/|^main/drivers/stepper_motor_encoder\.[ch]$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

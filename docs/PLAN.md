@@ -139,8 +139,9 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
 - [ ] OTA image identity check (`esp_ota_get_partition_description()` project-name compare)
   before `set_boot_partition` — one half of `#1c` above (the other half is the default-password fix).
 - [ ] SSE diff-and-heartbeat instead of unconditional full-state every 250ms.
-- [ ] Fix the stale `.pre-commit-config.yaml` exclude path (`^main/stepper_motor_encoder\.[ch]$`
-  — the file now lives at `main/drivers/stepper_motor_encoder.c`).
+- [x] Fixed the stale `.pre-commit-config.yaml` exclude path — was
+  `^main/stepper_motor_encoder\.[ch]$`, now `^main/drivers/stepper_motor_encoder\.[ch]$` matching
+  where the file actually lives.
 - [ ] `FW_VERSION` still `"1.8"` for what is a `feat!` platform migration (see `#24` above).
 
 Explicitly deferred (rationale in `docs/review-2026-07-25.md`'s Copilot-comparison section, not
