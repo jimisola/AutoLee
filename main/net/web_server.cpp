@@ -42,6 +42,14 @@ static const esp_partition_t *s_ota_partition = nullptr;
 // ==========================================================================
 static AuthenticationMiddleware s_auth;
 
+// True while the effective web password is still WEB_AUTH_DEFAULT_PASS. Set at
+// boot from loadWebPassword() and kept in sync by the /api/v1/web_password
+// handler. Read by buildStateJSON() (the "defaultPassword" field) and by the
+// write-gate middleware below - see the #1c comment near s_auth.addMiddleware
+// for why every state-changing route (bar the password endpoint itself) is
+// refused while this is true.
+static bool s_default_password_active = true;
+
 // Current password: NVS value if one was ever saved, else the factory default.
 static std::string loadWebPassword() {
   nvs_handle_t h;
@@ -143,6 +151,7 @@ static std::string buildStateJSON() {
   st.batchTarget = ms.batchTarget;
   st.batchCount = ms.batchCount;
   st.batchActive = ms.batchActive;
+  st.defaultPassword = s_default_password_active;
 
   char buf[768];
   autolee::buildStateJson(st, buf, sizeof(buf));
@@ -339,7 +348,8 @@ void setupWebServer() {
       .setRealm(WEB_AUTH_REALM)
       .setAuthMethod(DIGEST_AUTH)
       .setAuthFailureMessage("AutoLee: authentication required");
-  if (webPass == WEB_AUTH_DEFAULT_PASS) {
+  s_default_password_active = (webPass == WEB_AUTH_DEFAULT_PASS);
+  if (s_default_password_active) {
     webLog("SECURITY: web password is still the factory default - change it on the WiFi page");
   }
   // Attached once, server-wide, rather than per-endpoint: gating on the HTTP
@@ -367,7 +377,28 @@ void setupWebServer() {
         if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
           if (uri == "/save" || uri == "/clear") return next();
         }
-        return s_auth.run(req, res, next);
+        // #1c (docs/PLAN.md) "force-change-on-first-use": while the password
+        // is still the factory default, every state-changing route is refused
+        // with a friendly 403 telling the caller to set a real password first
+        // - except /api/v1/web_password itself, which must stay reachable or
+        // the operator could never get out of this state. This runs after the
+        // digest challenge (wrapped as `next` below) so it only ever applies
+        // to a caller who already authenticated with the (known-public)
+        // default password - it is not a substitute for auth, just a second
+        // gate on top of it: a leaked/default password otherwise still lets
+        // the machine run, calibrate and accept OTA uploads forever, per the
+        // #1c writeup.
+        if (uri == "/api/v1/web_password") return s_auth.run(req, res, next);
+        PsychicMiddlewareNext gated = [next, res]() -> esp_err_t {
+          if (s_default_password_active) {
+            return res->send(403, "application/json",
+                              "{\"error\":\"default_password\",\"message\":\"Web password is "
+                              "still the factory default - set a real one via POST "
+                              "/api/v1/web_password before using this control.\"}");
+          }
+          return next();
+        };
+        return s_auth.run(req, res, gated);
       });
 
   server.on("/", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
@@ -696,6 +727,11 @@ void setupWebServer() {
     if (pass.length() > WEB_AUTH_PASS_MAX) return res->send(400, "text/plain", "password too long");
     if (!saveWebPassword(pass)) return res->send(500, "text/plain", "could not save password");
     s_auth.setPassword(pass.c_str());
+    // Without this, the #1c write-gate above would keep 403ing every other
+    // route forever after a real password is set - the flag was otherwise
+    // only ever refreshed at boot, so an operator who follows the "set a
+    // password" prompt would find nothing else works until a reboot.
+    s_default_password_active = (pass == WEB_AUTH_DEFAULT_PASS);
     webLog("Web password changed");
     return res->send(200, "text/plain", "ok");
   });

@@ -37,6 +37,7 @@ details summary{color:var(--accent);font-size:.85em;cursor:pointer;padding:4px 0
 details summary:hover{opacity:.8}
 details[open] summary{margin-bottom:8px}
 .jam-alert{display:none;background:#2a1111;border:1px solid #442222;border-radius:10px;padding:12px;margin-top:10px;text-align:center}
+.pw-alert{display:none;background:#3A2B12;border:1px solid #5c431d;border-radius:10px;padding:12px;margin-bottom:10px;text-align:center}
 input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:.9em}
 .upload{border:2px dashed #444;border-radius:8px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;font-size:.85em}
 .upload:hover{border-color:var(--accent)}.upload.on{border-color:var(--green);color:var(--green)}
@@ -56,6 +57,15 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 
 <h1>AutoLee</h1>
 <div class="sub">by K.L Design · <span id="ver"></span></div>
+
+<!-- Shown on every page (not just Main) while the web password is still the
+     factory default: the firmware refuses every control action with a 403
+     until it's changed - see the "defaultPassword" state field. -->
+<div class="pw-alert" id="pwAlert">
+<div style="color:#FFD37C;font-weight:700;margin-bottom:4px">&#9888; DEFAULT PASSWORD IN USE</div>
+<div style="color:#aaa;font-size:.8em;margin-bottom:8px">Controls are locked (run, calibrate, OTA, etc.) until you set a real web password.</div>
+<button class="btn btn-blue btn-sm" onclick="showPage('pageWifi')">Set Password</button>
+</div>
 
 <!-- ==================== MAIN PAGE ==================== -->
 <div id="pageMain" class="page active">
@@ -251,7 +261,7 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <div class="sec">
 <h2>Web Password</h2>
-<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload (user: <b>autolee</b>). The factory default is public &mdash; change it.</div>
+<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload (user: <b>autolee</b>). The factory default is public &mdash; until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all.</div>
 <input type="password" id="wpNew" placeholder="New password">
 <button class="btn btn-blue btn-sm" onclick="saveWebPassword()" style="width:100%">Change Password</button>
 <div id="wpMsg" class="hint" style="margin-top:6px"></div>
@@ -350,6 +360,7 @@ function buildSgControls(profiles,activeIdx){
 
 function upd(d){
   if(d.version)document.getElementById('ver').textContent='v'+d.version;
+  document.getElementById('pwAlert').style.display=d.defaultPassword?'block':'none';
   document.getElementById('ctr').textContent=d.counter;
   document.getElementById('sv').textContent=d.profileName+' \u2014 '+d.speed+'Hz (SG='+d.sgTrip+')';
     document.getElementById('cp').textContent=d.position;

@@ -78,7 +78,7 @@ The Arduino cooperative `loop()` became several FreeRTOS tasks (`pump_task`, LVG
 Not a blocker for the port itself, but must be decided before the press is used unattended on a shared network:
 - [x] **#1a:** setup AP secured — WPA2 + per-device key + join QR (`b31fe49`), replacing the previous open (`WIFI_AUTH_OPEN`) AP.
 - [x] **#1b:** Digest auth (`DIGEST_AUTH`) gates every state-changing route via a server-wide method-based middleware (`main/net/web_server.cpp:271-300`) — confirmed the middleware actually runs before dispatch, not just registration order (`lib/psychic_http/src/PsychicHttpServer.cpp:502-508`'s `runChain()` wraps `_process()`). Reads/SSE are intentionally open; `/save`+`/clear` are exempt only in unconfigured AP mode (WPA2 gates access there instead). Documented in `api/openapi.yaml:173-183`.
-- [ ] **#1c (residual of #1b):** factory-default web password `"autolee"` (`main/config.h:166`) persists until manually changed, and OTA accepts any well-formed image with no identity/signature check (secure boot off) — so one leaked/default password is enough to flash arbitrary firmware. Decide (a) force-change-on-first-use + an OTA image identity check (`esp_ota_get_partition_description()` project-name compare, code-level, verifiable on the bench — also tracked in Phase 8), vs. (b) Secure Boot v2 / signed OTA (provisioning-level, involves **irreversible eFuse burns** — do NOT do casually on the dev board).
+- [x] **#1c (residual of #1b):** factory-default web password `"autolee"` (`main/config.h:166`) persisted until manually changed, and OTA accepted any well-formed image with no identity/signature check (secure boot off) — so one leaked/default password was enough to flash arbitrary firmware. Went with (a) over (b) Secure Boot v2 / signed OTA (provisioning-level, involves **irreversible eFuse burns** — not doing that casually on the dev board): the OTA image identity check (`esp_ota_get_partition_description()` project-name compare) landed first; the force-change-on-first-use half now also landed — while `defaultPassword` is true (`GET /api/v1/state`'s JSON / the SSE state event), `main/net/web_server.cpp`'s server-wide middleware refuses every state-changing route (run, calibrate, OTA upload, etc.) with 403 except `POST /api/v1/web_password` itself, and `main/net/index_html.h`'s dashboard shows a persistent "DEFAULT PASSWORD IN USE" banner until it's changed. Documented in `api/openapi.yaml`/`api/schemas/state.schema.json`.
 - [ ] **#20:** WiFi PSK is stored plaintext in NVS with flash encryption off — recoverable from a flash dump. Enable NVS/flash encryption as part of the (b) provisioning bundle above.
 
 Note: PR #4 review finding #29 (squash the CI-debugging churn commits) is intentionally skipped — this branch will be **squash-merged**, which collapses the history anyway.
@@ -297,7 +297,8 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
   the download natively. `espcoredump` and `esp_partition` added to `main/CMakeLists.txt`'s
   `REQUIRES`. Documented in `api/openapi.yaml`.
 - [x] OTA image identity check (`main/net/web_server.cpp`'s `handleOtaUpload()`, lines 260-300) —
-  one half of `#1c` above (the other half is the default-password fix, still open). Before
+  one half of `#1c` above (the other half, force-change-on-first-use for the default password, has
+  since also landed — see `#1c` above). Before
   `esp_ota_set_boot_partition()`, and while the OTA handle is still open (i.e. before
   `esp_ota_end()`), `esp_ota_get_partition_description()` reads the just-written partition's
   `esp_app_desc_t` and compares its `project_name` against the running app's own

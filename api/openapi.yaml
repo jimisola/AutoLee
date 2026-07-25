@@ -13,7 +13,11 @@ info:
     and the SSE stream) are deliberately open - they expose only the cycle
     counter, SSID and IP. The password is stored in NVS and is changeable via
     `POST /api/v1/web_password`; the shipped factory default is public, so change
-    it on first setup.
+    it on first setup. Until it is changed, every state-changing endpoint except
+    `POST /api/v1/web_password` itself returns 403 (`DefaultPasswordActive`) -
+    the device will not run, calibrate or accept an OTA upload while the
+    factory-default password is still in effect. `GET /api/v1/state`'s
+    `defaultPassword` field reflects this.
   license:
     name: CC BY-NC 4.0
     url: https://creativecommons.org/licenses/by-nc/4.0/
@@ -41,7 +45,9 @@ paths:
     post:
       summary: Start or stop the run
       operationId: toggleRun
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/profile:
     post:
@@ -52,7 +58,9 @@ paths:
           in: query
           required: true
           schema: { type: integer, enum: [0, 1, 2] }
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/sg_trip:
     post:
@@ -62,7 +70,9 @@ paths:
         - { name: value, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1023 } }
         - { name: delta, in: query, required: false, schema: { type: integer } }
         - { name: profile, in: query, required: false, description: "Target profile (defaults to active)", schema: { type: integer, enum: [0, 1, 2] } }
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/current:
     post:
@@ -73,7 +83,9 @@ paths:
           in: query
           required: true
           schema: { type: integer, minimum: 1000, maximum: 4500 }
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/work_zone:
     post:
@@ -81,7 +93,9 @@ paths:
       operationId: setWorkZone
       parameters:
         - { name: delta, in: query, required: true, schema: { type: integer } }
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/endpoint:
     post:
@@ -90,7 +104,9 @@ paths:
       parameters:
         - { name: which, in: query, required: true, schema: { type: string, enum: [up, down] } }
         - { name: delta, in: query, required: true, schema: { type: integer } }
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/batch:
     post:
@@ -99,7 +115,9 @@ paths:
       parameters:
         - { name: delta, in: query, required: false, schema: { type: integer } }
         - { name: action, in: query, required: false, schema: { type: string, enum: [start, clear] } }
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/action:
     post:
@@ -122,7 +140,9 @@ paths:
           in: query
           required: true
           schema: { type: string, enum: [calibrate, return_home, reset_counter, reset_settings] }
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/wifi:
     post:
@@ -131,19 +151,25 @@ paths:
       parameters:
         - { name: ssid, in: query, required: true, schema: { type: string } }
         - { name: pass, in: query, required: false, schema: { type: string } }
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/wifi_reset:
     post:
       summary: Clear saved WiFi and reboot into AP mode
       operationId: resetWifi
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/log_clear:
     post:
       summary: Clear the log ring buffer
       operationId: clearLog
-      responses: { "200": { $ref: "#/components/responses/Ok" } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/web_password:
     post:
@@ -243,6 +269,7 @@ paths:
                   description: App-only .bin image
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
 security:
   - digestAuth: []
@@ -261,3 +288,17 @@ components:
       description: >
         Accepted. The updated state is pushed to all clients over `/api/v1/events`
         (and is readable via `GET /api/v1/state`).
+    DefaultPasswordActive:
+      description: >
+        Refused: the web/API password is still the factory default. Every
+        state-changing endpoint except `POST /api/v1/web_password` returns this
+        until a real password is set (see `defaultPassword` in the state schema).
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [error, message]
+            properties:
+              error: { type: string, enum: [default_password] }
+              message: { type: string }

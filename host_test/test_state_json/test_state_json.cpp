@@ -30,7 +30,8 @@ static std::string readContractExample() {
 // readable reference; test_literal_matches_contract_file guards it against drift
 // from the actual contract file.
 static const char *EXPECTED =
-    "{\"version\":\"1.8\",\"state\":\"IDLE\",\"counter\":42,\"speed\":35000,\"calibrated\":true,"
+    "{\"version\":\"1.8\",\"state\":\"IDLE\",\"defaultPassword\":false,\"counter\":42,"
+    "\"speed\":35000,\"calibrated\":true,"
     "\"positionStale\":false,"
     "\"rawUp\":0,\"rawDown\":10000,\"endpointUp\":0,\"endpointDown\":9500,"
     "\"upOffset\":0,\"downOffset\":-500,\"position\":0,\"sgTrip\":15,"
@@ -46,6 +47,7 @@ static DeviceState sample() {
   DeviceState s{};
   s.version = "1.8";
   s.state = "IDLE";
+  s.defaultPassword = false;
   s.counter = 42;
   s.speed = 35000;
   s.calibrated = true;
@@ -121,11 +123,13 @@ void test_booleans_render_as_words() {
   s.calibrated = false;
   s.batchActive = false;
   s.positionStale = true;
+  s.defaultPassword = true;
   char buf[900];
   buildStateJson(s, buf, sizeof(buf));
   TEST_ASSERT_NOT_NULL(strstr(buf, "\"calibrated\":false"));
   TEST_ASSERT_NOT_NULL(strstr(buf, "\"positionStale\":true"));
   TEST_ASSERT_NOT_NULL(strstr(buf, "\"batchActive\":false"));
+  TEST_ASSERT_NOT_NULL(strstr(buf, "\"defaultPassword\":true"));
 }
 
 int main(int, char **) {

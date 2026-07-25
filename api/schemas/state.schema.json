@@ -6,7 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "version", "state", "counter", "speed", "calibrated", "positionStale",
+    "version", "state", "defaultPassword", "counter", "speed", "calibrated", "positionStale",
     "rawUp", "rawDown", "endpointUp", "endpointDown",
     "upOffset", "downOffset", "position", "sgTrip", "workZone", "currentMa",
     "profileIdx", "profileName", "profiles",
@@ -22,6 +22,10 @@
     "counter": { "type": "integer", "minimum": 0, "maximum": 9999 },
     "speed": { "type": "integer", "minimum": 0 },
     "calibrated": { "type": "boolean" },
+    "defaultPassword": {
+      "type": "boolean",
+      "description": "True while the web/API password is still the factory default (\"autolee\"). While true, the firmware refuses every state-changing write except POST /api/v1/web_password with 403 - set a real password to clear this."
+    },
     "positionStale": {
       "type": "boolean",
       "description": "Calibration was restored across a reboot but the axis has not been re-referenced against the UP hard stop since. The device refuses to start a run while this is true; a Return Home (or a fresh calibration) clears it."

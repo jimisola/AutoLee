@@ -21,6 +21,13 @@ struct ProfileView {
 struct DeviceState {
   const char *version;
   const char *state;  // "IDLE" | "RUNNING" | "STOPPING" | "CALIBRATING" | "STALLED" | "HOMING"
+  // True while the web/API password is still the factory default (see
+  // main/config.h's WEB_AUTH_DEFAULT_PASS). While true, the firmware refuses
+  // every state-changing write except POST /api/v1/web_password itself -
+  // this is the "force-change-on-first-use" half of docs/PLAN.md's #1c;
+  // the dashboard uses this flag to show a "set a password" banner instead
+  // of relying on the operator having read the boot log.
+  bool defaultPassword;
   long counter;
   uint32_t speed;
   bool calibrated;
@@ -70,7 +77,8 @@ inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
   jsonEscape(s.wifiSSID, ssidEscaped, sizeof(ssidEscaped));
   return snprintf(
       out, n,
-      "{\"version\":\"%s\",\"state\":\"%s\",\"counter\":%ld,\"speed\":%lu,\"calibrated\":%s,"
+      "{\"version\":\"%s\",\"state\":\"%s\",\"defaultPassword\":%s,\"counter\":%ld,\"speed\":%lu,"
+      "\"calibrated\":%s,"
       "\"positionStale\":%s,"
       "\"rawUp\":%ld,\"rawDown\":%ld,\"endpointUp\":%ld,\"endpointDown\":%ld,"
       "\"upOffset\":%ld,\"downOffset\":%ld,\"position\":%ld,\"sgTrip\":%u,"
@@ -81,7 +89,8 @@ inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
       "{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u}],"
       "\"wifiStatus\":\"%s\",\"wifiSSID\":\"%s\",\"wifiIP\":\"%s\","
       "\"batchTarget\":%ld,\"batchCount\":%ld,\"batchActive\":%s}",
-      s.version, s.state, s.counter, (unsigned long)s.speed, s.calibrated ? "true" : "false",
+      s.version, s.state, s.defaultPassword ? "true" : "false", s.counter, (unsigned long)s.speed,
+      s.calibrated ? "true" : "false",
       s.positionStale ? "true" : "false", s.rawUp, s.rawDown, s.endpointUp, s.endpointDown,
       (long)s.upOffset, (long)s.downOffset, s.position, s.sgTrip, (long)s.workZone, s.currentMa,
       s.profileIdx, s.profileName, s.profiles[0].name, (unsigned long)s.profiles[0].hz,
