@@ -641,9 +641,19 @@ static void counter_timer_cb(lv_timer_t *t) {
 // ==========================================================================
 //  BUILD UI - called from app_main
 // ==========================================================================
-void buildUI() {
-  lvgl_port_lock(0);
-
+// Split into one build_<name>_screen() function per screen (was previously
+// one ~510-line buildUI() with a centralized "build everything, then wire
+// everything" tail block). That tail block turned out to be a purely
+// stylistic artifact, not a real dependency: every callback in it only
+// referenced navigation targets (the screen pointers, e.g. main_scr,
+// config_scr - already file-scope extern globals in globals.h, shared with
+// motion.cpp/web_server.cpp) or widgets already promoted to file-scope
+// statics for other reasons (btn_calibrate, btn_reset_cal, profile_btns[],
+// btn_wifi_reset/skip/back, btn_run_global). No callback reached into a
+// button handle local to a *different* screen's construction block, so each
+// screen's event wiring moves inline, right after that screen's widgets are
+// created - no new promotions were needed beyond what was already global.
+static void build_main_screen() {
   main_scr = lv_scr_act();
   style_screen(main_scr);
   lv_obj_t *mc = make_content_free(main_scr);
@@ -704,14 +714,39 @@ void buildUI() {
 
   lv_obj_t *btn_batch = make_btn(mc, "Batch Run", 140, 36, 0x1F6FEB, &lv_font_montserrat_16);
   lv_obj_align(btn_batch, LV_ALIGN_BOTTOM_MID, 0, -56);
+  lv_obj_add_event_cb(
+      btn_batch,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        ui_update_batch_val();
+        go(batch_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
 
   lv_obj_t *btn_settings = make_btn(mc, "Settings", 140, 36, 0x3A3A3A, &lv_font_montserrat_16);
   lv_obj_align(btn_settings, LV_ALIGN_BOTTOM_MID, 0, -8);
+  lv_obj_add_event_cb(
+      btn_settings,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        go(settings_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
 
   btn_run_global = make_btn(mn, "RUN", 140, 44, 0x00FF00, &lv_font_montserrat_22);
   lv_obj_align(btn_run_global, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_event_cb(
+      btn_run_global,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        // Deferred: touches the stepper + TMC SPI.
+        motion_cmd::requestToggleRun();
+      },
+      LV_EVENT_CLICKED, nullptr);
+}
 
-  // Settings screen
+// Settings screen
+static void build_settings_screen() {
   settings_scr = lv_obj_create(nullptr);
   style_screen(settings_scr);
   lv_obj_t *sc = make_content(settings_scr);
@@ -727,7 +762,37 @@ void buildUI() {
   lv_obj_t *b_back_s = make_btn(sn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_s, LV_ALIGN_CENTER, 0, 0);
 
-  // Configuration screen
+  lv_obj_add_event_cb(b_cal, on_calibrate, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_config,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        reset_cal_disarm();  // never enter the screen with Reset Cal pre-armed
+        go(config_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_reset,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        {
+          motion_state::Guard g;
+          g_motion.counter = 0;
+        }
+        if (counter_label) lv_label_set_text(counter_label, "0");
+      },
+      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_back_s,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        go(main_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
+}
+
+// Configuration screen
+static void build_config_screen() {
   config_scr = lv_obj_create(nullptr);
   style_screen(config_scr);
   lv_obj_t *cfgc = make_content(config_scr);
@@ -747,7 +812,37 @@ void buildUI() {
   lv_obj_t *b_back_cfg = make_btn(cfgn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_cfg, LV_ALIGN_CENTER, 0, 0);
 
-  // Profile (speed) screen
+  lv_obj_add_event_cb(b_speed, on_go_profile, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(b_tuning, on_go_tuning, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_stall,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        ui_update_sg_val();
+        go(stall_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_wifi,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        ui_update_wifi_label();
+        go(wifi_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(btn_reset_cal, on_reset_cal, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_back_cfg,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        reset_cal_disarm();  // leaving the screen cancels a pending confirm
+        go(settings_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
+}
+
+// Profile (speed) screen
+static void build_profile_screen() {
   profile_scr = lv_obj_create(nullptr);
   style_screen(profile_scr);
   lv_obj_t *pc = make_content(profile_scr);
@@ -785,8 +880,17 @@ void buildUI() {
 
   lv_obj_t *b_back_p = make_btn(pn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_p, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_event_cb(
+      b_back_p,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        go(config_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
+}
 
-  // Tuning screen
+// Tuning screen
+static void build_tuning_screen() {
   tuning_scr = lv_obj_create(nullptr);
   style_screen(tuning_scr);
   lv_obj_t *tc = make_content_free(tuning_scr);
@@ -827,13 +931,33 @@ void buildUI() {
   lv_obj_t *b_back_t = make_btn(tn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_t, LV_ALIGN_CENTER, 0, 0);
 
-  // Endpoint screens
+  lv_obj_add_event_cb(btn_eu, on_go_ep_up, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(btn_ed, on_go_ep_dn, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_back_t,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        go(config_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
+}
+
+// Endpoint screens - build_endpoint_screen() (defined above) already wires its
+// own Back button and its own +/- delta buttons inline; it is a shared,
+// parameterized per-screen builder (isUp selects EP UP vs EP DOWN), so it
+// needs no further splitting here.
+static void build_endpoint_up_screen() {
   ep_up_scr = lv_obj_create(nullptr);
   build_endpoint_screen(ep_up_scr, "EP UP", true);
+}
+
+static void build_endpoint_down_screen() {
   ep_dn_scr = lv_obj_create(nullptr);
   build_endpoint_screen(ep_dn_scr, "EP DOWN", false);
+}
 
-  // WiFi screen
+// WiFi screen
+static void build_wifi_screen() {
   wifi_scr = lv_obj_create(nullptr);
   style_screen(wifi_scr);
   lv_obj_t *wc = make_content(wifi_scr);
@@ -882,7 +1006,34 @@ void buildUI() {
   lv_obj_align(btn_wifi_skip, LV_ALIGN_CENTER, 0, 0);
   lv_obj_add_flag(btn_wifi_skip, LV_OBJ_FLAG_HIDDEN);
 
-  // Jam screen
+  lv_obj_add_event_cb(
+      btn_wifi_skip,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        go(main_scr);  // leave setup; device stays in AP mode, configurable later
+      },
+      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_wifi_reset,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        wifi_mgr::clearCredentials();
+        webLog("WiFi credentials cleared, rebooting...");
+        rebootRequested = true;
+        rebootRequestMs = millis();
+      },
+      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(
+      b_back_w,
+      [](lv_event_t *e) {
+        LV_UNUSED(e);
+        go(config_scr);
+      },
+      LV_EVENT_CLICKED, nullptr);
+}
+
+// Jam screen
+static void build_jam_screen() {
   jam_scr = lv_obj_create(nullptr);
   style_screen(jam_scr);
   lv_obj_t *jc = make_content_free(jam_scr);
@@ -913,8 +1064,10 @@ void buildUI() {
   lv_obj_t *btn_home = make_btn(jn, "Return Home", 140, 44, 0x1F6FEB, &lv_font_montserrat_18);
   lv_obj_align(btn_home, LV_ALIGN_CENTER, 0, 0);
   lv_obj_add_event_cb(btn_home, onJamReturnHome, LV_EVENT_CLICKED, nullptr);
+}
 
-  // Stall sensitivity screen
+// Stall sensitivity screen
+static void build_stall_screen() {
   stall_scr = lv_obj_create(nullptr);
   style_screen(stall_scr);
   lv_obj_t *ssc = make_content(stall_scr);
@@ -984,8 +1137,10 @@ void buildUI() {
         go(config_scr);
       },
       LV_EVENT_CLICKED, nullptr);
+}
 
-  // Batch run screen
+// Batch run screen
+static void build_batch_screen() {
   batch_scr = lv_obj_create(nullptr);
   style_screen(batch_scr);
   lv_obj_t *brc = make_content(batch_scr);
@@ -1071,126 +1226,22 @@ void buildUI() {
         go(main_scr);
       },
       LV_EVENT_CLICKED, nullptr);
+}
 
-  // ---- Events ----
-  lv_obj_add_event_cb(
-      btn_batch,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        ui_update_batch_val();
-        go(batch_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      btn_settings,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        go(settings_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      btn_run_global,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        // Deferred: touches the stepper + TMC SPI.
-        motion_cmd::requestToggleRun();
-      },
-      LV_EVENT_CLICKED, nullptr);
+void buildUI() {
+  lvgl_port_lock(0);
 
-  lv_obj_add_event_cb(b_speed, on_go_profile, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(b_tuning, on_go_tuning, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(b_cal, on_calibrate, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_config,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        reset_cal_disarm();  // never enter the screen with Reset Cal pre-armed
-        go(config_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_reset,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        {
-          motion_state::Guard g;
-          g_motion.counter = 0;
-        }
-        if (counter_label) lv_label_set_text(counter_label, "0");
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_back_s,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        go(main_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_stall,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        ui_update_sg_val();
-        go(stall_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_wifi,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        ui_update_wifi_label();
-        go(wifi_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      btn_wifi_skip,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        go(main_scr);  // leave setup; device stays in AP mode, configurable later
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_wifi_reset,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        wifi_mgr::clearCredentials();
-        webLog("WiFi credentials cleared, rebooting...");
-        rebootRequested = true;
-        rebootRequestMs = millis();
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_back_cfg,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        reset_cal_disarm();  // leaving the screen cancels a pending confirm
-        go(settings_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_back_p,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        go(config_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(btn_reset_cal, on_reset_cal, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(btn_eu, on_go_ep_up, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(btn_ed, on_go_ep_dn, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_back_t,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        go(config_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_back_w,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        go(config_scr);
-      },
-      LV_EVENT_CLICKED, nullptr);
+  build_main_screen();
+  build_settings_screen();
+  build_config_screen();
+  build_profile_screen();
+  build_tuning_screen();
+  build_endpoint_up_screen();
+  build_endpoint_down_screen();
+  build_wifi_screen();
+  build_jam_screen();
+  build_stall_screen();
+  build_batch_screen();
 
   lv_timer_create(counter_timer_cb, 100, nullptr);
 
