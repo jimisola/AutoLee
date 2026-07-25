@@ -120,9 +120,39 @@ Deferred low-priority cleanups from the PR #4 review (not blocking):
 ## Phase 8 — Post-migration hardening
 Non-bench-blocking follow-ups from the 2026-07-25 codebase review (`docs/review-2026-07-25.md`).
 The safety-critical, bench-blocking items from that review are tracked in Phase 4 above, not here.
-- [ ] Persist settings/calibration to NVS as a versioned struct (endpoints, per-profile
-  `sg_trip`, `RUN_CURRENT_MA`, `SG_WORK_ZONE_STEPS`, active profile, counter) — currently
-  RAM-only in `main/globals.cpp`, lost every reboot.
+- [x] **Persist settings/calibration to NVS as a versioned struct** (`main/settings_store.{h,cpp}`,
+  registered in `main/CMakeLists.txt:6`). One fixed-layout `Persisted` blob
+  (`main/settings_store.cpp:39`) in NVS namespace `autolee`, key `settings`, `uint16_t version`
+  first: `rawUp`/`rawDown`/`endpointsCalibrated`/`upOffsetSteps`/`downOffsetSteps`, the
+  per-profile `sg_trip[]`, `runCurrentMa`, `sgWorkZoneSteps`, `activeProfile`, `counter`.
+  Deliberately **not** persisted: `runState`, `currentTarget`, `batch*` and the SG telemetry
+  counters (must always come up at safe defaults after any reset), `SpeedProfile::name`/`speed_hz`
+  (a `const char *` is meaningless across a firmware update, and `speed_hz` has no runtime writer),
+  and the derived `endpointUp`/`endpointDown` (recomputed from the restored raws).
+  - **Load** (`main/settings_store.cpp:155`) runs from `app_main.cpp:93`, before `motion_init()`,
+    so the restored `runCurrentMa` is what `motion_init()` pushes to the TMC5160; it finishes with
+    `recomputeEffectiveEndpoints()`.
+  - **Fail-safe, all-or-nothing**: a missing blob, a size mismatch, a `version` mismatch, or *any*
+    field outside the bounds the live setters already enforce (`OFFSET_MIN/MAX`,
+    `RUN_CURRENT_MIN/MAX`, `SG_WORK_ZONE_MIN/MAX`, `RUN_SG_TRIP_MIN/MAX`, `NUM_PROFILES`, plus a
+    geometry check that travel is positive and within `CAL_SEARCH_STEPS`) discards the **whole**
+    blob (`validate()`, `main/settings_store.cpp:84`), keeps `MotionState`'s compiled-in defaults
+    and explicitly forces `endpointsCalibrated = false` + zeroed effective endpoints
+    (`fallbackToDefaults()`, `:126`), logging the reason via `webLog()`. Nothing is partially
+    trusted — the press must never believe it knows its endpoints from data that failed a check.
+  - **Save** (`main/settings_store.cpp:206`) is a dirty-check hook at the end of
+    `processPendingCommands()` (`main/motion/motion_cmd.cpp:156`), i.e. pump_task only: `memcmp`
+    against the last-saved copy, at most one write per 5 s (`kSaveIntervalMs`), so a held-down UI
+    knob costs one commit rather than one per step. An NVS commit is a few ms — three orders of
+    magnitude inside the 8 s task-WDT budget, and pump_task resets the watchdog on the next
+    iteration.
+  - **Known residual (not solvable inside this module):** the stepper's position counter starts at
+    0 every boot while the carriage sits wherever power was lost. 0 *is* the UP endpoint in the
+    normal case (a finished run, a stop and a home all park there), but after a mid-stroke power
+    cut or watchdog reset the restored endpoints are offset from reality. Load logs
+    "position reference unknown after reboot - return home before running"; a proper gate
+    (require Return Home before the first run after a restore) belongs in
+    `startRunBetweenEndpoints()` and is left as a follow-up.
 - [ ] **Reset calibration/settings action** (depends on the item above — nothing to reset until
   persistence exists). Once calibration silently survives reboots, there needs to be a deliberate
   way to discard it (press moved, brass changed, just want a clean recalibration) without an NVS
@@ -133,22 +163,90 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
   defaults) — must NOT touch WiFi credentials, the AP key, or the web password, so a reset can't
   accidentally lock the device off the network. Destructive, so require a confirm step in the UI
   before firing.
-- [ ] Fake the `stepper::`/`tmc5160::` seams so `motion.cpp`'s jam/backoff/homing sequencing
-  gets host-test coverage (highest-value test investment; narrow seams already exist).
-- [ ] Add `/api/v1/info` diagnostics endpoint (`esp_app_get_description()`, reset reason, heap,
-  uptime, running partition, coredump-present flag).
-- [ ] Add `GET /api/v1/coredump` — streams the raw `coredump` partition (already exists,
-  `partitions.csv`, verified end-to-end in Phase 6) as a file download, gated behind the same
-  Digest auth as other reads; skip/404 cleanly if no coredump is present (check via
-  `esp_core_dump_image_check()` or equivalent before reading). Add a "Download core dump" button
-  to the web Firmware page next to OTA upload. Today the only way to get a coredump off the
-  device is `idf.py coredump-info` over a USB serial connection — this makes it retrievable
-  remotely, which matters once the press is on Karl's network and not on a bench. Distinct from
-  the deferred "diagnostics ZIP" idea above (no filesystem involved — this reads one existing
-  raw partition directly via `esp_partition_read`, not multiple files bundled together).
-- [ ] OTA image identity check (`esp_ota_get_partition_description()` project-name compare)
-  before `set_boot_partition` — one half of `#1c` above (the other half is the default-password fix).
-- [ ] SSE diff-and-heartbeat instead of unconditional full-state every 250ms.
+- [x] **Faked the `stepper::`/`tmc5160::` seams — `motion.cpp`'s sequencing now has host-test
+  coverage** (`host_test/fakes/` + `host_test/test_motion_seq/`, 30 Unity tests, **100% line
+  coverage of `main/motion/motion.cpp`** per gcovr — note CI's coverage *gate* still filters on
+  `lib/autolee_logic/` only, so this figure is informational, not enforced). `main/motion/`'s
+  `motion.cpp` and `motion_state.cpp` are compiled **verbatim** into the new suite (not extracted,
+  not reimplemented — a behaviour-preserving change by construction, since the firmware sources are
+  byte-identical and `idf.py build` is unaffected): what is replaced is everything *below* them —
+  fake `stepper::`/`tmc5160::` bodies behind the **real** `main/drivers/*.h` headers (so a seam
+  signature change breaks the test build instead of silently drifting), fake `webLog()`/`ui_touch.h`
+  hooks, and minimal `esp_timer`/`esp_task_wdt`/`vTaskDelay`/`portMUX`/`lvgl.h` stubs under
+  `host_test/fakes/include/`. The stepper fake models the two things the sequencing depends on:
+  moves take time (`forceStop()` only takes effect on the next poll, matching the one-cruise-chunk
+  latency `stepper.cpp` documents) and position is a **pulse count** (PCNT keeps counting while the
+  carriage sits against a hard stop — which is exactly what StallGuard sees as a stall), so
+  calibration/homing hit detection is driven by a simulated press with real mechanical stops rather
+  than by canned SG values. `host_test/CMakeLists.txt` grew one generic extension point (a suite may
+  add a `suite.cmake` for extra sources/includes); the other nine suites are unchanged.
+  - **Now covered:** the jam path end-to-end (SG trip → `forceStop` → creep speed → backoff by
+    exactly ±`RUN_BACKOFF_STEPS` *away* from the target endpoint → `STALLED` latch → jam screen,
+    plus "no further move is commanded after a jam" and `handleMotion()` being inert in
+    `STALLED`/`HOMING`/`CALIBRATING`); accel-blank, work-zone and single-high-reading debounce
+    (no false jam); endpoint-arrival cycle counting, target flip, batch completion → graceful stop,
+    and the counter-saturation-must-not-stall-a-batch regression; graceful stop reaching UP vs.
+    timing out after `STOP_TIMEOUT_MS`; the full `calibrateEndpointsSensorless()` order
+    (cal current → pre-move → UP search → back off → re-zero → DOWN search → back off → restore run
+    current → park at UP) and its clean-failure path when no stop is found; `safeCreepHome()`
+    find-stop/re-zero/return-to-IDLE and its failure path; `return_home_up_safe()`'s retry counting
+    (3 stalls → `HOME_MAX_RETRIES` give-up) and `HOME_TIMEOUT_MS`; every FSM-rejection guard
+    (start/stop/calibrate/return-home from a state that forbids it must touch **no** hardware);
+    and — asserted in `tearDown()` for every test — that no stepper/TMC/`webLog` call ever happens
+    inside a `motion_state::Guard` critical section, the rule `motion_state.h` documents.
+  - **Still NOT covered:** anything below the seam (`main/drivers/stepper.cpp`'s RMT/PCNT pulse
+    generation, `tmc5160_hal.cpp`'s SPI/CS handling, `axs5106l_touch`, `display_touch`), real
+    concurrency (the host build is single-threaded: `portENTER_CRITICAL` only counts nesting, so
+    these tests prove the *discipline*, not the absence of races), real timing/accel behaviour
+    (the fake ramps instantly and advances the clock in 10 ms `vTaskDelay` steps), and the actual
+    SG signal a jammed press produces. Bench verification of calibration/jam/homing on the real
+    press (Phase 4) is still required — this suite catches sequencing regressions, it does not
+    replace the bench session.
+- [x] Added `GET /api/v1/info` diagnostics endpoint (`main/net/web_server.cpp:444-472`):
+  `esp_app_get_description()` (version, idf_ver, compile date/time, ELF SHA-256 truncated to
+  the first 8 bytes/16 hex chars — matching ESP-IDF's own boot-log short SHA), `esp_reset_reason()`
+  mapped to a string via a local `resetReasonStr()` (`web_server.cpp:70-90`), free/min-free heap
+  (`esp_get_free_heap_size()`/`esp_get_minimum_free_heap_size()`), uptime
+  (`esp_timer_get_time()/1000`), the running OTA partition's label
+  (`esp_ota_get_running_partition()`), and a `coredumpPresent` bool
+  (`esp_core_dump_image_check() == ESP_OK`). It's a GET, so — like every other read in this file —
+  it's left open, not Digest-gated (matches the existing convention: only non-GET routes go through
+  `s_auth`). Documented in `api/openapi.yaml`.
+- [x] Added `GET /api/v1/coredump` (`main/net/web_server.cpp:475-512`) — streams the raw `coredump`
+  partition (`partitions.csv`, verified end-to-end in Phase 6) as a chunked file download via
+  PsychicHttp's `sendChunk`/`finishChunking`, reading through `esp_partition_read` in 512-byte
+  chunks after `esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP)`.
+  Presence/integrity is checked with `esp_core_dump_image_check()` (validates the stored checksum)
+  before anything is streamed — returns a clean 404 instead of any bytes if no valid coredump is
+  present, and the actual byte count comes from `esp_core_dump_image_get()`. **Digest-gated**,
+  unlike `/api/v1/info` and every other GET in this file — caught in review before commit: a
+  coredump is a raw RAM snapshot and can contain the WiFi or web password in plaintext (both are
+  held in local C buffers at runtime — `wifi_mgr.cpp`'s `wifi_config.sta/ap.password`, `s_auth`'s
+  stored password). The shared auth middleware (`web_server.cpp`'s `addMiddleware`) special-cases
+  this one route to require auth despite being a GET. Added a "Download Core Dump" link next to
+  the OTA upload control on
+  the web UI's Firmware page (`main/net/index_html.h`) — a plain `<a href>`, so the browser handles
+  the download natively. `espcoredump` and `esp_partition` added to `main/CMakeLists.txt`'s
+  `REQUIRES`. Documented in `api/openapi.yaml`.
+- [x] OTA image identity check (`main/net/web_server.cpp`'s `handleOtaUpload()`, lines 260-300) —
+  one half of `#1c` above (the other half is the default-password fix, still open). Before
+  `esp_ota_set_boot_partition()`, and while the OTA handle is still open (i.e. before
+  `esp_ota_end()`), `esp_ota_get_partition_description()` reads the just-written partition's
+  `esp_app_desc_t` and compares its `project_name` against the running app's own
+  (`esp_app_get_description()`). A mismatch is rejected via the existing `otaAbort()` helper
+  (handle still open, so `esp_ota_abort()` — not `esp_ota_end()` — is correct) and logged both to
+  `ESP_LOGE` and `webLog()`; boot partition is never set. A same-project image proceeds through the
+  existing `esp_ota_end()` → `esp_ota_set_boot_partition()` path unchanged.
+- [x] SSE diff-and-heartbeat instead of unconditional full-state every 250ms
+  (`main/net/web_server.cpp`'s `broadcastState()`, lines 714-740). `buildStateJSON()`'s output is
+  now compared against `s_lastSentState`; the default `message` SSE event is only sent when it
+  differs. When it doesn't, a lightweight named `heartbeat` event (`{}`) is sent instead once
+  `SSE_HEARTBEAT_MS` (8s, new constant in `main/config.h`) has elapsed since the last send of
+  either kind — so a client can tell "still connected, nothing changed" apart from a dead
+  connection without a full-state payload every 250ms regardless of whether anything moved. The
+  dashboard's `onmessage` handler only fires for the unnamed event, so the heartbeat is inert to
+  existing JS. The `MotionState`/`buildStateJSON()` data model is unchanged. `api/asyncapi.yaml`
+  updated with the new `heartbeat` message and the revised send-cadence description.
 - [x] Fixed the stale `.pre-commit-config.yaml` exclude path — was
   `^main/stepper_motor_encoder\.[ch]$`, now `^main/drivers/stepper_motor_encoder\.[ch]$` matching
   where the file actually lives.

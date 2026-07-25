@@ -49,6 +49,13 @@ foreach(suite ${test_suites})
     # Harmless for the suites that don't use it.
     target_compile_definitions(${suite} PRIVATE
       STATE_EXAMPLE_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../api/schemas/state.example.json")
+    # Per-suite extension point: a suite needing extra sources or include dirs
+    # (test_motion_seq compiles main/motion/motion.cpp against host_test/fakes)
+    # drops a suite.cmake next to its test file. `suite` and `TEST_DIR` are in
+    # scope there.
+    if(EXISTS "${suite_dir}/suite.cmake")
+      include("${suite_dir}/suite.cmake")
+    endif()
     if(AUTOLEE_COVERAGE)
       target_compile_options(${suite} PRIVATE --coverage -O0 -g)
       target_link_options(${suite} PRIVATE --coverage)
