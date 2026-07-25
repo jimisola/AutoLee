@@ -99,8 +99,8 @@ The stall detection and jam protection features are designed to detect brass get
 
 | | |
 |---|---|
-| **[Bill of Materials](docs/bill-of-materials.md)** | Every part needed, with links |
-| **[Wiring](docs/wiring.md)** | Pin-by-pin connections + wiring diagram |
+| **[Bill of Materials — 24V](docs/24V/bill-of-materials.md) · [36V](docs/36V/bill-of-materials.md)** | Every part needed, with links |
+| **[Wiring](docs/wiring.md)** | Pin-by-pin connections + wiring diagrams (both variants) |
 
 Read the safety warning above first.
 

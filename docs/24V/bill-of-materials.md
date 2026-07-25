@@ -1,7 +1,9 @@
-# Bill of Materials
+# Bill of Materials — 24V
 
-Everything needed to build an AutoLee. See [Wiring](wiring.md) for how it all connects,
-and the [README](../README.md) for the safety warning **before** you build or operate it.
+Everything needed to build the **24V** variant of AutoLee. See [Wiring](../wiring.md) for
+how it all connects, and the [README](../../README.md) for the safety warning **before**
+you build or operate it. Building the 36V variant instead? See
+[../36V/bill-of-materials.md](../36V/bill-of-materials.md).
 
 
 > **Support this project:** The product links below are affiliate links. If you purchase through them, I earn a small commission at no extra cost to you — it's a simple way to help fund continued development of AutoLee. Thank you!

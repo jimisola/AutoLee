@@ -231,5 +231,5 @@ for why ESP-IDF was chosen and what each option concretely buys.
 ## See also
 
 - [PLAN.md](PLAN.md) — phased migration checklist and what remains unverified
-- [wiring.md](wiring.md) · [bill-of-materials.md](bill-of-materials.md)
+- [wiring.md](wiring.md) · Bill of Materials: [24V](24V/bill-of-materials.md) · [36V](36V/bill-of-materials.md)
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) — build, test, and release workflow
