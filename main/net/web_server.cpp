@@ -8,6 +8,7 @@
 #include "globals.h"
 #include "motion.h"
 #include "motion_cmd.h"
+#include "motion_state.h"
 #include "stepper.h"
 #include "tmc5160_ctrl.h"
 #include "wifi_mgr.h"
@@ -64,47 +65,55 @@ static inline uint32_t millis() {
 // ==========================================================================
 //  STATE JSON BUILDER
 // ==========================================================================
+// Called from the HTTP task and from sse_task - never from pump_task, which
+// owns the motion state. One snapshot() up front (a struct copy taken under
+// motion_state's spinlock) gives a self-consistent view of every motion /
+// endpoint / batch / profile field; the rest of this function then works off
+// that local copy, so no lock is held while the JSON is assembled and no
+// field can change underneath a half-built payload.
 static std::string buildStateJSON() {
+  const MotionState ms = motion_state::snapshot();
+
   const char *wfStat =
       wifi_mgr::isConnected() ? "Connected" : (wifi_mgr::isApMode() ? "AP Mode" : "Disconnected");
   std::string wfSSID = (wifi_mgr::isConnected() || wifi_mgr::isApMode()) ? wifi_mgr::ssid() : "-";
   std::string wfIP =
       (wifi_mgr::isConnected() || wifi_mgr::isApMode()) ? wifi_mgr::ipAddress() : "-";
 
-  const char *stateStr = runState == RUNNING       ? "RUNNING"
-                         : runState == STOPPING    ? "STOPPING"
-                         : runState == CALIBRATING ? "CALIBRATING"
-                         : runState == STALLED     ? "STALLED"
-                         : runState == HOMING      ? "HOMING"
-                                                   : "IDLE";
+  const char *stateStr = ms.runState == RUNNING       ? "RUNNING"
+                         : ms.runState == STOPPING    ? "STOPPING"
+                         : ms.runState == CALIBRATING ? "CALIBRATING"
+                         : ms.runState == STALLED     ? "STALLED"
+                         : ms.runState == HOMING      ? "HOMING"
+                                                      : "IDLE";
 
   autolee::DeviceState st{};
   st.version = FW_VERSION;
   st.state = stateStr;
-  st.counter = counter;
-  st.speed = ui_speed_hz;
-  st.calibrated = endpointsCalibrated;
-  st.rawUp = rawUp;
-  st.rawDown = rawDown;
-  st.endpointUp = endpointUp;
-  st.endpointDown = endpointDown;
-  st.upOffset = upOffsetSteps;
-  st.downOffset = downOffsetSteps;
+  st.counter = ms.counter;
+  st.speed = ms.profiles[ms.activeProfile].speed_hz;
+  st.calibrated = ms.endpointsCalibrated;
+  st.rawUp = ms.rawUp;
+  st.rawDown = ms.rawDown;
+  st.endpointUp = ms.endpointUp;
+  st.endpointDown = ms.endpointDown;
+  st.upOffset = ms.upOffsetSteps;
+  st.downOffset = ms.downOffsetSteps;
   st.position = stepper::getCurrentPosition();
-  st.sgTrip = RUN_SG_TRIP;
-  st.workZone = SG_WORK_ZONE_STEPS;
-  st.currentMa = RUN_CURRENT_MA;
-  st.profileIdx = activeProfile;
-  st.profileName = profiles[activeProfile].name;
+  st.sgTrip = ms.profiles[ms.activeProfile].sg_trip;
+  st.workZone = ms.sgWorkZoneSteps;
+  st.currentMa = ms.runCurrentMa;
+  st.profileIdx = ms.activeProfile;
+  st.profileName = ms.profiles[ms.activeProfile].name;
   for (int i = 0; i < NUM_PROFILES; i++) {
-    st.profiles[i] = {profiles[i].name, profiles[i].speed_hz, profiles[i].sg_trip};
+    st.profiles[i] = {ms.profiles[i].name, ms.profiles[i].speed_hz, ms.profiles[i].sg_trip};
   }
   st.wifiStatus = wfStat;
   st.wifiSSID = wfSSID.c_str();
   st.wifiIP = wfIP.c_str();
-  st.batchTarget = batchTarget;
-  st.batchCount = batchCount;
-  st.batchActive = batchActive;
+  st.batchTarget = ms.batchTarget;
+  st.batchCount = ms.batchCount;
+  st.batchActive = ms.batchActive;
 
   char buf[768];
   autolee::buildStateJson(st, buf, sizeof(buf));
@@ -206,7 +215,7 @@ static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_
     s_ota_in_progress = true;
     // Deferred: stepper calls must not run in the HTTP task. pump_task keeps
     // running during the upload, so the stop executes within milliseconds.
-    if (runState == RUNNING) motion_cmd::requestStop();
+    if (motion_state::snapshot().runState == RUNNING) motion_cmd::requestStop();
     s_ota_partition = esp_ota_get_next_update_partition(nullptr);
     if (!s_ota_partition ||
         esp_ota_begin(s_ota_partition, OTA_SIZE_UNKNOWN, &s_ota_handle) != ESP_OK) {
@@ -400,21 +409,29 @@ void setupWebServer() {
   });
 
   server.on("/api/v1/endpoint", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    if (req->hasParam("which") && req->hasParam("delta") && endpointsCalibrated) {
+    if (req->hasParam("which") && req->hasParam("delta") &&
+        motion_state::snapshot().endpointsCalibrated) {
       std::string w = req->getParam("which", "");
       int32_t d = atoi(req->getParam("delta", "0"));
-      if (w == "up")
-        upOffsetSteps = autolee::clamp_i32(upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
-      else
-        downOffsetSteps = autolee::clamp_i32(downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
-      recomputeEffectiveEndpoints();   // pure math, no hardware/LVGL
+      {
+        // Read-modify-write of state pump_task also reads - must be guarded.
+        motion_state::Guard g;
+        if (w == "up")
+          g_motion.upOffsetSteps =
+              autolee::clamp_i32(g_motion.upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
+        else
+          g_motion.downOffsetSteps =
+              autolee::clamp_i32(g_motion.downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
+      }
+      recomputeEffectiveEndpoints();   // pure math (takes the guard itself)
       motion_cmd::requestUiRefresh();  // LVGL label update deferred to pump_task
     }
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/sg_trip", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    uint8_t tgt = activeProfile;
+    const MotionState ms = motion_state::snapshot();
+    uint8_t tgt = ms.activeProfile;
     if (req->hasParam("profile")) {
       uint8_t p = (uint8_t)atoi(req->getParam("profile", "0"));
       if (p < NUM_PROFILES) tgt = p;
@@ -423,13 +440,19 @@ void setupWebServer() {
       int32_t v = atoi(req->getParam("value", "0"));
       if (v < RUN_SG_TRIP_MIN) v = RUN_SG_TRIP_MIN;
       if (v > RUN_SG_TRIP_MAX) v = RUN_SG_TRIP_MAX;
-      profiles[tgt].sg_trip = (uint16_t)v;
+      {
+        motion_state::Guard g;
+        g_motion.profiles[tgt].sg_trip = (uint16_t)v;
+      }
       motion_cmd::requestUiRefresh();
     } else if (req->hasParam("delta")) {
-      int32_t v = (int32_t)profiles[tgt].sg_trip + atoi(req->getParam("delta", "0"));
+      int32_t v = (int32_t)ms.profiles[tgt].sg_trip + atoi(req->getParam("delta", "0"));
       if (v < RUN_SG_TRIP_MIN) v = RUN_SG_TRIP_MIN;
       if (v > RUN_SG_TRIP_MAX) v = RUN_SG_TRIP_MAX;
-      profiles[tgt].sg_trip = (uint16_t)v;
+      {
+        motion_state::Guard g;
+        g_motion.profiles[tgt].sg_trip = (uint16_t)v;
+      }
       motion_cmd::requestUiRefresh();
     }
     return res->send(200, "text/plain", "ok");
@@ -437,10 +460,14 @@ void setupWebServer() {
 
   server.on("/api/v1/work_zone", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("delta")) {
-      int32_t v = SG_WORK_ZONE_STEPS + atoi(req->getParam("delta", "0"));
-      if (v < SG_WORK_ZONE_MIN) v = SG_WORK_ZONE_MIN;
-      if (v > SG_WORK_ZONE_MAX) v = SG_WORK_ZONE_MAX;
-      SG_WORK_ZONE_STEPS = v;
+      const int32_t d = atoi(req->getParam("delta", "0"));
+      {
+        motion_state::Guard g;
+        int32_t v = g_motion.sgWorkZoneSteps + d;
+        if (v < SG_WORK_ZONE_MIN) v = SG_WORK_ZONE_MIN;
+        if (v > SG_WORK_ZONE_MAX) v = SG_WORK_ZONE_MAX;
+        g_motion.sgWorkZoneSteps = v;
+      }
       motion_cmd::requestUiRefresh();
     }
     return res->send(200, "text/plain", "ok");
@@ -448,8 +475,12 @@ void setupWebServer() {
 
   server.on("/api/v1/batch", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("delta")) {
-      int32_t v = batchTarget + atoi(req->getParam("delta", "0"));
-      batchTarget = (v < 0) ? 0 : (v > BATCH_TARGET_MAX ? BATCH_TARGET_MAX : v);
+      const int32_t d = atoi(req->getParam("delta", "0"));
+      {
+        motion_state::Guard g;
+        int32_t v = g_motion.batchTarget + d;
+        g_motion.batchTarget = (v < 0) ? 0 : (v > BATCH_TARGET_MAX ? BATCH_TARGET_MAX : v);
+      }
       motion_cmd::requestUiRefresh();
     }
     if (req->hasParam("action")) {
@@ -459,9 +490,13 @@ void setupWebServer() {
         // Validity (target set, IDLE, calibrated) is re-checked at execution.
         motion_cmd::requestBatchStart();
       } else if (a == "clear") {
-        batchTarget = 0;
-        batchCount = 0;
-        batchActive = false;
+        {
+          // One guard: readers must never see target/count/active disagree.
+          motion_state::Guard g;
+          g_motion.batchTarget = 0;
+          g_motion.batchCount = 0;
+          g_motion.batchActive = false;
+        }
         motion_cmd::requestUiRefresh();
       }
     }
@@ -476,7 +511,8 @@ void setupWebServer() {
       } else if (action == "return_home") {
         motion_cmd::requestReturnHome();
       } else if (action == "reset_counter") {
-        counter = 0;
+        motion_state::Guard g;
+        g_motion.counter = 0;
       }
     }
     return res->send(200, "text/plain", "ok");

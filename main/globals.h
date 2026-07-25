@@ -3,29 +3,16 @@
 #include <cstdint>
 #include "lvgl.h"
 #include "config.h"
+// The motion/endpoint/batch/profile state that used to be declared here as
+// loose globals now lives in one lock-protected struct (`g_motion`) - see
+// main/motion/motion_state.h for the ownership and snapshot rules. Included
+// here so everything that already includes globals.h still sees RunState and
+// the ui_speed_hz / RUN_SG_TRIP accessors.
+#include "motion_state.h"
 
 // Mutable, cross-module state - defined once in globals.cpp. Mirrors the
 // original Arduino firmware's `AutoLee.ino` role as the single definition
-// site for these globals; config.h's `extern` declarations point here now
-// instead.
-
-enum RunState : uint8_t { IDLE, RUNNING, STOPPING, CALIBRATING, STALLED, HOMING };
-extern volatile RunState runState;
-extern long currentTarget;
-extern uint32_t stopEntryMs;
-
-extern long rawUp, rawDown;
-extern long endpointUp, endpointDown;
-extern bool endpointsCalibrated;
-extern long counter;
-
-extern uint32_t lastDirectionChangeMs;
-extern uint8_t runSGHighCount;
-extern uint8_t runSGLowCount;
-
-extern bool batchActive;
-extern int32_t batchCount;
-extern int32_t batchTarget;
+// site for these globals.
 
 // Deferred reboot (set from a handler, serviced by pump_task). Motion-affecting
 // requests go through motion_cmd:: instead - see main/motion/motion_cmd.h.

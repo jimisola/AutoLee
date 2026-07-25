@@ -37,22 +37,18 @@ struct SpeedProfile {
 };
 
 static constexpr uint8_t NUM_PROFILES = 3;
-// Defined in globals.cpp (mutable, shared across translation units).
-extern SpeedProfile profiles[NUM_PROFILES];
-extern uint8_t activeProfile;
+// The profile table itself and the active-profile index are mutable, cross-task
+// state: they live in MotionState (main/motion/motion_state.h), which also
+// defines the ui_speed_hz / RUN_SG_TRIP accessors that used to sit here.
 
 static constexpr uint32_t RUN_DECEL =
     800000;  // accel/decel rate for run moves (fast ramps, max SG coverage)
 
-// Accessors — use these everywhere instead of raw globals
-#define ui_speed_hz (profiles[activeProfile].speed_hz)
-#define RUN_SG_TRIP (profiles[activeProfile].sg_trip)
-
 // ==========================================================================
 //  ENDPOINT TUNING
 // ==========================================================================
-extern int32_t upOffsetSteps;    // defined in globals.cpp
-extern int32_t downOffsetSteps;  // defined in globals.cpp
+// The endpoint offsets are cross-task state: MotionState::upOffsetSteps /
+// ::downOffsetSteps in main/motion/motion_state.h.
 static constexpr int32_t DOWN_OFFSET_DEFAULT = -500;
 static constexpr int32_t OFFSET_MIN = -8000;
 static constexpr int32_t OFFSET_MAX = +8000;
@@ -67,7 +63,8 @@ static constexpr int8_t CAL_SGT = -1;
 // TMC5160 SGT (StallGuard2 threshold) COOLCONF field is a signed 7-bit value.
 static constexpr int8_t SGT_MIN = -64;
 static constexpr int8_t SGT_MAX = 63;
-extern uint16_t RUN_CURRENT_MA;  // defined in globals.cpp
+// Run current is cross-task state: MotionState::runCurrentMa (default 3500mA)
+// in main/motion/motion_state.h.
 static constexpr uint16_t RUN_CURRENT_MIN = 1000;
 static constexpr uint16_t RUN_CURRENT_MAX = 4500;
 static constexpr uint16_t CAL_CURRENT_MA = 3200;
@@ -125,7 +122,8 @@ static constexpr uint32_t CAL_MUS_LOG_INTERVAL_MS = 400;
 // does useful work (e.g. pushing primers). The resistance here is normal
 // and would false-trigger stall detection at low trip thresholds.
 // SG is still active for the rest of the travel and near the UP endpoint.
-extern int32_t SG_WORK_ZONE_STEPS;  // defined in globals.cpp (default 5500)
+// The work-zone width is cross-task state: MotionState::sgWorkZoneSteps
+// (default 5500) in main/motion/motion_state.h.
 static constexpr int32_t SG_WORK_ZONE_MIN = 0;
 static constexpr int32_t SG_WORK_ZONE_MAX = 20000;
 static constexpr uint32_t CREEP_HOME_SPEED = CAL_SPEED_HZ;
@@ -196,8 +194,8 @@ static constexpr int BATCH_TARGET_MAX = 9999;
 //  If the main loop stalls (hung SPI, stuck WiFi stack, etc.) the hardware
 //  watchdog resets the board rather than leaving a powered stepper in an
 //  undefined state. The blocking calibration/homing loops feed it explicitly
-//  (see wdt_feed()), so the timeout only needs to exceed a single feed gap.
-//  Set ENABLE_TASK_WDT to 0 to disable (e.g. while bring-up debugging).
+//  (see wdt_feed() in motion.cpp), so the timeout only needs to exceed a
+//  single feed gap. The actual timeout is an ESP-IDF Kconfig setting
+//  (CONFIG_ESP_TASK_WDT_TIMEOUT_S, set to 8 in sdkconfig.defaults), not a
+//  compile-time constant here - there is no build-time knob in this file.
 // ==========================================================================
-#define ENABLE_TASK_WDT 1
-static constexpr uint32_t TASK_WDT_TIMEOUT_MS = 8000;

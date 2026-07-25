@@ -79,6 +79,24 @@ flowchart LR
 **The rule:** only `pump_task` touches the stepper, the TMC5160, or the motion
 state machine. Everything else *requests*; nothing else acts.
 
+### Reading motion state from another task
+
+The mirror image of that rule: motion/endpoint/batch/profile state lives in one
+struct, `g_motion` (`main/motion/motion_state.h`), behind one spinlock.
+
+| Who | Reads | Writes |
+|---|---|---|
+| `pump_task` (owner) | direct, unlocked | under `motion_state::Guard` |
+| HTTP task, `sse_task`, LVGL task | `motion_state::snapshot()` | under `motion_state::Guard` |
+
+`snapshot()` copies the whole struct inside a critical section, so a reader can
+never see a half-applied update — e.g. `batchCount` already incremented while
+`batchActive` is not yet cleared, or a new `endpointUp` against a stale
+`endpointDown`. Readers then render/serialize from their local copy, holding no
+lock while they call LVGL or write to a socket. Writers group fields that belong
+together into a single guard, and keep the section free of anything that logs,
+blocks, allocates or touches SPI — it runs with interrupts disabled.
+
 ### Why `sse_task` is separate
 
 `broadcastState()` does a blocking socket `send()`. It used to run inside

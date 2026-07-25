@@ -5,6 +5,7 @@
 #include "config.h"
 #include "globals.h"
 #include "motion.h"
+#include "motion_state.h"
 #include "tmc5160_ctrl.h"
 #include "ui_touch.h"
 
@@ -54,41 +55,47 @@ void requestCurrentMa(int32_t ma) {
   s_currentMa.store(ma);
 }
 
+// Runs on pump_task only (see the header), so g_motion reads here are unlocked
+// - but every write still takes motion_state::Guard, per motion_state.h's rules.
 void processPendingCommands() {
   // Calibration and homing block for seconds; they were already deferred
   // before this module existed, so keep using their existing entry points.
   if (s_calibrate.exchange(false)) {
-    if (runState == IDLE) calibrateEndpointsSensorless();
+    if (g_motion.runState == IDLE) calibrateEndpointsSensorless();
   }
 
   if (s_returnHome.exchange(false)) {
-    if (runState == STALLED) safeCreepHome();
+    if (g_motion.runState == STALLED) safeCreepHome();
   }
 
   if (s_toggleRun.exchange(false)) {
     // Re-check state here, not at request time: the press may have jammed or
     // finished a batch between the tap and now.
-    if (runState == IDLE) {
+    if (g_motion.runState == IDLE) {
       startRunBetweenEndpoints();
-      setRunButtonState(runState == RUNNING);
-    } else if (runState == RUNNING) {
+      setRunButtonState(g_motion.runState == RUNNING);
+    } else if (g_motion.runState == RUNNING) {
       requestGracefulStop();
       setRunButtonState(false);
-      batchActive = false;
+      motion_state::Guard g;
+      g_motion.batchActive = false;
     }
   }
 
   if (s_stop.exchange(false)) {
-    if (runState == RUNNING) {
+    if (g_motion.runState == RUNNING) {
       requestGracefulStop();
       setRunButtonState(false);
     }
   }
 
   if (s_batchStart.exchange(false)) {
-    if (batchTarget > 0 && runState == IDLE && endpointsCalibrated) {
-      batchCount = 0;
-      batchActive = true;
+    if (g_motion.batchTarget > 0 && g_motion.runState == IDLE && g_motion.endpointsCalibrated) {
+      {
+        motion_state::Guard g;
+        g_motion.batchCount = 0;
+        g_motion.batchActive = true;
+      }
       startRunBetweenEndpoints();
       setRunButtonState(true);
     }
@@ -104,18 +111,23 @@ void processPendingCommands() {
 
   int32_t ma = s_currentMa.exchange(-1);
   if (ma >= 0) {
-    RUN_CURRENT_MA = (uint16_t)(ma < RUN_CURRENT_MIN   ? RUN_CURRENT_MIN
-                                : ma > RUN_CURRENT_MAX ? RUN_CURRENT_MAX
-                                                       : ma);
+    const uint16_t clamped = (uint16_t)(ma < RUN_CURRENT_MIN   ? RUN_CURRENT_MIN
+                                        : ma > RUN_CURRENT_MAX ? RUN_CURRENT_MAX
+                                                               : ma);
+    {
+      motion_state::Guard g;
+      g_motion.runCurrentMa = clamped;
+    }
     // SPI write on the bus shared with the display - must not run from the
     // HTTP task alongside pump_task's StallGuard reads.
-    tmc5160::rms_current(RUN_CURRENT_MA);
-    webLog("Current set to %u mA", RUN_CURRENT_MA);
+    tmc5160::rms_current(clamped);
+    webLog("Current set to %u mA", clamped);
   }
 
   if (s_logClear.exchange(false)) {
-    // Reassigning the ring from another task would race webLog()'s push.
-    g_log = autolee::LogRing<LOG_LINES, LOG_LINE_LEN>();
+    // clear() takes LogRing's internal lock, so this is now safe even
+    // though webLog() may be pushing concurrently from another task.
+    g_log.clear();
     logSentSerial = 0;
   }
 

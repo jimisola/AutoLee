@@ -17,6 +17,7 @@
 #include "motion_cmd.h"
 #include "globals.h"
 #include "motion.h"
+#include "motion_state.h"
 #include "wifi_mgr.h"
 
 #include "esp_lvgl_port.h"
@@ -30,6 +31,14 @@ static inline uint32_t millis() {
 static inline int32_t clampi(int32_t v, int32_t lo, int32_t hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
+
+// Everything in this file runs on the LVGL task (event callbacks, the 100ms
+// timer) or is called into from pump_task (motion.cpp / motion_cmd.cpp) - never
+// as the owner of the motion state. So label updates read one
+// motion_state::snapshot() and render from that local copy (self-consistent,
+// and no spinlock held across LVGL calls), and the few handlers that change
+// motion state write g_motion under a motion_state::Guard. See
+// main/motion/motion_state.h.
 
 // ==========================================================================
 //  LVGL UI HELPERS
@@ -157,9 +166,10 @@ static void onJamReturnHome(lv_event_t *e) {
 //  UI UPDATE FUNCTIONS
 // ==========================================================================
 void ui_update_main_warning() {
+  const bool calibrated = motion_state::snapshot().endpointsCalibrated;
   lvgl_port_lock(0);
   if (main_warn) {
-    if (endpointsCalibrated)
+    if (calibrated)
       lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
     else
       lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
@@ -182,25 +192,27 @@ static void ui_create_main_warning(lv_obj_t *parent) {
   lv_obj_set_style_text_color(main_warn_lbl, lv_color_hex(0xFFD37C), LV_PART_MAIN);
   lv_obj_set_style_text_align(main_warn_lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_center(main_warn_lbl);
-  if (endpointsCalibrated)
+  if (motion_state::snapshot().endpointsCalibrated)
     lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
   else
     lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
 }
 
 void ui_update_speed_val() {
+  const MotionState ms = motion_state::snapshot();
   lvgl_port_lock(0);
   if (lbl_speed_val)
-    lv_label_set_text_fmt(lbl_speed_val, "%s  %lukHz", profiles[activeProfile].name,
-                          (unsigned long)(ui_speed_hz / 1000));
+    lv_label_set_text_fmt(lbl_speed_val, "%s  %lukHz", ms.profiles[ms.activeProfile].name,
+                          (unsigned long)(ms.profiles[ms.activeProfile].speed_hz / 1000));
   lvgl_port_unlock();
 }
 
 void ui_update_profile_screen() {
+  const MotionState ms = motion_state::snapshot();
   lvgl_port_lock(0);
   for (uint8_t i = 0; i < NUM_PROFILES; i++) {
     if (!profile_btns[i]) continue;
-    if (i == activeProfile) {
+    if (i == ms.activeProfile) {
       lv_obj_set_style_bg_color(profile_btns[i], lv_color_hex(0x1F6FEB), LV_PART_MAIN);
       lv_obj_set_style_border_width(profile_btns[i], 2, LV_PART_MAIN);
       lv_obj_set_style_border_color(profile_btns[i], lv_color_hex(0x00FF00), LV_PART_MAIN);
@@ -210,15 +222,17 @@ void ui_update_profile_screen() {
     }
   }
   if (lbl_profile_info) {
-    lv_label_set_text_fmt(lbl_profile_info, "%luHz  SG=%u", (unsigned long)ui_speed_hz,
-                          RUN_SG_TRIP);
+    lv_label_set_text_fmt(lbl_profile_info, "%luHz  SG=%u",
+                          (unsigned long)ms.profiles[ms.activeProfile].speed_hz,
+                          ms.profiles[ms.activeProfile].sg_trip);
   }
   lvgl_port_unlock();
 }
 
 void ui_update_tuning_numbers() {
+  const MotionState ms = motion_state::snapshot();
   lvgl_port_lock(0);
-  if (!endpointsCalibrated) {
+  if (!ms.endpointsCalibrated) {
     if (lbl_ep_up) lv_label_set_text(lbl_ep_up, "UP: -");
     if (lbl_ep_dn) lv_label_set_text(lbl_ep_dn, "DOWN: -");
     if (lbl_travel) lv_label_set_text(lbl_travel, "TRAVEL: -");
@@ -227,30 +241,33 @@ void ui_update_tuning_numbers() {
     lvgl_port_unlock();
     return;
   }
-  if (lbl_ep_up) lv_label_set_text_fmt(lbl_ep_up, "UP: %ld", rawUp);
-  if (lbl_ep_dn) lv_label_set_text_fmt(lbl_ep_dn, "DOWN: %ld", rawDown);
-  if (lbl_travel) lv_label_set_text_fmt(lbl_travel, "TRAVEL: %ld", rawDown - rawUp);
+  if (lbl_ep_up) lv_label_set_text_fmt(lbl_ep_up, "UP: %ld", ms.rawUp);
+  if (lbl_ep_dn) lv_label_set_text_fmt(lbl_ep_dn, "DOWN: %ld", ms.rawDown);
+  if (lbl_travel) lv_label_set_text_fmt(lbl_travel, "TRAVEL: %ld", ms.rawDown - ms.rawUp);
   if (lbl_up_eff)
-    lv_label_set_text_fmt(lbl_up_eff, "UP: %ld (%+ld)", endpointUp, (long)upOffsetSteps);
+    lv_label_set_text_fmt(lbl_up_eff, "UP: %ld (%+ld)", ms.endpointUp, (long)ms.upOffsetSteps);
   if (lbl_dn_eff)
-    lv_label_set_text_fmt(lbl_dn_eff, "DN: %ld (%+ld)", endpointDown, (long)downOffsetSteps);
+    lv_label_set_text_fmt(lbl_dn_eff, "DN: %ld (%+ld)", ms.endpointDown, (long)ms.downOffsetSteps);
   lvgl_port_unlock();
 }
 
 void ui_update_endpoint_edit_values() {
+  const MotionState ms = motion_state::snapshot();
   lvgl_port_lock(0);
-  if (lbl_ep_up_val) lv_label_set_text_fmt(lbl_ep_up_val, "%ld", endpointUp);
-  if (lbl_ep_dn_val) lv_label_set_text_fmt(lbl_ep_dn_val, "%ld", endpointDown);
+  if (lbl_ep_up_val) lv_label_set_text_fmt(lbl_ep_up_val, "%ld", ms.endpointUp);
+  if (lbl_ep_dn_val) lv_label_set_text_fmt(lbl_ep_dn_val, "%ld", ms.endpointDown);
   lvgl_port_unlock();
 }
 
 void ui_update_sg_val() {
+  const MotionState ms = motion_state::snapshot();
   lvgl_port_lock(0);
-  if (lbl_sg_val) lv_label_set_text_fmt(lbl_sg_val, "%u", RUN_SG_TRIP);
+  if (lbl_sg_val) lv_label_set_text_fmt(lbl_sg_val, "%u", ms.profiles[ms.activeProfile].sg_trip);
   lvgl_port_unlock();
 }
 
 void ui_update_batch_val() {
+  const int32_t batchTarget = motion_state::snapshot().batchTarget;
   lvgl_port_lock(0);
   if (lbl_batch_val) {
     if (batchTarget <= 0)
@@ -262,10 +279,11 @@ void ui_update_batch_val() {
 }
 
 void ui_update_batch_remain() {
+  const MotionState ms = motion_state::snapshot();
   lvgl_port_lock(0);
   if (lbl_batch_remain) {
-    if (batchActive && batchTarget > 0) {
-      int32_t remain = batchTarget - batchCount;
+    if (ms.batchActive && ms.batchTarget > 0) {
+      int32_t remain = ms.batchTarget - ms.batchCount;
       if (remain < 0) remain = 0;
       lv_label_set_text_fmt(lbl_batch_remain, "Batch: %ld left", remain);
       lv_obj_clear_flag(lbl_batch_remain, LV_OBJ_FLAG_HIDDEN);
@@ -373,19 +391,26 @@ void setRunButtonState(bool running) {
 //  UI EVENT HANDLERS
 // ==========================================================================
 static void on_ep_up_delta(lv_event_t *e) {
-  if (!endpointsCalibrated) return;
+  if (!motion_state::snapshot().endpointsCalibrated) return;
   int32_t d = (int32_t)(intptr_t)lv_event_get_user_data(e);
-  upOffsetSteps = autolee::clamp_i32(upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
-  recomputeEffectiveEndpoints();
+  {
+    motion_state::Guard g;
+    g_motion.upOffsetSteps = autolee::clamp_i32(g_motion.upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
+  }
+  recomputeEffectiveEndpoints();  // takes the guard itself
   ui_update_endpoint_edit_values();
   ui_update_tuning_numbers();
 }
 
 static void on_ep_dn_delta(lv_event_t *e) {
-  if (!endpointsCalibrated) return;
+  if (!motion_state::snapshot().endpointsCalibrated) return;
   int32_t d = (int32_t)(intptr_t)lv_event_get_user_data(e);
-  downOffsetSteps = autolee::clamp_i32(downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
-  recomputeEffectiveEndpoints();
+  {
+    motion_state::Guard g;
+    g_motion.downOffsetSteps =
+        autolee::clamp_i32(g_motion.downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
+  }
+  recomputeEffectiveEndpoints();  // takes the guard itself
   ui_update_endpoint_edit_values();
   ui_update_tuning_numbers();
 }
@@ -495,7 +520,8 @@ static void on_calibrate(lv_event_t *e) {
 
 static void counter_timer_cb(lv_timer_t *t) {
   LV_UNUSED(t);
-  long shown = counter < COUNTER_MAX ? counter : COUNTER_MAX;
+  const MotionState ms = motion_state::snapshot();
+  long shown = ms.counter < COUNTER_MAX ? ms.counter : COUNTER_MAX;
   if (counter_label) lv_label_set_text_fmt(counter_label, "%ld", shown);
   if (main_scr && lv_scr_act() == main_scr) {
     ui_update_main_warning();
@@ -505,7 +531,7 @@ static void counter_timer_cb(lv_timer_t *t) {
   // instead of being driven inline by a blocking handler.
   if (btn_calibrate) {
     lv_obj_t *lbl = lv_obj_get_child(btn_calibrate, 0);
-    bool busy = (runState == CALIBRATING);
+    bool busy = (ms.runState == CALIBRATING);
     if (lbl) lv_label_set_text(lbl, busy ? "Calibrating..." : "Calibrate");
     if (busy)
       lv_obj_add_state(btn_calibrate, LV_STATE_DISABLED);
@@ -545,7 +571,10 @@ void buildUI() {
   lv_obj_align_to(main_warn, lbl_speed_val, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
 
   counter_label = lv_label_create(mc);
-  lv_label_set_text_fmt(counter_label, "%ld", counter < COUNTER_MAX ? counter : COUNTER_MAX);
+  {
+    const long c = motion_state::snapshot().counter;
+    lv_label_set_text_fmt(counter_label, "%ld", c < COUNTER_MAX ? c : COUNTER_MAX);
+  }
   lv_obj_set_style_text_font(counter_label, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_set_style_text_color(counter_label, lv_color_hex(0x00FF00), LV_PART_MAIN);
   lv_obj_align(counter_label, LV_ALIGN_CENTER, 0, 8);
@@ -554,7 +583,10 @@ void buildUI() {
       counter_label,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        counter = 0;
+        {
+          motion_state::Guard g;
+          g_motion.counter = 0;
+        }
         lv_label_set_text(counter_label, "0");
         // Original flashed the label red for 200ms as reset feedback via
         // a blocking delay() + manual lv_timer_handler() call - unsafe
@@ -628,10 +660,11 @@ void buildUI() {
   lv_obj_set_style_text_font(lbl_profile_info, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_obj_center(lbl_profile_info);
 
+  const MotionState boot_ms = motion_state::snapshot();
   for (uint8_t i = 0; i < NUM_PROFILES; i++) {
     char label[32];
-    snprintf(label, sizeof(label), "%s  %lukHz", profiles[i].name,
-             (unsigned long)(profiles[i].speed_hz / 1000));
+    snprintf(label, sizeof(label), "%s  %lukHz", boot_ms.profiles[i].name,
+             (unsigned long)(boot_ms.profiles[i].speed_hz / 1000));
     profile_btns[i] = make_btn(pc, label, 140, 40, 0x3A3A3A, &lv_font_montserrat_16);
     lv_obj_add_event_cb(
         profile_btns[i],
@@ -640,8 +673,10 @@ void buildUI() {
           // Deferred: setActiveProfile() drives the stepper. pump_task
           // refreshes the labels once applied.
           motion_cmd::requestProfile(idx);
-          webLog("Profile: %s spd=%lu sg=%u", profiles[idx].name, (unsigned long)ui_speed_hz,
-                 RUN_SG_TRIP);
+          const MotionState ms = motion_state::snapshot();
+          webLog("Profile: %s spd=%lu sg=%u", ms.profiles[idx].name,
+                 (unsigned long)ms.profiles[ms.activeProfile].speed_hz,
+                 ms.profiles[ms.activeProfile].sg_trip);
         },
         LV_EVENT_CLICKED, (void *)(intptr_t)i);
   }
@@ -824,8 +859,13 @@ void buildUI() {
 
   auto sg_cb = [](lv_event_t *e) {
     int32_t d = (int32_t)(intptr_t)lv_event_get_user_data(e);
-    int32_t v = (int32_t)RUN_SG_TRIP + d;
-    RUN_SG_TRIP = (uint16_t)clampi(v, (int32_t)RUN_SG_TRIP_MIN, (int32_t)RUN_SG_TRIP_MAX);
+    {
+      // Read-modify-write of the active profile's trip - pump_task reads it on
+      // every StallGuard sample, so it has to be one guarded transaction.
+      motion_state::Guard g;
+      int32_t v = (int32_t)RUN_SG_TRIP + d;
+      RUN_SG_TRIP = (uint16_t)clampi(v, (int32_t)RUN_SG_TRIP_MIN, (int32_t)RUN_SG_TRIP_MAX);
+    }
     ui_update_sg_val();
   };
   lv_obj_add_event_cb(sgM5, sg_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-5);
@@ -895,8 +935,10 @@ void buildUI() {
 
   auto br_cb = [](lv_event_t *e) {
     int32_t d = (int32_t)(intptr_t)lv_event_get_user_data(e);
-    int32_t v = batchTarget + d;
-    batchTarget = clampi(v, 0, BATCH_TARGET_MAX);
+    {
+      motion_state::Guard g;
+      g_motion.batchTarget = clampi(g_motion.batchTarget + d, 0, BATCH_TARGET_MAX);
+    }
     ui_update_batch_val();
   };
   lv_obj_add_event_cb(brM100, br_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-100);
@@ -967,7 +1009,10 @@ void buildUI() {
       b_reset,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        counter = 0;
+        {
+          motion_state::Guard g;
+          g_motion.counter = 0;
+        }
         if (counter_label) lv_label_set_text(counter_label, "0");
       },
       LV_EVENT_CLICKED, nullptr);

@@ -29,9 +29,13 @@ CONFIG_LV_CONF_SKIP=n
 # OTA rollback: an update that doesn't self-validate reverts to the last-good app
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
-# Task + interrupt watchdog, panic on trip (mirrors today's ENABLE_TASK_WDT, made fuller)
+# Task + interrupt watchdog, panic on trip
 CONFIG_ESP_TASK_WDT_EN=y
 CONFIG_ESP_TASK_WDT_PANIC=y
+# 8s budget: motion.cpp's blocking calibration/homing polling loops feed the
+# watchdog explicitly (wdt_feed()); the timeout just needs to exceed a single
+# feed gap. Set explicitly - IDF's own default is 5s, which is not enough.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=8
 CONFIG_ESP_INT_WDT=y
 CONFIG_ESP_INT_WDT_PANIC=y
 
