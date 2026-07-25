@@ -388,7 +388,7 @@ function upd(d){
   const ja=document.getElementById('jamAlert'),jt=document.getElementById('jamTitle'),jm=document.getElementById('jamMsg'),bh=document.getElementById('bh');
   if(d.state==='STALLED'){jt.textContent='\u26A0 JAM DETECTED';jm.textContent='Motor stalled and backed off.';ja.style.display='block';bh.disabled=false;bh.textContent='Return Home'}
   else if(d.state==='HOMING'){ja.style.display='block';bh.disabled=true;bh.textContent='Returning...'}
-  else if(d.positionStale){jt.textContent='\u26A0 POSITION UNCONFIRMED';jm.textContent='Calibration restored after a reboot - return home to re-reference the axis before running.';ja.style.display='block';bh.disabled=false;bh.textContent='Return Home'}
+  else if(d.positionStale&&d.calibrated){jt.textContent='\u26A0 POSITION UNCONFIRMED';jm.textContent='Calibration restored after a reboot - return home to re-reference the axis before running.';ja.style.display='block';bh.disabled=false;bh.textContent='Return Home'}
   else{ja.style.display='none'}
   const br=document.getElementById('br');
   if(d.state==='RUNNING'){br.textContent='STOP';br.classList.add('active')}
