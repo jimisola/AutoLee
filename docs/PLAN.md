@@ -5,8 +5,9 @@ Working checklist for porting AutoLee from Arduino to **native ESP‑IDF**, dire
 0001's status note). Derived from [ADR 0001](adr/0001-build-tooling-and-platform.md) — read it
 first for the *why* and the per‑subsystem analysis.
 
-- **Base:** current **v1.8** source (branch `feat/esp-idf`, off `main`). Karl's
-  **v1.9** isn't available yet → we build on v1.8 and **re‑diff v1.8→v1.9 later** (Phase 7).
+- **Base:** started from **v1.8** source (branch `feat/esp-idf`, off `main`). Karl's upstream
+  release (**v1.10.0**) has since shipped and been diffed in - see Phase 7 - so this port now
+  incorporates both v1.8 and the v1.10.0 delta.
   `lib/autolee_logic/`, `test/`, `api/`, and the governance tooling (clang-format, commitlint,
   pre-commit, yamllint) were carried forward from the PR #3 research since they're
   framework-agnostic; everything Arduino/PlatformIO-specific was dropped.
@@ -109,13 +110,13 @@ Deferred low-priority cleanups from the PR #4 review (not blocking):
 - [ ] **Brownout** threshold: `CONFIG_ESP_BROWNOUT_DET=y` (Phase 1, default threshold). Tuning it against the actual 24V→5V + stepper draw needs the physical press - not done.
 - **DoD:** ✅ **core dump and OTA rollback both fully verified** (see above). Brownout tuning still needs real hardware (the press's power supply under load) - not done.
 
-## Phase 7 — CI, release, docs, v1.9
+## Phase 7 — CI, release, docs, v1.10.0
 - [x] **CI** (`.github/workflows/ci.yml`): three jobs, **confirmed green in real GitHub Actions runs on PR #4** (not just locally) - `idf.py build` (via `espressif/install-esp-idf-action`, pinned to ESP-IDF v5.3.2), host tests (`host_test/` ctest + gcovr coverage), and lint (pre-commit's clang-format/ruff/yamllint + Spectral on the API specs + a JSON Schema contract check). Actions pinned to commit SHAs (verified live via `gh api`, not from memory).
   - Getting host-tests green took 4 real iterations against actual CI: `install-esp-idf-action`'s cross-toolchain (Xtensa/RISC-V) leaked into `host_test/`'s native host build's `as`/`ld` resolution. Pinning `CC`/`CXX`, resetting `PATH`, and additionally resetting `COMPILER_PATH` all failed identically (`as: unrecognized option '--64'`), implying a system-level change (e.g. a gcc specs file), not a process-env one. Fixed by not using that action for this job at all - `host_test/` only needs one file from ESP-IDF (`components/unity/unity`, itself a `ThrowTheSwitch/Unity` submodule), fetched directly pinned to the exact commit ESP-IDF v5.3.2 references, verified in a fully clean (`env -i`) local simulation before trusting it in CI.
 - [x] **Release** (`.github/workflows/release.yml`): `idf.py build` → `idf.py merge-bin -o ..._merged.bin --fill-flash-size 4MB` (verified by hand: produces exactly a 4 MB raw image, matching the README's "flash at offset 0x0" instructions) + the app-only image as `..._update.bin`, both attached to the GitHub Release. Kept the `FW_VERSION`-must-match-tag guard from the old workflow. **Not yet run** - only exercised on `release: published`, untested until an actual release is cut.
 - [x] **Docs:** README/CONTRIBUTING/CLAUDE.md already rewritten for the ESP-IDF-only layout as part of the Phase 0-3 rebase (see the `refactor!` commit); nothing further pending here.
-- [ ] **v1.9:** diff Karl's v1.8→v1.9 and fold the deltas into this port - blocked, v1.9 not available yet (per the original decision to build on v1.8 and re-diff later).
-- **DoD:** ✅ **CI is green** (verified in real GitHub Actions, not just claimed). Release workflow's build steps verified by hand; the full release-on-publish flow untested (needs an actual release to exercise). v1.9 diff blocked on Karl.
+- [x] **v1.10.0 (was "v1.9"):** Karl's upstream release shipped, diffed, and folded into this port - see [`docs/upstream-v1.10.0-diff.md`](upstream-v1.10.0-diff.md) and the PR description's "Upstream v1.10.0 merge" section. Confirmed incorporated: three inherited bugs fixed (batch counting gated by the display counter cap, decel-blank carry-through discarding jam evidence, unescaped `&` in the WiFi scan dropdown), plus the TMC tuning delta (`TOFF` 5→4, `TBL`=1, `INTPOL`) - flagged unverified on hardware, still a Phase 4 bench item below.
+- **DoD:** ✅ **CI is green** (verified in real GitHub Actions, not just claimed). Release workflow's build steps verified by hand; the full release-on-publish flow untested (needs an actual release to exercise). v1.10.0 diff incorporated.
 
 ## Phase 8 — Post-migration hardening
 Non-bench-blocking follow-ups from the 2026-07-25 codebase review (`docs/review-2026-07-25.md`).
