@@ -60,21 +60,25 @@ void requestCurrentMa(int32_t ma) {
 void processPendingCommands() {
   // Calibration and homing block for seconds; they were already deferred
   // before this module existed, so keep using their existing entry points.
+  // The state gates below ask the host-tested transition table
+  // (lib/autolee_logic/motor_fsm.h) rather than re-hardcoding which states each
+  // command is legal from; motion.cpp re-checks the same table when it actually
+  // applies the transition, so the rule lives in exactly one tested place.
   if (s_calibrate.exchange(false)) {
-    if (g_motion.runState == IDLE) calibrateEndpointsSensorless();
+    if (motionEventAllowed(autolee::MotorEvent::Calibrate)) calibrateEndpointsSensorless();
   }
 
   if (s_returnHome.exchange(false)) {
-    if (g_motion.runState == STALLED) safeCreepHome();
+    if (motionEventAllowed(autolee::MotorEvent::ReturnHome)) safeCreepHome();
   }
 
   if (s_toggleRun.exchange(false)) {
     // Re-check state here, not at request time: the press may have jammed or
     // finished a batch between the tap and now.
-    if (g_motion.runState == IDLE) {
+    if (autolee::canStart(toMotorState(g_motion.runState))) {
       startRunBetweenEndpoints();
       setRunButtonState(g_motion.runState == RUNNING);
-    } else if (g_motion.runState == RUNNING) {
+    } else if (motionEventAllowed(autolee::MotorEvent::GracefulStop)) {
       requestGracefulStop();
       setRunButtonState(false);
       motion_state::Guard g;
@@ -83,14 +87,15 @@ void processPendingCommands() {
   }
 
   if (s_stop.exchange(false)) {
-    if (g_motion.runState == RUNNING) {
+    if (motionEventAllowed(autolee::MotorEvent::GracefulStop)) {
       requestGracefulStop();
       setRunButtonState(false);
     }
   }
 
   if (s_batchStart.exchange(false)) {
-    if (g_motion.batchTarget > 0 && g_motion.runState == IDLE && g_motion.endpointsCalibrated) {
+    if (g_motion.batchTarget > 0 && autolee::canStart(toMotorState(g_motion.runState)) &&
+        g_motion.endpointsCalibrated) {
       {
         motion_state::Guard g;
         g_motion.batchCount = 0;

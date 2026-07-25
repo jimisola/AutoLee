@@ -173,11 +173,16 @@ stateDiagram-v2
 The transition table is encoded in `lib/autolee_logic/motor_fsm.h` and is
 host-tested exhaustively (every invalid `(state, event)` pair must be rejected).
 
-> **Partial gap:** jam detection and the calibration/homing confirmation counters
-> run through the tested `StallCounter` / `ConfirmCounter`, but the *transition
-> table itself* is still implemented inline in `motion.cpp`'s `handleMotion()`
-> switch rather than calling `motorTransition()`. The "cannot Start from Stalled"
-> rule above is therefore tested, but not yet enforced by the tested code.
+The firmware calls it: every `runState` change in `main/motion/motion.cpp` goes
+through `applyMotorEventLocked()` (`main/motion/motion.h`), a thin bridge that
+runs `motorTransition()` inside the same `motion_state::Guard` as the other
+fields going live with the state change — the table is a pure switch, so it is
+safe in that critical section. A rejected event leaves the state untouched and
+makes the entry point a logged no-op *before* it drives the TMC or the stepper.
+`main/motion/motion_cmd.cpp`'s command gates ask the same table (`canStart()` /
+`motionEventAllowed()`) rather than re-hardcoding which states each command is
+legal from, so "cannot Start from Stalled" is enforced by the tested code, in one
+place.
 
 ### Jam detection
 

@@ -147,10 +147,17 @@ void recomputeEffectiveEndpoints() {
 void startRunBetweenEndpoints() {
   if (!g_motion.endpointsCalibrated) return;
   const uint32_t now = millis();
+  bool started;
   {
     motion_state::Guard g;
-    g_motion.runState = RUNNING;
-    g_motion.lastDirectionChangeMs = now;
+    started = applyMotorEventLocked(autolee::MotorEvent::Start);
+    if (started) g_motion.lastDirectionChangeMs = now;
+  }
+  // Rejected => not IDLE (e.g. STALLED: the tested table's "must home first"
+  // rule). Bail out before touching the TMC or the stepper.
+  if (!started) {
+    webLog("Start ignored in state %u", (unsigned)g_motion.runState);
+    return;
   }
   resetStallCounter();
 
@@ -179,15 +186,30 @@ void startRunBetweenEndpoints() {
   stepper::moveTo(target);
 }
 
+// Only meaningful while RUNNING, which is also the only state the tested table
+// accepts GracefulStop from. A rejected request is deliberately a no-op rather
+// than "stop anyway": from STOPPING the decel move toward UP is already in
+// flight (and its timeout already armed), and from IDLE/STALLED there is no
+// endpoint run to stop - issuing moveTo(endpointUp) out of STALLED would be a
+// fast unguarded move away from a jam, which is exactly what safeCreepHome()
+// exists to avoid. So this narrows what a stray stop can do; it does not weaken
+// the stop path for the state that matters.
 void requestGracefulStop() {
   const uint32_t now = millis();
   long up;
+  bool stopping;
   {
     motion_state::Guard g;
-    g_motion.runState = STOPPING;
-    g_motion.stopEntryMs = now;
+    stopping = applyMotorEventLocked(autolee::MotorEvent::GracefulStop);
     up = g_motion.endpointUp;
-    g_motion.currentTarget = up;
+    if (stopping) {
+      g_motion.stopEntryMs = now;
+      g_motion.currentTarget = up;
+    }
+  }
+  if (!stopping) {
+    webLog("Graceful stop ignored in state %u", (unsigned)g_motion.runState);
+    return;
   }
   stepper::setAcceleration(RUN_DECEL);
   stepper::moveTo(up);
@@ -318,10 +340,20 @@ void handleMotion() {
           stepper::move(backoff);
           fas_wait_for_stop();
 
+          bool latched;
           {
             motion_state::Guard g;
-            g_motion.runState = STALLED;
+            latched = applyMotorEventLocked(autolee::MotorEvent::Jam);
+            // Fail-safe: this arm only runs with runState == RUNNING, from which
+            // the tested table always accepts Jam, so `latched` is true. If a
+            // future change ever broke that invariant, leaving the state as-is
+            // would let the loop below flip target and drive on into the jam -
+            // so force the jam latch regardless. STALLED is the most
+            // restrictive state (blocks Start, requires a home first), so this
+            // fallback can only ever be more conservative than the table.
+            if (!latched) g_motion.runState = STALLED;
           }
+          if (!latched) webLog("BUG: Jam event rejected by FSM - latched STALLED anyway");
           resetStallCounter();
           showJamScreen();
         }
@@ -330,17 +362,20 @@ void handleMotion() {
     }
 
     case STOPPING: {
+      // Both exits below are ReachedHome/StopTimeout out of STOPPING, which the
+      // tested table always accepts, and the stepper is force-stopped either
+      // way - so the transition result needs no separate handling here.
       long pos = stepper::getCurrentPosition();
       if (!stepper::isRunning() || nearPos(pos, g_motion.endpointUp, STOP_ARRIVAL_TOL)) {
         if (stepper::isRunning()) stepper::forceStop();
         motion_state::Guard g;
-        g_motion.runState = IDLE;
+        applyMotorEventLocked(autolee::MotorEvent::ReachedHome);
         break;
       }
       if ((millis() - g_motion.stopEntryMs) > STOP_TIMEOUT_MS) {
         stepper::forceStop();
         motion_state::Guard g;
-        g_motion.runState = IDLE;
+        applyMotorEventLocked(autolee::MotorEvent::StopTimeout);
       }
       break;
     }
@@ -356,9 +391,17 @@ void handleMotion() {
 static bool move_until_stall(int dir, long &hit_pos);
 
 void safeCreepHome() {
+  bool homing;
   {
     motion_state::Guard g;
-    g_motion.runState = HOMING;
+    homing = applyMotorEventLocked(autolee::MotorEvent::ReturnHome);
+  }
+  // Rejected => not STALLED. Bail out before re-currenting the TMC or creeping
+  // the press; the caller (motion_cmd) already gates on STALLED, this is the
+  // tested table enforcing the same rule at the point of no return.
+  if (!homing) {
+    webLog("Return home ignored in state %u", (unsigned)g_motion.runState);
+    return;
   }
 
   tmc5160::rms_current(CAL_CURRENT_MA);
@@ -396,7 +439,7 @@ void safeCreepHome() {
 
   {
     motion_state::Guard g;
-    g_motion.runState = IDLE;
+    applyMotorEventLocked(autolee::MotorEvent::HomeDone);  // HOMING -> IDLE
   }
 
   webLog("Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
@@ -571,10 +614,20 @@ void setActiveProfile(uint8_t idx) {
 }
 
 bool calibrateEndpointsSensorless() {
+  bool entered;
   {
     motion_state::Guard g;
-    g_motion.runState = CALIBRATING;
-    g_motion.endpointsCalibrated = false;
+    entered = applyMotorEventLocked(autolee::MotorEvent::Calibrate);
+    // Invalidating the endpoints belongs to the same transaction - but only if
+    // we actually entered CALIBRATING, otherwise a rejected request would
+    // discard a good calibration.
+    if (entered) g_motion.endpointsCalibrated = false;
+  }
+  // Rejected => not IDLE (running, stopping, stalled, homing or already
+  // calibrating). Never start a blind sensorless search from those states.
+  if (!entered) {
+    webLog("Calibration ignored in state %u", (unsigned)g_motion.runState);
+    return false;
   }
   webLog("Calibration: start");
   if (stepper::isRunning()) {
@@ -597,7 +650,7 @@ bool calibrateEndpointsSensorless() {
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);
     motion_state::Guard g;
-    g_motion.runState = IDLE;
+    applyMotorEventLocked(autolee::MotorEvent::CalibrationDone);  // CALIBRATING -> IDLE
     return false;
   }
 
@@ -616,7 +669,7 @@ bool calibrateEndpointsSensorless() {
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);
     motion_state::Guard g;
-    g_motion.runState = IDLE;
+    applyMotorEventLocked(autolee::MotorEvent::CalibrationDone);  // CALIBRATING -> IDLE
     return false;
   }
 
@@ -647,7 +700,7 @@ bool calibrateEndpointsSensorless() {
 
   {
     motion_state::Guard g;
-    g_motion.runState = IDLE;
+    applyMotorEventLocked(autolee::MotorEvent::CalibrationDone);  // CALIBRATING -> IDLE
   }
   return true;
 }
