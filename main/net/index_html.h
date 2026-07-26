@@ -116,12 +116,12 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 </div>
 <div class="nav-row">
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 </div>
 </div>
 
@@ -198,12 +198,12 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 </div>
 <div class="nav-row">
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 </div>
 </div>
 
@@ -230,12 +230,12 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 </div>
 <div class="nav-row">
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 </div>
 </div>
 
@@ -260,12 +260,12 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 </div>
 <div class="nav-row">
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 </div>
 </div>
 
@@ -305,12 +305,12 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 </div>
 <div class="nav-row">
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 </div>
 </div>
 
@@ -362,12 +362,12 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 </div>
 <div class="nav-row">
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 </div>
 </div>
 
@@ -388,7 +388,7 @@ sse();
 const LOG_MAX_LINES=500;
 let logLines=[],logFilter='';
 function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function lineLevel(l){const m=/^\d\d:\d\d:\d\d ([IWE]) /.exec(l);return m?m[1]:'I'}
+function lineLevel(l){const m=/^\d+:\d\d:\d\d ([IWE]) /.exec(l);return m?m[1]:'I'}
 function addLogLines(lines){
   for(const l of lines){if(l!==logLines[logLines.length-1])logLines.push(l)}
   if(logLines.length>LOG_MAX_LINES)logLines=logLines.slice(logLines.length-LOG_MAX_LINES);

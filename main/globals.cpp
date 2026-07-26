@@ -6,10 +6,6 @@
 #include "config.h"
 #include "globals.h"
 
-static inline uint32_t millis() {
-  return (uint32_t)(esp_timer_get_time() / 1000);
-}
-
 // The motion/endpoint/batch/profile state moved to motion_state.cpp's
 // `g_motion` (one struct behind one spinlock) - see motion_state.h.
 
@@ -49,14 +45,19 @@ lv_obj_t *lbl_batch_val = nullptr;
 lv_obj_t *lbl_batch_remain = nullptr;
 
 static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
-  const uint32_t ms = millis();
-  const unsigned h = (ms / 3600000u) % 100u;  // wraps at 100h, plenty for uptime display
-  const unsigned m = (ms / 60000u) % 60u;
-  const unsigned s = (ms / 1000u) % 60u;
+  // Uses esp_timer_get_time() directly rather than the 32-bit millis() helper,
+  // which wraps at ~49.7 days - a press left running that long would otherwise
+  // have its log timestamps silently jump back to 00:00:00. Hours is
+  // deliberately unbounded width (not %02u): a fixed 2-digit field would wrap
+  // the *display* back to 00 at 100h even though the underlying count is fine.
+  const uint64_t ms = (uint64_t)(esp_timer_get_time() / 1000);
+  const unsigned long h = (unsigned long)(ms / 3600000ull);
+  const unsigned m = (unsigned)((ms / 60000ull) % 60ull);
+  const unsigned s = (unsigned)((ms / 1000ull) % 60ull);
   const char levelChar = level == LogLevel::Error ? 'E' : level == LogLevel::Warn ? 'W' : 'I';
 
   char line[LOG_LINE_LEN];
-  const int prefixLen = snprintf(line, sizeof(line), "%02u:%02u:%02u %c ", h, m, s, levelChar);
+  const int prefixLen = snprintf(line, sizeof(line), "%lu:%02u:%02u %c ", h, m, s, levelChar);
   if (prefixLen > 0 && (size_t)prefixLen < sizeof(line)) {
     vsnprintf(line + prefixLen, sizeof(line) - (size_t)prefixLen, fmt, args);
   }
