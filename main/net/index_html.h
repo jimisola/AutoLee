@@ -114,6 +114,7 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <a onclick="showPage('pageLog')">Log</a>
 <a onclick="showPage('pageFW')">Firmware</a>
 <a onclick="showPage('pageWifi')">WiFi</a>
+<a onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageMain -->
@@ -190,6 +191,7 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <a onclick="showPage('pageLog')">Log</a>
 <a onclick="showPage('pageFW')">Firmware</a>
 <a onclick="showPage('pageWifi')">WiFi</a>
+<a onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageConfig -->
@@ -210,6 +212,7 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <a onclick="showPage('pageConfig')">Configuration</a>
 <a onclick="showPage('pageFW')">Firmware</a>
 <a onclick="showPage('pageWifi')">WiFi</a>
+<a onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageLog -->
@@ -234,6 +237,7 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <a onclick="showPage('pageConfig')">Configuration</a>
 <a onclick="showPage('pageLog')">Log</a>
 <a onclick="showPage('pageWifi')">WiFi</a>
+<a onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageFW -->
@@ -273,9 +277,62 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <a onclick="showPage('pageConfig')">Configuration</a>
 <a onclick="showPage('pageLog')">Log</a>
 <a onclick="showPage('pageFW')">Firmware</a>
+<a onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageWifi -->
+
+<!-- ==================== DIAGNOSTICS PAGE ==================== -->
+<div id="pageDiag" class="page">
+<a class="back-link" onclick="showPage('pageMain')">&#8592; Back</a>
+
+<div class="sec">
+<h2>System</h2>
+<div class="sr"><span class="l">Version</span><span class="v" id="dgVer">-</span></div>
+<div class="sr"><span class="l">IDF Version</span><span class="v" id="dgIdf">-</span></div>
+<div class="sr"><span class="l">Built</span><span class="v" id="dgBuilt">-</span></div>
+<div class="sr"><span class="l">ELF SHA256</span><span class="v" id="dgSha">-</span></div>
+<div class="sr"><span class="l">Running Partition</span><span class="v" id="dgPart">-</span></div>
+<div class="sr"><span class="l">Uptime</span><span class="v" id="dgUptime">-</span></div>
+<div class="sr"><span class="l">Last Reset Reason</span><span class="v" id="dgReset">-</span></div>
+<div class="sr"><span class="l">Coredump Waiting</span><span class="v" id="dgCoredump">-</span></div>
+</div>
+
+<div class="sec">
+<h2>Resources</h2>
+<div class="sr"><span class="l">Free Heap</span><span class="v" id="dgHeap">-</span></div>
+<div class="sr"><span class="l">Min Free Heap</span><span class="v" id="dgMinHeap">-</span></div>
+<div class="sr"><span class="l">Largest Free Block</span><span class="v" id="dgLargestBlock">-</span></div>
+<div class="sr"><span class="l">Flash Size</span><span class="v" id="dgFlash">-</span></div>
+<div class="sr"><span class="l">CPU Freq</span><span class="v" id="dgCpu">-</span></div>
+<div class="sr"><span class="l">WiFi RSSI</span><span class="v" id="dgRssi">-</span></div>
+<div class="sr"><span class="l">Pump Task Stack HWM</span><span class="v" id="dgStack">-</span></div>
+<div class="sr"><span class="l">Settings Version</span><span class="v" id="dgSettingsVer">-</span></div>
+</div>
+
+<div class="sec">
+<h2>Lifetime Health</h2>
+<div class="sr"><span class="l">Cycle Count</span><span class="v" id="dgCycles">-</span></div>
+<div class="sr"><span class="l">Stall Count</span><span class="v" id="dgStalls">-</span></div>
+<div class="sr"><span class="l">Avg Cycle Time</span><span class="v" id="dgAvgCycle">-</span></div>
+<div class="sr"><span class="l">Longest Cycle</span><span class="v" id="dgLongestCycle">-</span></div>
+<div class="sr"><span class="l">Calibration Count</span><span class="v" id="dgCalCount">-</span></div>
+<div class="sr"><span class="l">OTA Count</span><span class="v" id="dgOtaCount">-</span></div>
+<div class="sr"><span class="l">Reset Count</span><span class="v" id="dgResetCount">-</span></div>
+</div>
+
+<button class="btn btn-dark btn-sm" onclick="loadDiag()" style="width:100%">Refresh</button>
+
+<!-- NAV FOOTER -->
+<div class="nav-footer">
+<a onclick="showPage('pageMain')">Main</a>
+<a onclick="showPage('pageConfig')">Configuration</a>
+<a onclick="showPage('pageLog')">Log</a>
+<a onclick="showPage('pageFW')">Firmware</a>
+<a onclick="showPage('pageWifi')">WiFi</a>
+</div>
+
+</div><!-- /pageDiag -->
 
 </div>
 
@@ -290,6 +347,46 @@ function showPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   window.scrollTo(0,0);
+  if(id==='pageDiag')loadDiag();
+}
+
+function fmtMs(ms){
+  if(ms<1000)return ms+'ms';
+  const s=Math.floor(ms/1000);
+  if(s<60)return s+'s';
+  const m=Math.floor(s/60);
+  if(m<60)return m+'m '+(s%60)+'s';
+  const h=Math.floor(m/60);
+  return h+'h '+(m%60)+'m';
+}
+
+function loadDiag(){
+  fetch('/api/v1/diagnostics/info').then(r=>r.json()).then(d=>{
+    document.getElementById('dgVer').textContent=d.version;
+    document.getElementById('dgIdf').textContent=d.idfVersion;
+    document.getElementById('dgBuilt').textContent=d.compileDate+' '+d.compileTime;
+    document.getElementById('dgSha').textContent=d.elfSha256;
+    document.getElementById('dgPart').textContent=d.runningPartition;
+    document.getElementById('dgUptime').textContent=fmtMs(d.uptimeMs);
+    document.getElementById('dgReset').textContent=d.resetReason;
+    document.getElementById('dgCoredump').textContent=d.coredumpPresent?'Yes':'No';
+    document.getElementById('dgHeap').textContent=(d.freeHeap/1024).toFixed(1)+' KB';
+    document.getElementById('dgMinHeap').textContent=(d.minFreeHeap/1024).toFixed(1)+' KB';
+    document.getElementById('dgLargestBlock').textContent=(d.largestFreeBlock/1024).toFixed(1)+' KB';
+    document.getElementById('dgFlash').textContent=(d.flashSizeBytes/1048576).toFixed(0)+' MB';
+    document.getElementById('dgCpu').textContent=d.cpuFreqMhz+' MHz';
+    document.getElementById('dgRssi').textContent=d.wifiRssi===null?'-':d.wifiRssi+' dBm';
+    document.getElementById('dgStack').textContent=d.pumpStackHighWaterMark+' B';
+    document.getElementById('dgSettingsVer').textContent=d.settingsVersion;
+    const h=d.health||{};
+    document.getElementById('dgCycles').textContent=h.cycleCount;
+    document.getElementById('dgStalls').textContent=h.stallCount;
+    document.getElementById('dgAvgCycle').textContent=fmtMs(h.avgCycleMs);
+    document.getElementById('dgLongestCycle').textContent=fmtMs(h.longestCycleMs);
+    document.getElementById('dgCalCount').textContent=h.calibrationCount;
+    document.getElementById('dgOtaCount').textContent=h.otaCount;
+    document.getElementById('dgResetCount').textContent=h.resetCount;
+  }).catch(()=>{});
 }
 
 
