@@ -54,10 +54,15 @@ static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
   const unsigned long h = (unsigned long)(ms / 3600000ull);
   const unsigned m = (unsigned)((ms / 60000ull) % 60ull);
   const unsigned s = (unsigned)((ms / 1000ull) % 60ull);
+  const unsigned msPart = (unsigned)(ms % 1000ull);
   const char levelChar = level == LogLevel::Error ? 'E' : level == LogLevel::Warn ? 'W' : 'I';
 
+  // Millisecond resolution matters here: jam/stall detection and StallGuard
+  // sampling happen well within a single second, so second-only timestamps
+  // would leave rapid-fire lines unordered relative to each other.
   char line[LOG_LINE_LEN];
-  const int prefixLen = snprintf(line, sizeof(line), "%lu:%02u:%02u %c ", h, m, s, levelChar);
+  const int prefixLen =
+      snprintf(line, sizeof(line), "%lu:%02u:%02u.%03u %c ", h, m, s, msPart, levelChar);
   if (prefixLen > 0 && (size_t)prefixLen < sizeof(line)) {
     vsnprintf(line + prefixLen, sizeof(line) - (size_t)prefixLen, fmt, args);
   }

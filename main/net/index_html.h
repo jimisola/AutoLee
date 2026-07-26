@@ -388,7 +388,7 @@ sse();
 const LOG_MAX_LINES=500;
 let logLines=[],logFilter='';
 function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function lineLevel(l){const m=/^\d+:\d\d:\d\d ([IWE]) /.exec(l);return m?m[1]:'I'}
+function lineLevel(l){const m=/^\d+:\d\d:\d\d\.\d\d\d ([IWE]) /.exec(l);return m?m[1]:'I'}
 function addLogLines(lines){
   for(const l of lines){if(l!==logLines[logLines.length-1])logLines.push(l)}
   if(logLines.length>LOG_MAX_LINES)logLines=logLines.slice(logLines.length-LOG_MAX_LINES);
