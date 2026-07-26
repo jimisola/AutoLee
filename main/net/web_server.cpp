@@ -319,7 +319,7 @@ static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_
     if (!identity_ok) {
       ESP_LOGE(TAG, "OTA: rejected - project name mismatch (image='%s', running='%s')",
                written_desc.project_name, running_desc.project_name);
-      webLogLevel(LogLevel::Error, "OTA", "OTA rejected: firmware image identity mismatch");
+      webLogLevel(LogLevel::Error, "OTA", "Rejected: firmware image identity mismatch");
       otaAbort("project name mismatch");  // handle still open - abort, not end
       return ESP_FAIL;
     }
@@ -330,7 +330,7 @@ static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_
     if (ended && esp_ota_set_boot_partition(s_ota_partition) == ESP_OK) {
       ESP_LOGI(TAG, "OTA: success, %llu bytes, project='%s' version='%s'", index + len,
                written_desc.project_name, written_desc.version);
-      webLog("OTA", "OTA: new firmware verified and set to boot");
+      webLog("OTA", "New firmware verified and set to boot");
       // Lifetime OTA count. No guard is held here (this runs on the HTTP task,
       // which is not the owner of g_motion), so take one for the single store -
       // pump_task reads this state unlocked. Counted at "set boot partition
@@ -403,7 +403,7 @@ void setupWebServer() {
   s_default_password_active = (webPass == WEB_AUTH_DEFAULT_PASS);
   if (s_default_password_active) {
     webLogLevel(LogLevel::Warn, "Security",
-                "SECURITY: web password is still the factory default - change it on the WiFi page");
+                "Web password is still the factory default - change it on the WiFi page");
   }
   // Attached once, server-wide, rather than per-endpoint: gating on the HTTP
   // method means every state-changing route is covered automatically - including

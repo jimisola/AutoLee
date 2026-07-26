@@ -1018,7 +1018,7 @@ static void build_wifi_screen() {
       [](lv_event_t *e) {
         LV_UNUSED(e);
         wifi_mgr::clearCredentials();
-        webLog("WiFi", "WiFi credentials cleared, rebooting...");
+        webLog("WiFi", "Credentials cleared, rebooting...");
         rebootRequested = true;
         rebootRequestMs = millis();
       },

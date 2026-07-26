@@ -161,7 +161,7 @@ void processPendingCommands() {
       ui_update_speed_val();
       s_uiRefresh.store(true);  // handled by the block below, same pass
     } else {
-      webLog("Settings", "Settings reset ignored in state %u", (unsigned)g_motion.runState);
+      webLog("Settings", "Reset ignored in state %u", (unsigned)g_motion.runState);
     }
   }
 

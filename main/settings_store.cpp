@@ -140,22 +140,21 @@ void applyCompiledDefaults() {
 
 void fallbackToDefaults(const char *why) {
   applyCompiledDefaults();
-  webLogLevel(LogLevel::Warn, "Settings", "Settings: %s - using defaults, calibration cleared",
-              why);
+  webLogLevel(LogLevel::Warn, "Settings", "%s - using defaults, calibration cleared", why);
 }
 
 bool writeBlob(const Persisted &p) {
   nvs_handle_t h;
   esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &h);
   if (err != ESP_OK) {
-    webLogLevel(LogLevel::Error, "Settings", "Settings: NVS open failed (%d)", (int)err);
+    webLogLevel(LogLevel::Error, "Settings", "NVS open failed (%d)", (int)err);
     return false;
   }
   err = nvs_set_blob(h, kKey, &p, sizeof(p));
   if (err == ESP_OK) err = nvs_commit(h);
   nvs_close(h);
   if (err != ESP_OK) {
-    webLogLevel(LogLevel::Error, "Settings", "Settings: NVS write failed (%d)", (int)err);
+    webLogLevel(LogLevel::Error, "Settings", "NVS write failed (%d)", (int)err);
     return false;
   }
   return true;
@@ -168,7 +167,7 @@ bool eraseBlob() {
   nvs_handle_t h;
   esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &h);
   if (err != ESP_OK) {
-    webLogLevel(LogLevel::Error, "Settings", "Settings: NVS open failed (%d)", (int)err);
+    webLogLevel(LogLevel::Error, "Settings", "NVS open failed (%d)", (int)err);
     return false;
   }
   err = nvs_erase_key(h, kKey);
@@ -176,7 +175,7 @@ bool eraseBlob() {
   if (err == ESP_OK) err = nvs_commit(h);
   nvs_close(h);
   if (err != ESP_OK) {
-    webLogLevel(LogLevel::Error, "Settings", "Settings: NVS erase failed (%d)", (int)err);
+    webLogLevel(LogLevel::Error, "Settings", "NVS erase failed (%d)", (int)err);
     return false;
   }
   return true;
@@ -233,10 +232,9 @@ void load() {
   } else {
     apply(p);
     if (migrated) {
-      webLog("Settings", "Settings: migrated from v%u to v%u", (unsigned)foundVersion,
-             (unsigned)kVersion);
+      webLog("Settings", "Migrated from v%u to v%u", (unsigned)foundVersion, (unsigned)kVersion);
     }
-    webLog("Settings", "Settings: restored (cal=%s up=%ld dn=%ld cur=%umA prof=%u cnt=%ld)",
+    webLog("Settings", "Restored (cal=%s up=%ld dn=%ld cur=%umA prof=%u cnt=%ld)",
            p.endpointsCalibrated ? "yes" : "no", (long)p.rawUp, (long)p.rawDown,
            (unsigned)p.runCurrentMa, (unsigned)p.activeProfile, (long)p.counter);
     if (p.endpointsCalibrated) {
@@ -249,7 +247,7 @@ void load() {
       // which startRunBetweenEndpoints() enforces: a Return Home (or a fresh
       // calibration) must re-reference the axis before a run is allowed.
       webLogLevel(LogLevel::Warn, "Settings",
-                  "Settings: position reference unknown after reboot - return home before running");
+                  "Position reference unknown after reboot - return home before running");
     }
   }
 
@@ -263,8 +261,7 @@ void load() {
   }
   {
     const MotionState ms = motion_state::snapshot();
-    webLog("Settings",
-           "Settings: health (boots=%u stalls=%u cals=%u otas=%u cycle_ms=%lu max_ms=%lu)",
+    webLog("Settings", "Health (boots=%u stalls=%u cals=%u otas=%u cycle_ms=%lu max_ms=%lu)",
            (unsigned)ms.resetCount, (unsigned)ms.stallCount, (unsigned)ms.calibrationCount,
            (unsigned)ms.otaCount, (unsigned long)ms.totalCycleTimeMs,
            (unsigned long)ms.longestCycleMs);
@@ -291,7 +288,7 @@ void load() {
   // old blob in place and the next tick() retries. One NVS write per boot, a
   // few ms, well inside the task-WDT budget (load() runs before motion_init()).
   if (writeBlob(s_lastSaved) && migrated) {
-    webLog("Settings", "Settings: rewritten in v%u format", (unsigned)kVersion);
+    webLog("Settings", "Rewritten in v%u format", (unsigned)kVersion);
   }
 }
 
@@ -330,8 +327,7 @@ void resetToDefaults() {
     // an operator makes afterwards still differs from this baseline, so normal
     // persistence resumes with the very next tick().
     s_lastSaved = def;
-    webLog("Settings",
-           "Settings: calibration and tuning reset to defaults (WiFi/password untouched)");
+    webLog("Settings", "Calibration and tuning reset to defaults (WiFi/password untouched)");
   } else {
     // Erase failed, so RAM and flash disagree and the stale blob would come
     // back on the next boot - which is the one outcome a reset must not have.
@@ -342,10 +338,10 @@ void resetToDefaults() {
     if (writeBlob(def)) {
       s_lastSaved = def;
       webLogLevel(LogLevel::Warn, "Settings",
-                  "Settings: reset to defaults (erase failed, defaults written instead)");
+                  "Reset to defaults (erase failed, defaults written instead)");
     } else {
       webLogLevel(LogLevel::Error, "Settings",
-                  "Settings: reset applied in RAM but NVS write failed - will retry");
+                  "Reset applied in RAM but NVS write failed - will retry");
     }
   }
 }
