@@ -361,8 +361,9 @@ paths:
       summary: Fetch the full retained log backlog
       description: >
         Returns every line currently retained in the log ring, oldest first, each
-        prefixed `H:MM:SS.mmm L ` (uptime since boot - no RTC/NTP on this board -
-        and a single-char level: D/I/W/E). The `/api/v1/events` SSE stream's "log"
+        prefixed `H:MM:SS.mmm L [Category] ` (uptime since boot - no RTC/NTP on
+        this board - a single-char level: D/I/W/E, and the subsystem that logged
+        it, e.g. Motion/Settings/WiFi/OTA/Security). The `/api/v1/events` SSE stream's "log"
         event only pushes what's new since the last broadcast (a single server-wide
         watermark), so a client connecting after boot's first one would otherwise
         never see the early lines - this endpoint is how it catches up. A GET, so

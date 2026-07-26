@@ -131,7 +131,7 @@ void processPendingCommands() {
     // SPI write on the bus shared with the display - must not run from the
     // HTTP task alongside pump_task's StallGuard reads.
     tmc5160::rms_current(clamped);
-    webLog("Current set to %u mA", clamped);
+    webLog("Motion", "Current set to %u mA", clamped);
   }
 
   if (s_logClear.exchange(false)) {
@@ -161,7 +161,7 @@ void processPendingCommands() {
       ui_update_speed_val();
       s_uiRefresh.store(true);  // handled by the block below, same pass
     } else {
-      webLog("Settings reset ignored in state %u", (unsigned)g_motion.runState);
+      webLog("Settings", "Settings reset ignored in state %u", (unsigned)g_motion.runState);
     }
   }
 

@@ -70,7 +70,7 @@ bool logLevelFromName(const char *name, LogLevel &out) {
   return true;
 }
 
-static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
+static void webLogImpl(LogLevel level, const char *category, const char *fmt, va_list args) {
   // ESP-IDF gates ESP_LOG* on two independent things beyond our own check
   // below: a compile-time ceiling (CONFIG_LOG_MAXIMUM_LEVEL, raised to Debug
   // in sdkconfig.defaults so ESP_LOGD isn't compiled out entirely) and a
@@ -108,8 +108,8 @@ static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
   // sampling happen well within a single second, so second-only timestamps
   // would leave rapid-fire lines unordered relative to each other.
   char line[LOG_LINE_LEN];
-  const int prefixLen =
-      snprintf(line, sizeof(line), "%lu:%02u:%02u.%03u %c ", h, m, s, msPart, levelChar);
+  const int prefixLen = snprintf(line, sizeof(line), "%lu:%02u:%02u.%03u %c [%s] ", h, m, s,
+                                  msPart, levelChar, category);
   if (prefixLen > 0 && (size_t)prefixLen < sizeof(line)) {
     vsnprintf(line + prefixLen, sizeof(line) - (size_t)prefixLen, fmt, args);
   }
@@ -125,16 +125,16 @@ static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
   }
 }
 
-void webLog(const char *fmt, ...) {
+void webLog(const char *category, const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
-  webLogImpl(LogLevel::Info, fmt, args);
+  webLogImpl(LogLevel::Info, category, fmt, args);
   va_end(args);
 }
 
-void webLogLevel(LogLevel level, const char *fmt, ...) {
+void webLogLevel(LogLevel level, const char *category, const char *fmt, ...) {
   va_list args;
   va_start(args, fmt);
-  webLogImpl(level, fmt, args);
+  webLogImpl(level, category, fmt, args);
   va_end(args);
 }

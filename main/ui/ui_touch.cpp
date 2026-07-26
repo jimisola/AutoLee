@@ -357,8 +357,8 @@ void ui_update_wifi_label() {
     if (apSetup) {
       // Standard WiFi-join QR: WIFI:T:WPA;S:<ssid>;P:<key>;;  ("WPA" covers
       // WPA2 and is what iOS/Android accept).
-      std::string payload = "WIFI:T:WPA;S:" + qrEscape(DEFAULT_AP_SSID) + ";P:" +
-                            qrEscape(wifi_mgr::apPassword()) + ";;";
+      std::string payload = "WIFI:T:WPA;S:" + qrEscape(DEFAULT_AP_SSID) +
+                            ";P:" + qrEscape(wifi_mgr::apPassword()) + ";;";
       lv_qrcode_update(wifi_qr, payload.c_str(), payload.length());
       lv_obj_clear_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
       lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s", DEFAULT_AP_SSID,
@@ -871,7 +871,7 @@ static void build_profile_screen() {
           // refreshes the labels once applied.
           motion_cmd::requestProfile(idx);
           const MotionState ms = motion_state::snapshot();
-          webLog("Profile: %s spd=%lu sg=%u", ms.profiles[idx].name,
+          webLog("Motion", "Profile: %s spd=%lu sg=%u", ms.profiles[idx].name,
                  (unsigned long)ms.profiles[ms.activeProfile].speed_hz,
                  ms.profiles[ms.activeProfile].sg_trip);
         },
@@ -1018,7 +1018,7 @@ static void build_wifi_screen() {
       [](lv_event_t *e) {
         LV_UNUSED(e);
         wifi_mgr::clearCredentials();
-        webLog("WiFi credentials cleared, rebooting...");
+        webLog("WiFi", "WiFi credentials cleared, rebooting...");
         rebootRequested = true;
         rebootRequestMs = millis();
       },

@@ -27,13 +27,17 @@ extern uint32_t rebootRequestMs;
 extern TaskHandle_t g_pump_task_handle;
 
 // Log ring for the web UI's log panel + SSE "log" events. Every pushed line
-// is prefixed "HH:MM:SS.mmm L " (uptime since boot - the board has no RTC/NTP -
-// and a single-char level: D/I/W/E) so the dashboard's Log page can show and
-// filter by both. webLog() is the plain call sites keep using (Info level);
-// webLogLevel() is for sites that are actually Debug (high-frequency
-// per-iteration diagnostic traces - StallGuard sampling, calibration search),
-// a warning, or an error (jam, calibration/homing failure, NVS errors,
-// security notices).
+// is prefixed "HH:MM:SS.mmm L [Category] " (uptime since boot - the board has
+// no RTC/NTP - a single-char level: D/I/W/E, and the subsystem that logged
+// it) so the dashboard's Log page can show and filter by level, and a reader
+// can tell at a glance whether a line is Motion/Settings/WiFi/OTA/Security
+// without parsing the free-text message. webLog() is the plain call sites
+// keep using (Info level); webLogLevel() is for sites that are actually
+// Debug (high-frequency per-iteration diagnostic traces - StallGuard
+// sampling, calibration search), a warning, or an error (jam,
+// calibration/homing failure, NVS errors, security notices). Category is a
+// free-text label, not an enum - callers pass whatever's accurate for the
+// call site rather than being forced into a fixed set.
 //
 // g_logLevel is the single shared minimum threshold for BOTH the ring (and
 // therefore the web dashboard/SSE) and the mirrored ESP_LOG* serial output -
@@ -50,8 +54,8 @@ enum class LogLevel : uint8_t { Debug, Info, Warn, Error };
 extern LogLevel g_logLevel;
 const char *logLevelName(LogLevel level);
 bool logLevelFromName(const char *name, LogLevel &out);
-void webLog(const char *fmt, ...);
-void webLogLevel(LogLevel level, const char *fmt, ...);
+void webLog(const char *category, const char *fmt, ...);
+void webLogLevel(LogLevel level, const char *category, const char *fmt, ...);
 
 // LVGL screens + widgets (defined in ui_touch.cpp; single definition site
 // matches the rest of this file since they're shared across ui_touch.cpp,

@@ -276,7 +276,7 @@ uint16_t SG_RESULT() {
 // ============================================================================
 //  webLog() + the ui_touch.h hooks motion.cpp calls
 // ============================================================================
-void webLog(const char *fmt, ...) {
+void webLog(const char * /*category*/, const char *fmt, ...) {
   fake::seam_touched();
   char buf[256];
   va_list ap;
@@ -286,7 +286,7 @@ void webLog(const char *fmt, ...) {
   fake::logs.push_back(buf);
 }
 
-void webLogLevel(LogLevel /*level*/, const char *fmt, ...) {
+void webLogLevel(LogLevel /*level*/, const char * /*category*/, const char *fmt, ...) {
   fake::seam_touched();
   char buf[256];
   va_list ap;

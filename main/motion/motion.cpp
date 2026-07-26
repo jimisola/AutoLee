@@ -153,7 +153,8 @@ void startRunBetweenEndpoints() {
   // calibration) re-zeroes against the UP hard stop. Bail out before touching
   // the TMC or the stepper, like the rejected-transition path below.
   if (g_motion.positionReferenceStale) {
-    webLogLevel(LogLevel::Warn, "Start refused: position reference unconfirmed - return home first");
+    webLogLevel(LogLevel::Warn, "Motion",
+                "Start refused: position reference unconfirmed - return home first");
     return;
   }
   const uint32_t now = millis();
@@ -166,7 +167,7 @@ void startRunBetweenEndpoints() {
   // Rejected => not IDLE (e.g. STALLED: the tested table's "must home first"
   // rule). Bail out before touching the TMC or the stepper.
   if (!started) {
-    webLog("Start ignored in state %u", (unsigned)g_motion.runState);
+    webLog("Motion", "Start ignored in state %u", (unsigned)g_motion.runState);
     return;
   }
   resetStallCounter();
@@ -218,7 +219,7 @@ void requestGracefulStop() {
     }
   }
   if (!stopping) {
-    webLog("Graceful stop ignored in state %u", (unsigned)g_motion.runState);
+    webLog("Motion", "Graceful stop ignored in state %u", (unsigned)g_motion.runState);
     return;
   }
   stepper::setAcceleration(RUN_DECEL);
@@ -270,7 +271,7 @@ void handleMotion() {
             }
           }
           if (complete) {
-            webLog("Batch complete: %ld/%ld", (long)doneCount, (long)doneTarget);
+            webLog("Motion", "Batch complete: %ld/%ld", (long)doneCount, (long)doneTarget);
             requestGracefulStop();
             setRunButtonState(false);
             break;
@@ -329,8 +330,8 @@ void handleMotion() {
       static uint32_t lastSGPrintMs = 0;
       if ((millis() - lastSGPrintMs) > RUN_SG_LOG_INTERVAL_MS) {
         int32_t distToTarget = labs(pos - g_motion.currentTarget);
-        webLogLevel(LogLevel::Debug, "RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u", sg,
-                    RUN_SG_TRIP, pos, (long)distToTarget, (unsigned long)sinceChange,
+        webLogLevel(LogLevel::Debug, "Motion", "RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u",
+                    sg, RUN_SG_TRIP, pos, (long)distToTarget, (unsigned long)sinceChange,
                     g_motion.runSGHighCount, RUN_SG_HIGH_NEEDED);
         lastSGPrintMs = millis();
       }
@@ -345,12 +346,12 @@ void handleMotion() {
       }
 
       if (sg > RUN_SG_TRIP) {
-        webLogLevel(LogLevel::Warn, "SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, RUN_SG_TRIP,
-                    g_motion.runSGHighCount, pos, (unsigned long)sinceChange);
+        webLogLevel(LogLevel::Warn, "Motion", "SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg,
+                    RUN_SG_TRIP, g_motion.runSGHighCount, pos, (unsigned long)sinceChange);
 
         if (jam) {
-          webLogLevel(LogLevel::Error, "JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg, RUN_SG_TRIP,
-                      pos, g_motion.currentTarget, g_motion.runSGHighCount);
+          webLogLevel(LogLevel::Error, "Motion", "JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg,
+                      RUN_SG_TRIP, pos, g_motion.currentTarget, g_motion.runSGHighCount);
 
           stepper::forceStop();
           fas_wait_for_stop();
@@ -359,7 +360,7 @@ void handleMotion() {
           stepper::setAcceleration(CREEP_HOME_ACCEL);
 
           int32_t backoff = (g_motion.currentTarget == g_motion.endpointDown) ? -RUN_BACKOFF_STEPS
-                                                                             : +RUN_BACKOFF_STEPS;
+                                                                              : +RUN_BACKOFF_STEPS;
           stepper::move(backoff);
           fas_wait_for_stop();
 
@@ -381,7 +382,8 @@ void handleMotion() {
             if (!latched) g_motion.runState = STALLED;
           }
           if (!latched)
-            webLogLevel(LogLevel::Error, "BUG: Jam event rejected by FSM - latched STALLED anyway");
+            webLogLevel(LogLevel::Error, "Motion",
+                        "BUG: Jam event rejected by FSM - latched STALLED anyway");
           resetStallCounter();
           showJamScreen();
         }
@@ -430,7 +432,7 @@ void safeCreepHome() {
   // press; the caller (motion_cmd) gates on the same table, this is it being
   // enforced at the point of no return.
   if (!homing) {
-    webLog("Return home ignored in state %u", (unsigned)g_motion.runState);
+    webLog("Motion", "Return home ignored in state %u", (unsigned)g_motion.runState);
     return;
   }
 
@@ -438,13 +440,14 @@ void safeCreepHome() {
   stepper::setSpeedInHz(CAL_SPEED_HZ);
   stepper::setAcceleration(CAL_ACCEL);
 
-  webLog("Creep home: start, I=%umA spd=%lu", CAL_CURRENT_MA, (unsigned long)CAL_SPEED_HZ);
+  webLog("Motion", "Creep home: start, I=%umA spd=%lu", CAL_CURRENT_MA,
+         (unsigned long)CAL_SPEED_HZ);
 
   long hit_pos = 0;
   bool found = move_until_stall(-1, hit_pos);  // -1 = toward UP
 
   if (found) {
-    webLog("Creep home: found stop at %ld", hit_pos);
+    webLog("Motion", "Creep home: found stop at %ld", hit_pos);
 
     stepper::move(+CAL_OVERSHOOT_BACKOFF_STEPS);
     fas_wait_for_stop();
@@ -460,7 +463,7 @@ void safeCreepHome() {
     stepper::moveTo(g_motion.endpointUp);
     fas_wait_for_stop();
   } else {
-    webLogLevel(LogLevel::Error, "Creep home: FAILED to find stop!");
+    webLogLevel(LogLevel::Error, "Motion", "Creep home: FAILED to find stop!");
   }
 
   tmc5160::rms_current(g_motion.runCurrentMa);
@@ -476,7 +479,7 @@ void safeCreepHome() {
     if (found) g_motion.positionReferenceStale = false;
   }
 
-  webLog("Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
+  webLog("Motion", "Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
 
   setRunButtonState(false);
   ui_update_main_warning();
@@ -496,7 +499,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
   int8_t sgt = clampSgt(CAL_SGT);
   tmc_enter_sensorless_mode(sgt);
 
-  webLogLevel(LogLevel::Debug, "MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d", dir,
+  webLogLevel(LogLevel::Debug, "Motion", "MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d", dir,
               (long)start_pos, (unsigned long)ignore_ms, (long)ignore_dst, sgt);
 
   stepper::move(target);
@@ -520,7 +523,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
 
     static uint32_t lastMUSPrint = 0;
     if ((now - lastMUSPrint) > CAL_MUS_LOG_INTERVAL_MS) {
-      webLogLevel(LogLevel::Debug, "MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u", sg,
+      webLogLevel(LogLevel::Debug, "Motion", "MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u", sg,
                   (long)dist, (unsigned long)elapsed_ms, baseline_started, dyn_ready, dyn_trip);
       lastMUSPrint = now;
     }
@@ -529,7 +532,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
             {EARLY_WINDOW_MS, EARLY_WINDOW_DST_MAX, EARLY_MIN_TIME_MS, EARLY_MIN_MOVE_STEPS},
             elapsed_ms, dist)) {
       if (confirm_early.feed(sg <= EARLY_TRIP)) {
-        webLogLevel(LogLevel::Debug, "MUS: EARLY HIT sg=%u pos=%ld", sg,
+        webLogLevel(LogLevel::Debug, "Motion", "MUS: EARLY HIT sg=%u pos=%ld", sg,
                     (long)stepper::getCurrentPosition());
         stepper::forceStop();
         fas_wait_for_stop();
@@ -552,13 +555,13 @@ static bool move_until_stall(int dir, long &hit_pos) {
         uint16_t baseline = autolee::baselineAverage(base_sum, base_cnt);
         dyn_trip = autolee::dynamicTrip(baseline, CAL_REL_DROP_Q8, CAL_ABS_MIN);
         dyn_ready = true;
-        webLogLevel(LogLevel::Debug, "MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);
+        webLogLevel(LogLevel::Debug, "Motion", "MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);
       }
     }
 
     if (dyn_ready) {
       if (confirm_dyn.feed(sg <= dyn_trip)) {
-        webLogLevel(LogLevel::Debug, "MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip,
+        webLogLevel(LogLevel::Debug, "Motion", "MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip,
                     (long)stepper::getCurrentPosition());
         stepper::forceStop();
         fas_wait_for_stop();
@@ -571,7 +574,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
     delay(1);
   }
   hit_pos = stepper::getCurrentPosition();
-  webLogLevel(LogLevel::Debug, "MUS: NO STALL DETECTED, ended at pos=%ld", hit_pos);
+  webLogLevel(LogLevel::Debug, "Motion", "MUS: NO STALL DETECTED, ended at pos=%ld", hit_pos);
   return false;
 }
 
@@ -596,7 +599,7 @@ bool return_home_up_safe() {
     const long pos = stepper::getCurrentPosition();
 
     if ((now - start_ms) > HOME_TIMEOUT_MS) {
-      webLogLevel(LogLevel::Error, "Home: TIMEOUT");
+      webLogLevel(LogLevel::Error, "Motion", "Home: TIMEOUT");
       stepper::forceStop();
       fas_wait_for_stop();
       return false;
@@ -610,14 +613,14 @@ bool return_home_up_safe() {
     if (time_moving >= HOME_MIN_MS && moved >= HOME_MIN_MOVE) {
       const uint16_t sg = read_sg();
       if (confirm_count.feed(sg <= HOME_SG_TRIP)) {
-        webLogLevel(LogLevel::Warn, "Home: stall @%ld retry %d", pos, retries);
+        webLogLevel(LogLevel::Warn, "Motion", "Home: stall @%ld retry %d", pos, retries);
         stepper::forceStop();
         fas_wait_for_stop();
         stepper::move(+HOME_RELEASE_STEPS);
         fas_wait_for_stop();
 
         if (retries >= HOME_MAX_RETRIES) {
-          webLogLevel(LogLevel::Error, "Home: max retries");
+          webLogLevel(LogLevel::Error, "Motion", "Home: max retries");
           return false;
         }
         retries++;
@@ -634,7 +637,7 @@ bool return_home_up_safe() {
 
   fas_wait_for_stop();
   long finalPos = stepper::getCurrentPosition();
-  webLog("Home: pos=%ld tgt=%ld diff=%ld", finalPos, g_motion.endpointUp,
+  webLog("Motion", "Home: pos=%ld tgt=%ld diff=%ld", finalPos, g_motion.endpointUp,
          finalPos - g_motion.endpointUp);
   return nearPos(finalPos, g_motion.endpointUp, HOME_FINAL_TOL);
 }
@@ -661,10 +664,10 @@ bool calibrateEndpointsSensorless() {
   // Rejected => not IDLE (running, stopping, stalled, homing or already
   // calibrating). Never start a blind sensorless search from those states.
   if (!entered) {
-    webLog("Calibration ignored in state %u", (unsigned)g_motion.runState);
+    webLog("Motion", "Calibration ignored in state %u", (unsigned)g_motion.runState);
     return false;
   }
-  webLog("Calibration: start");
+  webLog("Motion", "Calibration: start");
   if (stepper::isRunning()) {
     stepper::forceStop();
     fas_wait_for_stop();
@@ -680,7 +683,7 @@ bool calibrateEndpointsSensorless() {
 
   long hit_up = 0;
   if (!move_until_stall(-1, hit_up)) {
-    webLogLevel(LogLevel::Error, "Calibration: FAILED (no UP stop found)");
+    webLogLevel(LogLevel::Error, "Motion", "Calibration: FAILED (no UP stop found)");
     tmc5160::rms_current(g_motion.runCurrentMa);
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);
@@ -699,7 +702,7 @@ bool calibrateEndpointsSensorless() {
 
   long hit_down = 0;
   if (!move_until_stall(+1, hit_down)) {
-    webLogLevel(LogLevel::Error, "Calibration: FAILED (no DOWN stop found)");
+    webLogLevel(LogLevel::Error, "Motion", "Calibration: FAILED (no DOWN stop found)");
     tmc5160::rms_current(g_motion.runCurrentMa);
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);
@@ -716,7 +719,7 @@ bool calibrateEndpointsSensorless() {
     g_motion.rawDown = measuredDown;
   }
 
-  webLog("CAL: up=%ld dn=%ld travel=%ld", g_motion.rawUp, g_motion.rawDown,
+  webLog("Motion", "CAL: up=%ld dn=%ld travel=%ld", g_motion.rawUp, g_motion.rawDown,
          g_motion.rawDown - g_motion.rawUp);
   {
     // The "calibrated" flag and the offsets it validates go live together.
