@@ -234,18 +234,31 @@ void handleMotion() {
 
       if (!stepper::isRunning()) {
         if (g_motion.currentTarget == g_motion.endpointDown) {
+          // Duration of the stroke that just finished. lastDirectionChangeMs is
+          // stamped where the move toward this target was issued (the flip
+          // below, or startRunBetweenEndpoints()), so this is exactly the
+          // UP->DOWN stroke time. Computed here, outside the Guard, and only on
+          // this arm: the jam path never reaches it, so jam + backoff time is
+          // never averaged in as if it were a normal cycle.
+          const uint32_t strokeMs = millis() - g_motion.lastDirectionChangeMs;
           bool complete = false;
           int32_t doneCount = 0, doneTarget = 0;
           {
-            // One guarded transaction: the cycle counter, the batch counter and
-            // the batchActive flag must never be observed half-updated by a
-            // snapshotting reader (web/SSE/LVGL).
+            // One guarded transaction: the cycle counter, the health counters,
+            // the batch counter and the batchActive flag must never be observed
+            // half-updated by a snapshotting reader (web/SSE/LVGL).
             motion_state::Guard g;
             // COUNTER_MAX caps the *display* counter only (cosmetic, 4-digit
             // field). Batch counting must NOT be gated by it, or a batch stalls
             // forever once the lifetime counter saturates. (Fixed upstream in
             // Karl's v1.10.0; this port inherited the v1.8 bug.)
             if (g_motion.counter < COUNTER_MAX) g_motion.counter++;
+            // Lifetime cycle-time statistics (diagnostics only - nothing in the
+            // motion logic reads them). Unlike `counter` these are NOT capped
+            // by COUNTER_MAX: the display cap is cosmetic and would silently
+            // freeze the averages once it saturated.
+            g_motion.totalCycleTimeMs += strokeMs;
+            if (strokeMs > g_motion.longestCycleMs) g_motion.longestCycleMs = strokeMs;
             if (g_motion.batchActive) {
               g_motion.batchCount++;
               if (autolee::batchComplete(g_motion.batchCount, g_motion.batchTarget)) {
@@ -354,6 +367,10 @@ void handleMotion() {
           {
             motion_state::Guard g;
             latched = applyMotorEventLocked(autolee::MotorEvent::Jam);
+            // Lifetime jam count, in the same transaction as the latch so the
+            // two can never be seen to disagree. uint16_t: wraps to 0 after
+            // 65536 lifetime jams, which is well past diagnostic relevance.
+            g_motion.stallCount++;
             // Fail-safe: this arm only runs with runState == RUNNING, from which
             // the tested table always accepts Jam, so `latched` is true. If a
             // future change ever broke that invariant, leaving the state as-is
@@ -720,6 +737,10 @@ bool calibrateEndpointsSensorless() {
   {
     motion_state::Guard g;
     applyMotorEventLocked(autolee::MotorEvent::CalibrationDone);  // CALIBRATING -> IDLE
+    // Lifetime successful-calibration count, in the same transaction as the
+    // transition. Only this path bumps it - the two `return false` arms above
+    // never found both hard stops, so nothing was calibrated.
+    g_motion.calibrationCount++;
   }
   return true;
 }

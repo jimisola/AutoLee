@@ -278,6 +278,166 @@ static void test_decel_blanking_suppresses_jam_near_target(void) {
 }
 
 // --------------------------------------------------------------------------
+//  Lifetime health counters (#9). Diagnostics only - nothing in the motion
+//  logic reads them - but they are written from inside the same critical
+//  sections as the events they describe, so they are covered here rather than
+//  taken on trust.
+// --------------------------------------------------------------------------
+static void givenPress(int32_t upStop, int32_t downStop);  // defined with the calibration tests
+
+// A completed UP->DOWN stroke records its duration; the UP-bound leg does not
+// (only arrivals at DOWN close a cycle).
+static void test_successful_stroke_records_cycle_time(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  const uint32_t t0 = fake::millis_now();
+  startRunBetweenEndpoints();
+
+  pump(80);  // 20000 steps at 35 steps/ms == 58 ticks, so exactly one arrival
+
+  TEST_ASSERT_EQUAL_INT32(1, g_motion.counter);
+  const uint32_t elapsed = fake::millis_now() - t0;
+  // The recorded stroke is the time from the move being issued to the arrival
+  // being noticed - non-zero, and bounded by the wall clock of the whole test.
+  TEST_ASSERT_TRUE_MESSAGE(g_motion.totalCycleTimeMs > 0, "no cycle time recorded");
+  TEST_ASSERT_TRUE(g_motion.totalCycleTimeMs <= elapsed);
+  TEST_ASSERT_TRUE(g_motion.totalCycleTimeMs >= 500);  // ~580 ms of travel
+  // One stroke so far, so the longest IS the total.
+  TEST_ASSERT_EQUAL_UINT32(g_motion.totalCycleTimeMs, g_motion.longestCycleMs);
+  // Nothing else moved.
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.stallCount);
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+}
+
+// Two strokes: the total accumulates, the longest is a max (not the latest).
+static void test_cycle_time_accumulates_and_keeps_the_longest(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+
+  pump(80);  // first DOWN arrival
+  const uint32_t first = g_motion.totalCycleTimeMs;
+  TEST_ASSERT_TRUE(first > 0);
+  TEST_ASSERT_EQUAL_UINT32(first, g_motion.longestCycleMs);
+
+  // Slow the carriage down so the NEXT down stroke is clearly the longer one.
+  fake::sim.stepsPerMsOverride = 10;
+  pump(400);  // back up to UP, then down again
+
+  TEST_ASSERT_EQUAL_INT32(2, g_motion.counter);
+  const uint32_t second = g_motion.totalCycleTimeMs - first;
+  TEST_ASSERT_TRUE_MESSAGE(second > first, "the slowed stroke should be the longer one");
+  TEST_ASSERT_EQUAL_UINT32(second, g_motion.longestCycleMs);
+  TEST_ASSERT_EQUAL_UINT32(first + second, g_motion.totalCycleTimeMs);
+
+  // A shorter third stroke must NOT lower the recorded maximum.
+  const uint32_t maxSoFar = g_motion.longestCycleMs;
+  const uint32_t totalSoFar = g_motion.totalCycleTimeMs;
+  fake::sim.stepsPerMsOverride = 0;  // back to full speed
+  pump(200);
+  TEST_ASSERT_EQUAL_INT32(3, g_motion.counter);
+  TEST_ASSERT_EQUAL_UINT32(maxSoFar, g_motion.longestCycleMs);
+  TEST_ASSERT_TRUE(g_motion.totalCycleTimeMs > totalSoFar);
+}
+
+// A jam counts as a stall, and must NOT contribute a cycle time: the stroke
+// never completed, and the jam + backoff sequence is not representative of one.
+static void test_jam_counts_a_stall_and_no_cycle_time(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+
+  fake::sg_source = sg_jammed;
+  pump(30);
+
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.stallCount);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.counter);
+  TEST_ASSERT_EQUAL_UINT32(0, g_motion.totalCycleTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(0, g_motion.longestCycleMs);
+
+  // Latched STALLED, so no further jam can be counted while it stays there.
+  pump(20);
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.stallCount);
+}
+
+// Jam counts are cumulative across runs, and a jam that interrupts a run does
+// not disturb the cycle statistics already recorded.
+static void test_stall_count_accumulates_across_runs(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  pump(80);  // one clean stroke first
+  const uint32_t recorded = g_motion.totalCycleTimeMs;
+  TEST_ASSERT_TRUE(recorded > 0);
+
+  fake::sg_source = sg_jammed;
+  pump(30);
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.stallCount);
+
+  // Recover (STALLED -> IDLE via a home) and jam again.
+  givenPress(2000, 40000);
+  safeCreepHome();
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  fake::sim.hardStops = false;
+  fake::sim.stepsPerMsOverride = 0;
+  fake::sim.position = 0;
+  fake::sim.physical = 0;
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  fake::sg_source = sg_jammed;
+  pump(30);
+
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_UINT16(2, g_motion.stallCount);
+  // The completed stroke's timing is untouched by either jam.
+  TEST_ASSERT_EQUAL_UINT32(recorded, g_motion.totalCycleTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(recorded, g_motion.longestCycleMs);
+}
+
+// Only a calibration that found BOTH hard stops counts.
+static void test_successful_calibration_counts(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 40000);
+
+  TEST_ASSERT_TRUE_MESSAGE(calibrateEndpointsSensorless(), fake::dump().c_str());
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.calibrationCount);
+
+  // A second one accumulates.
+  fake::sim.position = 0;
+  fake::sim.physical = 0;
+  TEST_ASSERT_TRUE(calibrateEndpointsSensorless());
+  TEST_ASSERT_EQUAL_UINT16(2, g_motion.calibrationCount);
+}
+
+static void test_failed_calibration_does_not_count(void) {
+  // No UP stop: the first `return false` arm.
+  g_motion.runState = IDLE;
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+  TEST_ASSERT_TRUE(fake::logContains("Calibration: FAILED (no UP stop found)"));
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+
+  // No DOWN stop: the second `return false` arm.
+  fake::reset();
+  g_motion = MotionState{};
+  g_motion.runState = IDLE;
+  givenPress(-2000, 10000000);
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+  TEST_ASSERT_TRUE(fake::logContains("Calibration: FAILED (no DOWN stop found)"));
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+
+  // Rejected outright by the FSM (not IDLE): nothing ran, nothing counted.
+  fake::reset();
+  g_motion = MotionState{};
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+}
+
+// --------------------------------------------------------------------------
 //  Graceful stop
 // --------------------------------------------------------------------------
 static void test_graceful_stop_reaches_home_then_idles(void) {
@@ -672,6 +832,12 @@ int main(void) {
   RUN_TEST(test_accel_blanking_window_ignores_high_sg);
   RUN_TEST(test_work_zone_suppresses_jam_near_down);
   RUN_TEST(test_decel_blanking_suppresses_jam_near_target);
+  RUN_TEST(test_successful_stroke_records_cycle_time);
+  RUN_TEST(test_cycle_time_accumulates_and_keeps_the_longest);
+  RUN_TEST(test_jam_counts_a_stall_and_no_cycle_time);
+  RUN_TEST(test_stall_count_accumulates_across_runs);
+  RUN_TEST(test_successful_calibration_counts);
+  RUN_TEST(test_failed_calibration_does_not_count);
   RUN_TEST(test_graceful_stop_reaches_home_then_idles);
   RUN_TEST(test_graceful_stop_times_out_and_force_stops);
   RUN_TEST(test_graceful_stop_ignored_when_stalled);

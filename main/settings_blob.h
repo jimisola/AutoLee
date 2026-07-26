@@ -53,7 +53,7 @@
 namespace settings_store {
 
 // Bump whenever the persisted field set changes - and follow the recipe above.
-constexpr uint16_t kVersion = 1;
+constexpr uint16_t kVersion = 2;
 
 // ---------------------------------------------------------------------------
 //  Version 1 (shipped 2026-07)
@@ -88,14 +88,56 @@ static_assert(sizeof(PersistedV1) == 36,
               "PersistedV1 is a shipped on-flash layout - never edit it");
 static_assert(NUM_PROFILES == 3, "PersistedV1::sgTrip sizing assumes 3 profiles");
 
+// ---------------------------------------------------------------------------
+//  Version 2 (shipped 2026-07) - adds the lifetime health counters
+// ---------------------------------------------------------------------------
+// Every V1 field, in the same order and at the same offsets (so a v1 blob's
+// bytes still mean what they meant), followed by the six lifetime counters the
+// health-monitoring work added. These are diagnostics for support: how often
+// the press has jammed, how long a stroke takes on average and at worst, how
+// often it has been calibrated, OTA-updated and reset.
+//
+// Append order is chosen for a padding-free layout: V1 ends at offset 36, which
+// is 4-aligned, so the two uint32_t fields go first (36, 40) and the four
+// uint16_t ones after (44, 46, 48, 50) - total 52, a multiple of the struct's
+// 4-byte alignment, so there is no trailing padding either. The static_assert
+// below is the tripwire if that ever stops being true.
+struct PersistedV2 {
+  // --- carried over from V1, byte-identical ---
+  uint16_t version;
+  uint16_t runCurrentMa;
+  int32_t rawUp;
+  int32_t rawDown;
+  int32_t upOffsetSteps;
+  int32_t downOffsetSteps;
+  int32_t sgWorkZoneSteps;
+  int32_t counter;
+  uint16_t sgTrip[NUM_PROFILES];
+  uint8_t activeProfile;
+  uint8_t endpointsCalibrated;  // uint8_t, not bool: fixed on-flash width
+  // --- new in V2: lifetime health counters ---
+  uint32_t totalCycleTimeMs;  // summed duration of every successful UP->DOWN stroke
+  uint32_t longestCycleMs;    // longest single successful stroke seen
+  uint16_t stallCount;        // lifetime jams (StallGuard trips that latched STALLED)
+  uint16_t calibrationCount;  // lifetime successful calibrations
+  uint16_t otaCount;          // lifetime successful OTA updates
+  uint16_t resetCount;        // lifetime boots (incremented by settings_store::load())
+};
+static_assert(sizeof(PersistedV2) == 52,
+              "PersistedV2 must stay padding-free - see the offsets comment above");
+static_assert(offsetof(PersistedV2, totalCycleTimeMs) == sizeof(PersistedV1),
+              "V2's new fields must start exactly where V1 ended");
+static_assert(NUM_PROFILES == 3, "PersistedV2::sgTrip sizing assumes 3 profiles");
+
 // The layout the firmware works with in RAM. Repoint this (not PersistedV1)
 // when a new version is introduced.
-using Persisted = PersistedV1;
+using Persisted = PersistedV2;
 
 // Largest blob any known version occupies - the read buffer settings_store.cpp
 // sizes its nvs_get_blob() against. Extend with max(...) when a longer version
 // is added; a stored blob bigger than this is rejected as a size mismatch.
-constexpr size_t kMaxBlobBytes = sizeof(PersistedV1);
+constexpr size_t kMaxBlobBytes =
+    sizeof(PersistedV1) > sizeof(PersistedV2) ? sizeof(PersistedV1) : sizeof(PersistedV2);
 
 // ---------------------------------------------------------------------------
 //  Per-version validation
@@ -133,26 +175,85 @@ inline bool validateV1(const PersistedV1 &p) {
   return true;
 }
 
+// Validates the V2 LAYOUT. Deliberately a copy of validateV1()'s body rather
+// than a shared helper: each version must validate its own layout on its own
+// terms and stay frozen once shipped, so a later change to v3's bounds can
+// never retroactively change how a v1 or v2 blob is judged.
+//
+// The six counters added in v2 get NO bounds check, on purpose:
+//   - They are unsigned, so "not negative" is already guaranteed by the type.
+//   - Unlike every field above them, no live setter constrains them - nothing
+//     writes them but a ++ - so there is no "value the running firmware would
+//     have rejected" to mirror, which is what these validators exist for.
+//   - Any upper bound would be an invented number, and getting it wrong is
+//     expensive: this is an all-or-nothing validator, so a device that had
+//     simply been running for a long time would have its CALIBRATION thrown
+//     away over a cosmetic statistic.
+//   - The tempting cross-field invariant (longestCycleMs <= totalCycleTimeMs)
+//     is not actually invariant: totalCycleTimeMs is a uint32_t of milliseconds
+//     and wraps after ~49.7 days of accumulated stroke time, after which the
+//     "corruption" it would flag is just a long-lived press.
+// Bit-level corruption is not this function's job either - NVS stores its own
+// CRC per entry and refuses to hand back a blob that fails it.
+inline bool validateV2(const PersistedV2 &p) {
+  if (p.runCurrentMa < RUN_CURRENT_MIN || p.runCurrentMa > RUN_CURRENT_MAX) return false;
+  if (p.sgWorkZoneSteps < SG_WORK_ZONE_MIN || p.sgWorkZoneSteps > SG_WORK_ZONE_MAX) return false;
+  if (p.activeProfile >= NUM_PROFILES) return false;
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) {
+    if (p.sgTrip[i] < RUN_SG_TRIP_MIN || p.sgTrip[i] > RUN_SG_TRIP_MAX) return false;
+  }
+  if (p.upOffsetSteps < OFFSET_MIN || p.upOffsetSteps > OFFSET_MAX) return false;
+  if (p.downOffsetSteps < OFFSET_MIN || p.downOffsetSteps > OFFSET_MAX) return false;
+  if (p.counter < 0) return false;
+  if (p.endpointsCalibrated > 1) return false;
+
+  // Geometry sanity - identical to V1's (see there for the reasoning).
+  if (p.rawUp < -CAL_SEARCH_STEPS || p.rawUp > CAL_SEARCH_STEPS) return false;
+  if (p.rawDown < -CAL_SEARCH_STEPS || p.rawDown > CAL_SEARCH_STEPS) return false;
+  if (p.endpointsCalibrated) {
+    const int32_t travel = p.rawDown - p.rawUp;
+    if (travel <= 2 * ENDPOINT_GUARD || travel > CAL_SEARCH_STEPS) return false;
+  }
+  return true;
+}
+
 // Validation of the CURRENT layout, used by the direct (version == kVersion)
 // load path. Repoint at validateV<new> together with `Persisted`.
 inline bool validate(const Persisted &p) {
-  return validateV1(p);
+  return validateV2(p);
 }
 
 // ---------------------------------------------------------------------------
 //  Migration steps
 // ---------------------------------------------------------------------------
-// One function per adjacent version pair, e.g.
-//
-//   inline void migrate_v1_to_v2(const PersistedV1 &in, PersistedV2 &out) {
-//     out = PersistedV2{};          // zero-init: no byte left indeterminate
-//     out.version   = 2;
-//     out.rawUp     = in.rawUp;     // ... every carried-over field ...
-//     out.stallCount = 0;           // new field: explicit, sane default
-//   }
-//
-// None exist yet: kVersion is 1, so there is nothing older to come from. The
-// mechanism below is what makes adding the first one a one-function change.
+// One function per adjacent version pair. A blob several versions old is
+// carried forward by CHAINING these (v1 -> v2 -> v3), never by a shortcut.
+
+// v1 -> v2: every V1 field is carried over unchanged; the six health counters
+// added in v2 start at 0. A device upgrading from v1 firmware has no recorded
+// history to backfill - there is nothing truthful to seed them with, and
+// inventing a number would be worse than a visibly fresh count.
+inline void migrate_v1_to_v2(const PersistedV1 &in, PersistedV2 &out) {
+  out = PersistedV2{};  // zero-init first: no byte left indeterminate
+  out.version = 2;
+  out.runCurrentMa = in.runCurrentMa;
+  out.rawUp = in.rawUp;
+  out.rawDown = in.rawDown;
+  out.upOffsetSteps = in.upOffsetSteps;
+  out.downOffsetSteps = in.downOffsetSteps;
+  out.sgWorkZoneSteps = in.sgWorkZoneSteps;
+  out.counter = in.counter;
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) out.sgTrip[i] = in.sgTrip[i];
+  out.activeProfile = in.activeProfile;
+  out.endpointsCalibrated = in.endpointsCalibrated;
+  // New in v2 - explicit, not merely inherited from the zero-init above.
+  out.totalCycleTimeMs = 0;
+  out.longestCycleMs = 0;
+  out.stallCount = 0;
+  out.calibrationCount = 0;
+  out.otaCount = 0;
+  out.resetCount = 0;
+}
 
 // ---------------------------------------------------------------------------
 //  Dispatch
@@ -171,6 +272,7 @@ enum class ParseResult : uint8_t {
 // with rather than with today's.
 inline bool peekBlobVersion(const void *data, size_t len, uint16_t &out) {
   static_assert(offsetof(PersistedV1, version) == 0, "version must lead every blob layout");
+  static_assert(offsetof(PersistedV2, version) == 0, "version must lead every blob layout");
   if (data == nullptr || len < sizeof(uint16_t)) return false;
   std::memcpy(&out, data, sizeof(uint16_t));
   return true;
@@ -197,13 +299,19 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
       // trusts it. Every future step in the chain does the same for its input.
       if (!validateV1(v1)) return ParseResult::Invalid;
       // ---- migration chain starts here -------------------------------------
-      // v1 IS the current version today, so the chain is empty and this is the
-      // plain direct load. When kVersion becomes 2 this case becomes:
-      //     PersistedV2 v2{}; migrate_v1_to_v2(v1, v2);
-      //     ... (further steps) ...
-      //     out = v<kVersion>;
-      // and a new `case 2:` below handles the direct load.
-      out = v1;
+      // Add each further step below this one (v2 -> v3, ...) so an ancient blob
+      // walks the whole chain; `out` is only ever assigned the current layout.
+      PersistedV2 v2{};
+      migrate_v1_to_v2(v1, v2);
+      out = v2;
+      return ParseResult::Ok;
+    }
+    case 2: {
+      PersistedV2 v2{};
+      if (len != sizeof(v2)) return ParseResult::SizeMismatch;
+      std::memcpy(&v2, data, sizeof(v2));
+      if (!validateV2(v2)) return ParseResult::Invalid;
+      out = v2;  // current version: nothing to migrate
       return ParseResult::Ok;
     }
     default:
@@ -216,7 +324,7 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
 // Step 6 of the recipe above, enforced by the compiler: bumping kVersion
 // without extending parseAndMigrate()'s switch breaks the build here.
 static_assert(
-    kVersion == 1,
+    kVersion == 2,
     "kVersion was bumped - add the new `case` and the migrate_vN_to_vN+1() step to "
     "parseAndMigrate(), then update this assert. See the recipe at the top of this file.");
 

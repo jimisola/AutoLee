@@ -9,6 +9,7 @@
 #include "motion.h"
 #include "motion_cmd.h"
 #include "motion_state.h"
+#include "settings_store.h"
 #include "stepper.h"
 #include "tmc5160_ctrl.h"
 #include "wifi_mgr.h"
@@ -300,6 +301,20 @@ static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_
       ESP_LOGI(TAG, "OTA: success, %llu bytes, project='%s' version='%s'", index + len,
                written_desc.project_name, written_desc.version);
       webLog("OTA: new firmware verified and set to boot");
+      // Lifetime OTA count. No guard is held here (this runs on the HTTP task,
+      // which is not the owner of g_motion), so take one for the single store -
+      // pump_task reads this state unlocked. Counted at "set boot partition
+      // succeeded", i.e. the last point where the update can still fail: the
+      // reboot below is only the device acting on a decision already made.
+      {
+        motion_state::Guard g;
+        g_motion.otaCount++;
+      }
+      // Persist immediately rather than leaving it to tick()'s 5 s dirty check:
+      // rebootRequested (set on the next line) has pump_task restarting the
+      // chip ~500 ms from now, which would beat the throttle and lose the
+      // count. Same reasoning settings_store::load() applies to resetCount.
+      settings_store::saveNow();
       rebootRequested = true;
       rebootRequestMs = millis();
       otaClear();
@@ -501,17 +516,38 @@ void setupWebServer() {
 
     bool coredumpPresent = (esp_core_dump_image_check() == ESP_OK);
 
-    char buf[640];
+    // Lifetime health counters (persisted - see main/settings_blob.h). They
+    // live here rather than in /api/v1/state on purpose: they are support
+    // statistics that change at most once per stroke and are never needed to
+    // render the dashboard, whereas /api/v1/state is polled and re-broadcast
+    // over SSE continuously and is already close to its fixed 768-byte buffer.
+    const MotionState ms = motion_state::snapshot();
+    // Derived, not stored: the mean successful stroke time. `counter` is the
+    // successful-cycle count, so it is the right denominator - but note it is
+    // capped at COUNTER_MAX for the display and can be zeroed via
+    // /api/v1/motion/reset_counter, either of which skews this average while
+    // leaving totalCycleTimeMs/longestCycleMs exact. Prefer those two when the
+    // number has to be trusted.
+    const uint32_t avgCycleMs =
+        (ms.counter > 0) ? (uint32_t)(ms.totalCycleTimeMs / (uint32_t)ms.counter) : 0;
+
+    char buf[896];
     snprintf(buf, sizeof(buf),
              "{\"version\":\"%s\",\"idfVersion\":\"%s\",\"compileDate\":\"%s\","
              "\"compileTime\":\"%s\",\"elfSha256\":\"%s\",\"resetReason\":\"%s\","
              "\"freeHeap\":%u,\"minFreeHeap\":%u,\"uptimeMs\":%llu,"
-             "\"runningPartition\":\"%s\",\"coredumpPresent\":%s}",
+             "\"runningPartition\":\"%s\",\"coredumpPresent\":%s,"
+             "\"health\":{\"cycleCount\":%ld,\"stallCount\":%u,\"totalCycleTimeMs\":%lu,"
+             "\"avgCycleMs\":%lu,\"longestCycleMs\":%lu,\"calibrationCount\":%u,"
+             "\"otaCount\":%u,\"resetCount\":%u}}",
              desc->version, desc->idf_ver, desc->date, desc->time, sha,
              resetReasonStr(esp_reset_reason()), (unsigned)esp_get_free_heap_size(),
              (unsigned)esp_get_minimum_free_heap_size(),
              (unsigned long long)(esp_timer_get_time() / 1000),
-             running ? running->label : "?", coredumpPresent ? "true" : "false");
+             running ? running->label : "?", coredumpPresent ? "true" : "false",
+             (long)ms.counter, (unsigned)ms.stallCount, (unsigned long)ms.totalCycleTimeMs,
+             (unsigned long)avgCycleMs, (unsigned long)ms.longestCycleMs,
+             (unsigned)ms.calibrationCount, (unsigned)ms.otaCount, (unsigned)ms.resetCount);
     return res->send(200, "application/json", buf);
   });
 

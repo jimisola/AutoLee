@@ -83,6 +83,26 @@ struct MotionState {
 
   uint16_t runCurrentMa = 3500;
   int32_t sgWorkZoneSteps = 5500;
+
+  // --- Lifetime health counters (persisted; see main/settings_blob.h) -------
+  // Support/diagnostics only - nothing in the motion logic reads these, they
+  // are never a gate on anything. Written under the same Guard as the event
+  // that produced them (motion.cpp's jam latch, stroke completion and
+  // successful calibration; web_server.cpp's OTA success; settings_store's
+  // load()), so a snapshotting reader never sees a counter that disagrees with
+  // the state change it belongs to. `counter` above is the "successful cycles"
+  // statistic and is deliberately not duplicated here.
+  //
+  // The uint16_t counters wrap at 65535. Accepted: 65536 lifetime jams / OTA
+  // updates / calibrations / boots is far past the point where the exact number
+  // matters, and saturating arithmetic inside a critical section would cost
+  // more than the edge case is worth.
+  uint32_t totalCycleTimeMs = 0;  // summed duration of successful UP->DOWN strokes
+  uint32_t longestCycleMs = 0;    // longest single successful stroke
+  uint16_t stallCount = 0;        // jams that latched STALLED
+  uint16_t calibrationCount = 0;  // successful calibrations
+  uint16_t otaCount = 0;          // successful OTA updates
+  uint16_t resetCount = 0;        // boots
 };
 
 // Single definition site: motion_state.cpp.

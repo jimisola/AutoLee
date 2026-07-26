@@ -228,8 +228,15 @@ paths:
       description: >
         Build identity (version, IDF version, compile date/time, truncated ELF SHA-256),
         last reset reason, heap stats, uptime, the currently-running OTA partition label,
-        and whether a valid coredump is waiting in the `coredump` partition. A GET, so -
-        like every other read on this device - it is left open, not Digest-gated.
+        whether a valid coredump is waiting in the `coredump` partition, and the
+        persisted lifetime `health` counters (jams, cycle timing, calibrations, OTA
+        updates, boots). A GET, so - like every other read on this device - it is left
+        open, not Digest-gated.
+
+        The health counters live here rather than in `GET /api/v1/state` because they
+        are support statistics, not dashboard state: they survive reboots in NVS,
+        change at most once per stroke, and would otherwise inflate a payload that is
+        polled and re-broadcast over SSE continuously.
       tags: [Diagnostics]
       operationId: getInfo
       responses:
@@ -252,6 +259,7 @@ paths:
                   - uptimeMs
                   - runningPartition
                   - coredumpPresent
+                  - health
                 properties:
                   version: { type: string, description: "esp_app_desc_t.version" }
                   idfVersion: { type: string, description: "esp_app_desc_t.idf_ver" }
@@ -264,6 +272,31 @@ paths:
                   uptimeMs: { type: integer, description: "esp_timer_get_time() / 1000" }
                   runningPartition: { type: string, description: "Label of the running OTA slot, e.g. ota_0" }
                   coredumpPresent: { type: boolean, description: "esp_core_dump_image_check() == ESP_OK" }
+                  health:
+                    type: object
+                    description: >
+                      Lifetime counters persisted in NVS alongside the calibration
+                      (see the versioned settings blob). Cleared only by
+                      `POST /api/v1/settings/reset`. The 16-bit counters wrap at 65535.
+                    additionalProperties: false
+                    required:
+                      - cycleCount
+                      - stallCount
+                      - totalCycleTimeMs
+                      - avgCycleMs
+                      - longestCycleMs
+                      - calibrationCount
+                      - otaCount
+                      - resetCount
+                    properties:
+                      cycleCount: { type: integer, minimum: 0, description: "Successful cycles - the same piece counter as the state payload's `counter` (display-capped at 9999, zeroable via /api/v1/motion/reset_counter)" }
+                      stallCount: { type: integer, minimum: 0, description: "Jams that latched STALLED" }
+                      totalCycleTimeMs: { type: integer, minimum: 0, description: "Summed duration of every successful UP->DOWN stroke; jammed strokes are excluded" }
+                      avgCycleMs: { type: integer, minimum: 0, description: "totalCycleTimeMs / cycleCount, 0 when cycleCount is 0. Derived, not stored - skewed if the piece counter was reset or has saturated; totalCycleTimeMs and longestCycleMs stay exact" }
+                      longestCycleMs: { type: integer, minimum: 0, description: "Longest single successful stroke seen" }
+                      calibrationCount: { type: integer, minimum: 0, description: "Successful sensorless calibrations" }
+                      otaCount: { type: integer, minimum: 0, description: "Successful OTA updates (counted once the new image is set to boot)" }
+                      resetCount: { type: integer, minimum: 0, description: "Boots, counted at startup and written to flash immediately so a reset loop is visible" }
 
   /api/v1/diagnostics/coredump:
     get:

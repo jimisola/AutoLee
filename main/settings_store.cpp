@@ -55,6 +55,14 @@ Persisted capture() {
   for (uint8_t i = 0; i < NUM_PROFILES; i++) p.sgTrip[i] = ms.profiles[i].sg_trip;
   p.activeProfile = ms.activeProfile;
   p.endpointsCalibrated = ms.endpointsCalibrated ? 1 : 0;
+  // Lifetime health counters (v2). Diagnostics, but persisted for exactly the
+  // reason the calibration is: they are worthless if a reboot resets them.
+  p.totalCycleTimeMs = ms.totalCycleTimeMs;
+  p.longestCycleMs = ms.longestCycleMs;
+  p.stallCount = ms.stallCount;
+  p.calibrationCount = ms.calibrationCount;
+  p.otaCount = ms.otaCount;
+  p.resetCount = ms.resetCount;
   return p;
 }
 
@@ -70,6 +78,12 @@ void apply(const Persisted &p) {
   for (uint8_t i = 0; i < NUM_PROFILES; i++) g_motion.profiles[i].sg_trip = p.sgTrip[i];
   g_motion.activeProfile = p.activeProfile;
   g_motion.endpointsCalibrated = p.endpointsCalibrated != 0;
+  g_motion.totalCycleTimeMs = p.totalCycleTimeMs;
+  g_motion.longestCycleMs = p.longestCycleMs;
+  g_motion.stallCount = p.stallCount;
+  g_motion.calibrationCount = p.calibrationCount;
+  g_motion.otaCount = p.otaCount;
+  g_motion.resetCount = p.resetCount;
   // Restoring endpoints can never restore the *position reference* they are
   // measured against: the stepper counter starts at 0 while the carriage sits
   // wherever power was lost. Latch it stale so startRunBetweenEndpoints()
@@ -105,6 +119,16 @@ void applyCompiledDefaults() {
   g_motion.counter = def.counter;
   for (uint8_t i = 0; i < NUM_PROFILES; i++) g_motion.profiles[i].sg_trip = def.profiles[i].sg_trip;
   g_motion.activeProfile = def.activeProfile;
+  // The lifetime health counters are part of the persisted set, so they are
+  // part of what a deliberate "reset to defaults" clears - the operator asked
+  // for a factory-fresh device, and leaving stale jam/cycle statistics behind
+  // would also desync the memcmp() dirty check against the blob just erased.
+  g_motion.totalCycleTimeMs = def.totalCycleTimeMs;
+  g_motion.longestCycleMs = def.longestCycleMs;
+  g_motion.stallCount = def.stallCount;
+  g_motion.calibrationCount = def.calibrationCount;
+  g_motion.otaCount = def.otaCount;
+  g_motion.resetCount = def.resetCount;
   // Whatever else happened, the machine must not think it knows its endpoints.
   g_motion.endpointsCalibrated = false;
   g_motion.endpointUp = 0;
@@ -160,46 +184,46 @@ bool eraseBlob() {
 }  // namespace
 
 void load() {
-  nvs_handle_t h;
-  if (nvs_open(kNamespace, NVS_READONLY, &h) != ESP_OK) {
-    fallbackToDefaults("no stored settings");
-    s_lastSaved = capture();
-    s_lastCheckMs = now_ms();
-    return;
-  }
-
-  // Read into a raw byte buffer sized for the LARGEST known version, not
-  // straight into `Persisted`: an older blob may be a different length, and it
-  // is parseAndMigrate() - not nvs_get_blob() - that decides what the bytes
-  // mean. A stored blob longer than any version we know returns
-  // ESP_ERR_NVS_INVALID_LENGTH here, which is a size mismatch by another name.
-  uint8_t raw[kMaxBlobBytes];
-  size_t len = sizeof(raw);
-  const esp_err_t err = nvs_get_blob(h, kKey, raw, &len);
-  nvs_close(h);
-
   Persisted p{};
   uint16_t foundVersion = 0;
   const char *why = nullptr;
   bool migrated = false;
 
-  if (err != ESP_OK) {
-    why = (err == ESP_ERR_NVS_NOT_FOUND) ? "no stored settings" : "stored settings unreadable";
+  // Structured so EVERY path falls through to the common tail below rather than
+  // returning early: the boot counter there has to be bumped and written even
+  // when there was nothing to restore (see the comment at the bottom).
+  nvs_handle_t h;
+  if (nvs_open(kNamespace, NVS_READONLY, &h) != ESP_OK) {
+    why = "no stored settings";
   } else {
-    switch (parseAndMigrate(raw, len, p, &foundVersion)) {
-      case ParseResult::Ok:
-        migrated = (foundVersion != kVersion);
-        break;
-      case ParseResult::TooShort:
-      case ParseResult::SizeMismatch:
-        why = "stored settings size mismatch";
-        break;
-      case ParseResult::UnknownVersion:
-        why = "stored settings version mismatch";
-        break;
-      case ParseResult::Invalid:
-        why = "stored settings failed validation";
-        break;
+    // Read into a raw byte buffer sized for the LARGEST known version, not
+    // straight into `Persisted`: an older blob may be a different length, and it
+    // is parseAndMigrate() - not nvs_get_blob() - that decides what the bytes
+    // mean. A stored blob longer than any version we know returns
+    // ESP_ERR_NVS_INVALID_LENGTH here, which is a size mismatch by another name.
+    uint8_t raw[kMaxBlobBytes];
+    size_t len = sizeof(raw);
+    const esp_err_t err = nvs_get_blob(h, kKey, raw, &len);
+    nvs_close(h);
+
+    if (err != ESP_OK) {
+      why = (err == ESP_ERR_NVS_NOT_FOUND) ? "no stored settings" : "stored settings unreadable";
+    } else {
+      switch (parseAndMigrate(raw, len, p, &foundVersion)) {
+        case ParseResult::Ok:
+          migrated = (foundVersion != kVersion);
+          break;
+        case ParseResult::TooShort:
+        case ParseResult::SizeMismatch:
+          why = "stored settings size mismatch";
+          break;
+        case ParseResult::UnknownVersion:
+          why = "stored settings version mismatch";
+          break;
+        case ParseResult::Invalid:
+          why = "stored settings failed validation";
+          break;
+      }
     }
   }
 
@@ -226,6 +250,22 @@ void load() {
     }
   }
 
+  // Lifetime boot counter. Bumped on EVERY path through load(), restored or
+  // not: a reset happened whether or not the stored settings turned out to be
+  // usable, and the fallback paths are exactly the ones a device stuck in a
+  // reset loop takes. Wraps at 65535 (see motion_state.h).
+  {
+    motion_state::Guard g;
+    g_motion.resetCount++;
+  }
+  {
+    const MotionState ms = motion_state::snapshot();
+    webLog("Settings: health (boots=%u stalls=%u cals=%u otas=%u cycle_ms=%lu max_ms=%lu)",
+           (unsigned)ms.resetCount, (unsigned)ms.stallCount, (unsigned)ms.calibrationCount,
+           (unsigned)ms.otaCount, (unsigned long)ms.totalCycleTimeMs,
+           (unsigned long)ms.longestCycleMs);
+  }
+
   // Effective endpoints are derived state, never persisted; recompute from what
   // we just restored (this also zeroes them when calibration is absent).
   recomputeEffectiveEndpoints();
@@ -233,13 +273,20 @@ void load() {
   s_lastSaved = capture();
   s_lastCheckMs = now_ms();
 
-  // Rewrite the blob in the current format straight away after a migration, so
-  // the old-format bytes stop being what a subsequent boot has to interpret and
+  // The one unconditional write in this module, and the only field that forces
+  // it: resetCount. Everything else can wait for tick()'s 5 s throttled dirty
+  // check, because losing a few seconds of a tuning tweak to a power cut costs
+  // nothing. A boot counter is the opposite case - the failure it exists to
+  // diagnose (a brownout or watchdog reset LOOP) power-cycles the device in far
+  // less than 5 s, so a lazily-saved count would read "1" no matter how many
+  // times the device actually reset, i.e. it would be silent precisely when it
+  // matters. Writing here also subsumes the post-migration rewrite: the
+  // old-format bytes stop being what a subsequent boot has to interpret, and
   // the upgrade cannot be lost to a power cut before the next settings change.
-  // Only after s_lastSaved is baselined, so a failed write simply leaves the old
-  // blob in place and the next tick() retries. Boot-time and a few ms, well
-  // inside the task-WDT budget (load() runs before motion_init()).
-  if (migrated && writeBlob(s_lastSaved)) {
+  // Only after s_lastSaved is baselined, so a failed write simply leaves the
+  // old blob in place and the next tick() retries. One NVS write per boot, a
+  // few ms, well inside the task-WDT budget (load() runs before motion_init()).
+  if (writeBlob(s_lastSaved) && migrated) {
     webLog("Settings: rewritten in v%u format", (unsigned)kVersion);
   }
 }
