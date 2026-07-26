@@ -145,25 +145,25 @@ Non-bench-blocking follow-ups from the 2026-07-25 codebase review (`docs/review-
 The safety-critical, bench-blocking items from that review are tracked in Phase 4 above, not here.
 - [x] **Persist settings/calibration to NVS as a versioned struct** (`main/settings_store.{h,cpp}`,
   registered in `main/CMakeLists.txt:6`). One fixed-layout `Persisted` blob
-  (`main/settings_store.cpp:39`) in NVS namespace `autolee`, key `settings`, `uint16_t version`
+  (`PersistedV1`, `main/settings_blob.h:74`) in NVS namespace `autolee`, key `settings`, `uint16_t version`
   first: `rawUp`/`rawDown`/`endpointsCalibrated`/`upOffsetSteps`/`downOffsetSteps`, the
   per-profile `sg_trip[]`, `runCurrentMa`, `sgWorkZoneSteps`, `activeProfile`, `counter`.
   Deliberately **not** persisted: `runState`, `currentTarget`, `batch*` and the SG telemetry
   counters (must always come up at safe defaults after any reset), `SpeedProfile::name`/`speed_hz`
   (a `const char *` is meaningless across a firmware update, and `speed_hz` has no runtime writer),
   and the derived `endpointUp`/`endpointDown` (recomputed from the restored raws).
-  - **Load** (`main/settings_store.cpp:155`) runs from `app_main.cpp:93`, before `motion_init()`,
+  - **Load** (`main/settings_store.cpp:162`) runs from `app_main.cpp:93`, before `motion_init()`,
     so the restored `runCurrentMa` is what `motion_init()` pushes to the TMC5160; it finishes with
     `recomputeEffectiveEndpoints()`.
   - **Fail-safe, all-or-nothing**: a missing blob, a size mismatch, a `version` mismatch, or *any*
     field outside the bounds the live setters already enforce (`OFFSET_MIN/MAX`,
     `RUN_CURRENT_MIN/MAX`, `SG_WORK_ZONE_MIN/MAX`, `RUN_SG_TRIP_MIN/MAX`, `NUM_PROFILES`, plus a
     geometry check that travel is positive and within `CAL_SEARCH_STEPS`) discards the **whole**
-    blob (`validate()`, `main/settings_store.cpp:84`), keeps `MotionState`'s compiled-in defaults
+    blob (`validateV1()`, `main/settings_blob.h:111`), keeps `MotionState`'s compiled-in defaults
     and explicitly forces `endpointsCalibrated = false` + zeroed effective endpoints
-    (`fallbackToDefaults()`, `:126`), logging the reason via `webLog()`. Nothing is partially
+    (`fallbackToDefaults()`, `main/settings_store.cpp:117`), logging the reason via `webLog()`. Nothing is partially
     trusted — the press must never believe it knows its endpoints from data that failed a check.
-  - **Save** (`main/settings_store.cpp:206`) is a dirty-check hook at the end of
+  - **Save** (`main/settings_store.cpp:247`) is a dirty-check hook at the end of
     `processPendingCommands()` (`main/motion/motion_cmd.cpp:156`), i.e. pump_task only: `memcmp`
     against the last-saved copy, at most one write per 5 s (`kSaveIntervalMs`), so a held-down UI
     knob costs one commit rather than one per step. An NVS commit is a few ms — three orders of
@@ -175,8 +175,8 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
     there), but after a mid-stroke power cut or watchdog reset the restored endpoints are offset
     from reality — so the restore is no longer merely logged, it is gated:
     - `MotionState::positionReferenceStale` (`main/motion/motion_state.h:62`) is latched by
-      `settings_store::apply()` (`main/settings_store.cpp:127`) whenever a calibration is restored,
-      and by `fallbackToDefaults()` (`:142`) for good measure. It is cleared *only* by something
+      `settings_store::apply()` (`main/settings_store.cpp:61`) whenever a calibration is restored,
+      and by `fallbackToDefaults()` (`:117`) for good measure. It is cleared *only* by something
       that re-establishes ground truth against the UP hard stop: a successful `safeCreepHome()`
       (`main/motion/motion.cpp:458`, inside the same guard as the `HomeDone` transition, and **not**
       on the "FAILED to find stop!" path) or a fresh `calibrateEndpointsSensorless()`
@@ -204,22 +204,85 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
     - Covered by `host_test/test_motor_fsm` (the exhaustive transition sweep knows the new valid
       pair) and 4 new `host_test/test_motion_seq` cases: Start refused while stale, Return Home from
       IDLE clears it and unblocks Start, a failed home keeps it, a fresh calibration clears it.
+- [x] **Versioned-settings migration chain** (README-Copilot review item #4, "Version your settings",
+  `docs/review-2026-07-25.md:60`) — the persisted blob was *versioned* but had no *migration*: a
+  `version` mismatch took the same all-or-nothing reject path as corruption, so the first field
+  addition after deployment would have silently wiped every device's calibration. There is now a
+  real forward-migration mechanism.
+  - **New pure header `main/settings_blob.h`** — the on-flash layouts, the per-version validators
+    and the version dispatch, split out of `settings_store.cpp` and deliberately free of NVS,
+    `MotionState` and logging so the host tests exercise exactly what the firmware runs (same
+    split as `lib/autolee_logic/`, but it stays under `main/` because it depends on `main/config.h`
+    for `NUM_PROFILES` and the validation bounds). `settings_store.cpp` keeps the NVS I/O and the
+    `MotionState` apply halves only.
+  - **Layouts:** `struct PersistedV1` (`main/settings_blob.h:74`) is the byte-for-byte 36-byte
+    layout that shipped, `static_assert`'d at `:87` and frozen — old-version structs are never
+    edited, they describe bytes that exist on deployed devices. `using Persisted = PersistedV1`
+    (`:93`) is what the firmware works with in RAM; a new version repoints *that*, not `PersistedV1`.
+    `kMaxBlobBytes` (`:98`) sizes the `nvs_get_blob()` read buffer against the largest known version,
+    so `load()` reads raw bytes and lets the dispatch decide what they mean rather than reading
+    straight into today's struct (`main/settings_store.cpp:176`).
+  - **Dispatch:** `peekBlobVersion()` (`:172`) reads only the leading `uint16_t` — `version` is the
+    first member of every layout by construction, `static_assert`'d at `:173` — and
+    `parseAndMigrate()` (`:185`) then switches on it: current version → direct deserialize, older
+    version → deserialize with *that version's* struct and run the chained
+    `migrate_vN_to_vN+1()` steps, anything else (too old, or from the future after an OTA rollback)
+    → `ParseResult::UnknownVersion`. Multi-version jumps chain single steps (v1→v2→v3); no
+    shortcut functions.
+  - **Corrupt old blobs cannot be laundered forward:** each version has its own validator
+    (`validateV1()`, `main/settings_blob.h:111` — the old `validate()` moved verbatim, same bounds
+    the live setters enforce) and every step validates its input on its *own* version's terms
+    **before** migrating, so a bad v1 blob is rejected rather than turned into a v2 struct that
+    passes every v2 check. `out` is left untouched on every failure path.
+  - **`kVersion` deliberately stays 1.** Nothing is being added to the persisted set here — the
+    mechanism is what was missing. The bump to 2 belongs to the health-monitoring item (stall
+    count, cycle stats), which will be its first real user. To stop that bump shipping without its
+    migration, `static_assert(kVersion == 1, ...)` (`main/settings_blob.h:218`) fails the build if
+    `kVersion` moves without `parseAndMigrate()`'s switch being extended — verified by temporarily
+    bumping it and watching the build stop.
+  - **Recipe is documented where it will be found** (`main/settings_blob.h:20`, the file header):
+    the seven steps to add a persisted field, from "never edit the old struct" through the new
+    validator, the one migration function, the new `case`, and the test.
+  - **Load-path behaviour is otherwise unchanged.** `load()` (`main/settings_store.cpp:162`) maps
+    `ParseResult` back onto the same `webLog()` reasons as before (size mismatch / version
+    mismatch / failed validation → `fallbackToDefaults()`), so a current-version blob loads exactly
+    as it did. New: on a successful migration it logs `Settings: migrated from vN to vM` (`:211`)
+    and immediately rewrites the blob in the current format (`:243`) — after `s_lastSaved` is
+    baselined, so a failed rewrite just leaves the old bytes and `tick()` retries.
+  - **Tests:** new `host_test/test_settings_blob` (9 cases, suite wired via
+    `host_test/test_settings_blob/suite.cmake`). Every "stored blob" is assembled as raw
+    little-endian bytes at hand-written offsets rather than by `memcpy`-ing a struct, so the suite
+    is an independent description of what is on flash and catches a layout edit the struct's own
+    `sizeof` assert would miss (`test_v1_layout_is_frozen`, `:104`). Covers the unchanged common
+    case (`test_v1_blob_loads_unchanged`, `:141`), the uncalibrated blob, version 0/2/0xFFFF
+    rejection, truncated/short/long blobs, and 11 out-of-range field rejections that each assert
+    `out` was left untouched. Because there is no real v2 yet, `test_recipe_migrates_an_old_blob_forward`
+    (`:387`) and `test_recipe_rejects_a_corrupt_old_blob_before_migrating` (`:403`) rehearse the
+    documented recipe on stand-in structs (`namespace recipe`, `:279`) with a genuine two-step
+    v1→v2→v3 chain, proving carried-over fields survive, new fields get explicit defaults and a
+    corrupt old blob is rejected before any migration runs. Replace that pair with the real
+    migration's test when the health-monitoring bump lands.
+  - **Verified:** `idf.py build` clean; all 11 host suites pass; and on the real board a v1 blob
+    written by the *previous* firmware (`runCurrentMa` set to 2800 mA over
+    `POST /api/v1/current`) was restored correctly after flashing the new build —
+    `I (592) weblog: Settings: restored (cal=no up=0 dn=0 cur=2800mA prof=1 cnt=0)`, no migration
+    line, no fallback.
 - [x] **Reset calibration/settings action** — a deliberate way to discard a stored calibration
   (press moved, brass changed, a clean recalibration wanted) without an NVS erase over serial.
-  - **Core:** `settings_store::resetToDefaults()` (`main/settings_store.h:64`,
-    `main/settings_store.cpp:284`). Erases the blob with **`nvs_erase_key`, never
+  - **Core:** `settings_store::resetToDefaults()` (`main/settings_store.h:72`,
+    `main/settings_store.cpp:264`). Erases the blob with **`nvs_erase_key`, never
     `nvs_erase_all`** — the `autolee` namespace is *shared*: `wifi_mgr.cpp` keeps `ssid`/`pass`/
     `apkey` and `web_server.cpp` keeps `webpass` in it, so only the `settings` key is ours to
     delete and a reset can never lock the device off the network (the misleading "own namespace,
     not wifi_mgr's" comment at `main/settings_store.cpp:16` was corrected to say this).
   - **Defaults come from `MotionState` itself**, not from literals: `applyCompiledDefaults()`
-    (`main/settings_store.cpp:148`) copies the persisted subset out of a default-constructed
+    (`main/settings_store.cpp:96`) copies the persisted subset out of a default-constructed
     `MotionState`, so `motion_state.h` stays the single source of truth and a new persisted field
-    cannot be silently left behind. `fallbackToDefaults()` (`:170`) now just calls it plus logs —
+    cannot be silently left behind. `fallbackToDefaults()` (`:117`) now just calls it plus logs —
     the rejected-load and the deliberate-reset paths share one field list. Calibration is forced
     off, the effective endpoints zeroed and `positionReferenceStale` latched, then
     `recomputeEffectiveEndpoints()` runs, exactly as at the end of `load()`.
-  - **Dirty-check bookkeeping is defined, not accidental** (`main/settings_store.cpp:284`): on a
+  - **Dirty-check bookkeeping is defined, not accidental** (`main/settings_store.cpp:264`): on a
     successful erase, `s_lastSaved` is re-baselined to the *defaults* and `s_lastCheckMs` reset,
     so the `tick()` call at the very end of the same `processPendingCommands()` pass sees no diff
     and does **not** immediately re-create the blob — the next boot takes the same "no stored
