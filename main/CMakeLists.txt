@@ -16,5 +16,5 @@ idf_component_register(
     REQUIRES autolee_logic nvs_flash esp_lcd driver esp_timer esp_driver_rmt esp_driver_pcnt
              esp_driver_gpio esp_driver_spi esp_driver_i2c esp_system esp_wifi esp_netif
              esp_event nvs_flash dns_server psychic_http esp_https_server esp_http_server
-             app_update esp_partition espcoredump
+             app_update esp_partition espcoredump esp_hw_support spi_flash heap
 )

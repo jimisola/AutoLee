@@ -11,6 +11,8 @@
 volatile bool rebootRequested = false;
 uint32_t rebootRequestMs = 0;
 
+TaskHandle_t g_pump_task_handle = nullptr;
+
 autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
 uint32_t logSentSerial = 0;
 

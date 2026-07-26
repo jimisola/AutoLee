@@ -137,6 +137,6 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "OTA: image marked valid (rollback canceled)");
   }
 
-  xTaskCreate(pump_task, "pump", 8192, nullptr, 5, nullptr);
+  xTaskCreate(pump_task, "pump", 8192, nullptr, 5, &g_pump_task_handle);
   xTaskCreate(sse_task, "sse", 4096, nullptr, 4, nullptr);
 }

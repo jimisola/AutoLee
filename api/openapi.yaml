@@ -256,9 +256,15 @@ paths:
                   - resetReason
                   - freeHeap
                   - minFreeHeap
+                  - largestFreeBlock
                   - uptimeMs
                   - runningPartition
                   - coredumpPresent
+                  - flashSizeBytes
+                  - cpuFreqMhz
+                  - wifiRssi
+                  - pumpStackHighWaterMark
+                  - settingsVersion
                   - health
                 properties:
                   version: { type: string, description: "esp_app_desc_t.version" }
@@ -269,9 +275,20 @@ paths:
                   resetReason: { type: string, description: "esp_reset_reason(), e.g. POWERON, PANIC, TASK_WDT" }
                   freeHeap: { type: integer, description: "esp_get_free_heap_size(), bytes" }
                   minFreeHeap: { type: integer, description: "esp_get_minimum_free_heap_size(), bytes" }
+                  largestFreeBlock: { type: integer, description: "heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), bytes - the largest single allocation that would currently succeed, a more useful fragmentation indicator than freeHeap alone" }
                   uptimeMs: { type: integer, description: "esp_timer_get_time() / 1000" }
                   runningPartition: { type: string, description: "Label of the running OTA slot, e.g. ota_0" }
                   coredumpPresent: { type: boolean, description: "esp_core_dump_image_check() == ESP_OK" }
+                  flashSizeBytes: { type: integer, description: "esp_flash_get_size() of the main flash chip, bytes (e.g. 4194304 for the 4 MB part in partitions.csv)" }
+                  cpuFreqMhz: { type: integer, description: "esp_clk_cpu_freq() / 1000000" }
+                  wifiRssi:
+                    type: [integer, "null"]
+                    description: >
+                      esp_wifi_sta_get_ap_info().rssi (dBm) of the currently-associated AP.
+                      `null` when not connected as a station (AP-setup mode, or STA
+                      disconnected) - there is no AP to report an RSSI for.
+                  pumpStackHighWaterMark: { type: integer, description: "uxTaskGetStackHighWaterMark() for pump_task (the handleMotion()/motion_cmd dispatch loop), in bytes. Minimum-ever free stack since boot - the smaller this gets, the closer that task has come to overflowing its stack" }
+                  settingsVersion: { type: integer, description: "settings_store::kVersion - the on-flash layout version of the persisted settings/calibration blob (see main/settings_blob.h)" }
                   health:
                     type: object
                     description: >

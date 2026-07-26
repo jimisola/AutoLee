@@ -23,6 +23,12 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
+#include "esp_flash.h"
+#include "esp_private/esp_clk.h"  // esp_clk_cpu_freq() - see diagnostics/info handler comment
+#include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs.h"
 
 #include "state_json.h"
@@ -531,20 +537,60 @@ void setupWebServer() {
     const uint32_t avgCycleMs =
         (ms.counter > 0) ? (uint32_t)(ms.totalCycleTimeMs / (uint32_t)ms.counter) : 0;
 
-    char buf[896];
+    // Largest single allocatable block, MALLOC_CAP_8BIT to match
+    // esp_get_free_heap_size()/esp_get_minimum_free_heap_size() above (both
+    // count all byte-addressable memory) - a more useful "can I actually do
+    // one big allocation" figure than the total free heap number.
+    const size_t largestFreeBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+
+    // NULL -> the default/main flash chip (esp_flash_default_chip), the only
+    // one this board has.
+    uint32_t flashSizeBytes = 0;
+    esp_flash_get_size(NULL, &flashSizeBytes);
+
+    const int cpuFreqMhz = esp_clk_cpu_freq() / 1000000;
+
+    // Only meaningful while associated as a station - AP mode / disconnected
+    // has no "current AP" to report an RSSI for. Build as a bare JSON token
+    // (number or `null`) rather than adding a second snprintf format per
+    // case, so the field is always present and always valid JSON.
+    char wifiRssiJson[8] = "null";
+    if (wifi_mgr::isConnected() && !wifi_mgr::isApMode()) {
+      wifi_ap_record_t ap_info;
+      if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        snprintf(wifiRssiJson, sizeof(wifiRssiJson), "%d", (int)ap_info.rssi);
+      }
+    }
+
+    // Minimum-ever free stack for pump_task, the safety-critical loop
+    // (handleMotion() + motion_cmd::processPendingCommands()) - see
+    // main/app_main.cpp. uxTaskGetStackHighWaterMark() returns words; report
+    // bytes (x sizeof(StackType_t)) since that's what the 8192 passed to
+    // xTaskCreate() is already in on this port.
+    const uint32_t pumpStackHighWaterMarkBytes =
+        g_pump_task_handle
+            ? (uint32_t)uxTaskGetStackHighWaterMark(g_pump_task_handle) * sizeof(StackType_t)
+            : 0;
+
+    char buf[1280];
     snprintf(buf, sizeof(buf),
              "{\"version\":\"%s\",\"idfVersion\":\"%s\",\"compileDate\":\"%s\","
              "\"compileTime\":\"%s\",\"elfSha256\":\"%s\",\"resetReason\":\"%s\","
-             "\"freeHeap\":%u,\"minFreeHeap\":%u,\"uptimeMs\":%llu,"
+             "\"freeHeap\":%u,\"minFreeHeap\":%u,\"largestFreeBlock\":%u,"
+             "\"uptimeMs\":%llu,"
              "\"runningPartition\":\"%s\",\"coredumpPresent\":%s,"
+             "\"flashSizeBytes\":%lu,\"cpuFreqMhz\":%d,\"wifiRssi\":%s,"
+             "\"pumpStackHighWaterMark\":%lu,\"settingsVersion\":%u,"
              "\"health\":{\"cycleCount\":%ld,\"stallCount\":%u,\"totalCycleTimeMs\":%lu,"
              "\"avgCycleMs\":%lu,\"longestCycleMs\":%lu,\"calibrationCount\":%u,"
              "\"otaCount\":%u,\"resetCount\":%u}}",
              desc->version, desc->idf_ver, desc->date, desc->time, sha,
              resetReasonStr(esp_reset_reason()), (unsigned)esp_get_free_heap_size(),
-             (unsigned)esp_get_minimum_free_heap_size(),
+             (unsigned)esp_get_minimum_free_heap_size(), (unsigned)largestFreeBlock,
              (unsigned long long)(esp_timer_get_time() / 1000),
              running ? running->label : "?", coredumpPresent ? "true" : "false",
+             (unsigned long)flashSizeBytes, cpuFreqMhz, wifiRssiJson,
+             (unsigned long)pumpStackHighWaterMarkBytes, (unsigned)settings_store::kVersion,
              (long)ms.counter, (unsigned)ms.stallCount, (unsigned long)ms.totalCycleTimeMs,
              (unsigned long)avgCycleMs, (unsigned long)ms.longestCycleMs,
              (unsigned)ms.calibrationCount, (unsigned)ms.otaCount, (unsigned)ms.resetCount);

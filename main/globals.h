@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lvgl.h"
 #include "config.h"
 // The motion/endpoint/batch/profile state that used to be declared here as
@@ -18,6 +20,11 @@
 // requests go through motion_cmd:: instead - see main/motion/motion_cmd.h.
 extern volatile bool rebootRequested;
 extern uint32_t rebootRequestMs;
+
+// pump_task's handle, captured at creation (app_main.cpp) so web_server.cpp's
+// diagnostics endpoint can read its stack high-water mark. Never used to
+// suspend/delete/notify the task - purely a read-only diagnostics handle.
+extern TaskHandle_t g_pump_task_handle;
 
 // Log ring for the web UI's log panel + SSE "log" events.
 #include "log_ring.h"
