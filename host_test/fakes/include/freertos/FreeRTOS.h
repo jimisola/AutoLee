@@ -11,6 +11,10 @@
 
 typedef uint32_t TickType_t;
 
+// Opaque handle, same as the real freertos/task.h - only ever compared/passed
+// through on the host (main/globals.h's g_pump_task_handle), never dereferenced.
+typedef void *TaskHandle_t;
+
 // Same tick rate the firmware runs at (CONFIG_FREERTOS_HZ=100), so the
 // pdMS_TO_TICKS rounding behaviour motion.cpp's delay() compensates for is
 // reproduced faithfully on the host.
