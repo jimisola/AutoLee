@@ -78,7 +78,7 @@ The Arduino cooperative `loop()` became several FreeRTOS tasks (`pump_task`, LVG
 Not a blocker for the port itself, but must be decided before the press is used unattended on a shared network:
 - [x] **#1a:** setup AP secured — WPA2 + per-device key + join QR (`b31fe49`), replacing the previous open (`WIFI_AUTH_OPEN`) AP.
 - [x] **#1b:** Digest auth (`DIGEST_AUTH`) gates every state-changing route via a server-wide method-based middleware (`main/net/web_server.cpp:271-300`) — confirmed the middleware actually runs before dispatch, not just registration order (`lib/psychic_http/src/PsychicHttpServer.cpp:502-508`'s `runChain()` wraps `_process()`). Reads/SSE are intentionally open; `/save`+`/clear` are exempt only in unconfigured AP mode (WPA2 gates access there instead). Documented in `api/openapi.yaml:173-183`.
-- [x] **#1c (residual of #1b):** factory-default web password `"autolee"` (`main/config.h:166`) persisted until manually changed, and OTA accepted any well-formed image with no identity/signature check (secure boot off) — so one leaked/default password was enough to flash arbitrary firmware. Went with (a) over (b) Secure Boot v2 / signed OTA (provisioning-level, involves **irreversible eFuse burns** — not doing that casually on the dev board): the OTA image identity check (`esp_ota_get_partition_description()` project-name compare) landed first; the force-change-on-first-use half now also landed — while `defaultPassword` is true (`GET /api/v1/state`'s JSON / the SSE state event), `main/net/web_server.cpp`'s server-wide middleware refuses every state-changing route (run, calibrate, OTA upload, etc.) with 403 except `POST /api/v1/web_password` itself, and `main/net/index_html.h`'s dashboard shows a persistent "DEFAULT PASSWORD IN USE" banner until it's changed. Documented in `api/openapi.yaml`/`api/schemas/state.schema.json`.
+- [x] **#1c (residual of #1b):** factory-default web password `"autolee"` (`main/config.h:166`) persisted until manually changed, and OTA accepted any well-formed image with no identity/signature check (secure boot off) — so one leaked/default password was enough to flash arbitrary firmware. Went with (a) over (b) Secure Boot v2 / signed OTA (provisioning-level, involves **irreversible eFuse burns** — not doing that casually on the dev board): the OTA image identity check (`esp_ota_get_partition_description()` project-name compare) landed first; the force-change-on-first-use half now also landed — while `defaultPassword` is true (`GET /api/v1/state`'s JSON / the SSE state event), `main/net/web_server.cpp`'s server-wide middleware refuses every state-changing route (run, calibrate, OTA upload, etc.) with 403 except `POST /api/v1/system/web_password` itself, and `main/net/index_html.h`'s dashboard shows a persistent "DEFAULT PASSWORD IN USE" banner until it's changed. Documented in `api/openapi.yaml`/`api/schemas/state.schema.json`.
 - [ ] **#20:** WiFi PSK is stored plaintext in NVS with flash encryption off — recoverable from a flash dump. Enable NVS/flash encryption as part of the (b) provisioning bundle above.
 
 Note: PR #4 review finding #29 (squash the CI-debugging churn commits) is intentionally skipped — this branch will be **squash-merged**, which collapses the history anyway.
@@ -98,7 +98,7 @@ Deferred low-priority cleanups from the PR #4 review (not blocking):
   already derives from git — `esp_app_desc_t.version`, auto-populated at build time from
   `git describe --always --tags --dirty` (no `version.txt`, no `VERSION` in `project()`, no
   `PROJECT_VER`). The firmware reads it via `esp_app_get_description()->version` in the boot
-  banner, in `buildStateJSON()` (`/api/v1/state`) and in `/api/v1/info`, so all three report the
+  banner, in `buildStateJSON()` (`/api/v1/state`) and in `/api/v1/diagnostics/info`, so all three report the
   identical string. Verified on hardware: `"2.0.0"` with a bare `2.0.0` tag at HEAD, a commit hash
   (plus `-dirty`) otherwise. Two real bugs caught and fixed along the way: (1) the dashboard used
   to prepend its own `"v"` unconditionally, which double-prefixed a `v`-tagged release as
@@ -264,7 +264,7 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
     migration's test when the health-monitoring bump lands.
   - **Verified:** `idf.py build` clean; all 11 host suites pass; and on the real board a v1 blob
     written by the *previous* firmware (`runCurrentMa` set to 2800 mA over
-    `POST /api/v1/current`) was restored correctly after flashing the new build —
+    `POST /api/v1/motion/current`) was restored correctly after flashing the new build —
     `I (592) weblog: Settings: restored (cal=no up=0 dn=0 cur=2800mA prof=1 cnt=0)`, no migration
     line, no fallback.
 - [x] **Reset calibration/settings action** — a deliberate way to discard a stored calibration
@@ -298,7 +298,7 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
     pump_task then re-programs the hardware from the restored defaults (`tmc5160::rms_current()`
     on the display-shared SPI bus, `setActiveProfile()` for the stepper speed) and refreshes the
     UI. A non-IDLE request is logged and dropped.
-  - **API:** `POST /api/v1/action?do=reset_settings` (`main/net/web_server.cpp:654`), already
+  - **API:** `POST /api/v1/settings/reset` (`main/net/web_server.cpp:654`), already
     covered by the existing Digest-auth middleware like every other write; documented with the
     other action values in `api/openapi.yaml:104`.
   - **Web UI:** a "Reset Calibration" section at the end of the Configuration page
@@ -355,7 +355,7 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
     SG signal a jammed press produces. Bench verification of calibration/jam/homing on the real
     press (Phase 4) is still required — this suite catches sequencing regressions, it does not
     replace the bench session.
-- [x] Added `GET /api/v1/info` diagnostics endpoint (`main/net/web_server.cpp:444-472`):
+- [x] Added `GET /api/v1/diagnostics/info` diagnostics endpoint (`main/net/web_server.cpp:444-472`):
   `esp_app_get_description()` (version, idf_ver, compile date/time, ELF SHA-256 truncated to
   the first 8 bytes/16 hex chars — matching ESP-IDF's own boot-log short SHA), `esp_reset_reason()`
   mapped to a string via a local `resetReasonStr()` (`web_server.cpp:70-90`), free/min-free heap
@@ -365,14 +365,14 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
   (`esp_core_dump_image_check() == ESP_OK`). It's a GET, so — like every other read in this file —
   it's left open, not Digest-gated (matches the existing convention: only non-GET routes go through
   `s_auth`). Documented in `api/openapi.yaml`.
-- [x] Added `GET /api/v1/coredump` (`main/net/web_server.cpp:475-512`) — streams the raw `coredump`
+- [x] Added `GET /api/v1/diagnostics/coredump` (`main/net/web_server.cpp:475-512`) — streams the raw `coredump`
   partition (`partitions.csv`, verified end-to-end in Phase 6) as a chunked file download via
   PsychicHttp's `sendChunk`/`finishChunking`, reading through `esp_partition_read` in 512-byte
   chunks after `esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP)`.
   Presence/integrity is checked with `esp_core_dump_image_check()` (validates the stored checksum)
   before anything is streamed — returns a clean 404 instead of any bytes if no valid coredump is
   present, and the actual byte count comes from `esp_core_dump_image_get()`. **Digest-gated**,
-  unlike `/api/v1/info` and every other GET in this file — caught in review before commit: a
+  unlike `/api/v1/diagnostics/info` and every other GET in this file — caught in review before commit: a
   coredump is a raw RAM snapshot and can contain the WiFi or web password in plaintext (both are
   held in local C buffers at runtime — `wifi_mgr.cpp`'s `wifi_config.sta/ap.password`, `s_auth`'s
   stored password). The shared auth middleware (`web_server.cpp`'s `addMiddleware`) special-cases
@@ -405,6 +405,27 @@ The safety-critical, bench-blocking items from that review are tracked in Phase 
   `^main/stepper_motor_encoder\.[ch]$`, now `^main/drivers/stepper_motor_encoder\.[ch]$` matching
   where the file actually lives.
 - [x] Firmware version switched to the git-derived `esp_app_desc_t.version` (`git describe`), replacing the hand-maintained `FW_VERSION` macro that was previously bumped to `"2.0"` (see `#24` above).
+- [x] **REST API regrouped from flat `/api/v1/*` into nested paths** — `motion/*`, `settings/*`,
+  `wifi/*`, `diagnostics/*`, `system/*`; `GET /api/v1/state` and the SSE `/api/v1/events` stay
+  top-level. The old `POST /api/v1/action?do=<verb>` dispatcher is gone, split into four standalone
+  routes (`motion/calibrate`, `motion/return_home`, `motion/reset_counter`, and `settings/reset`,
+  which moved out of motion into its own group). Started as "just add OpenAPI `tags:` so Swagger
+  UI/Redoc group cleanly", but on rubber-ducking it, the two things that made a full regroup look
+  risky both turned out to be defensible: the `system` bucket (password/log/OTA are genuinely
+  device administration, not motion) and the `action` split (each verb is its own resource; the
+  `do=` query param was only ever a way to save URI handlers). Safe to do now because no release
+  has been cut — zero git tags, zero GitHub releases, so there is no external consumer to break.
+  The one real risk was `main/net/web_server.cpp`'s server-wide auth middleware, which does **exact
+  string equality** on two literal paths: the `#1c` write-gate exemption for the password endpoint
+  (get it wrong and a device on the factory-default password can never have it changed over the
+  network again) and the Digest-despite-being-a-GET gate on the coredump download (get it wrong and
+  the coredump silently becomes unauthenticated). Both are testable with two curls, and both were
+  verified on hardware after the rename. Changed in lockstep: `main/net/web_server.cpp`,
+  `main/net/index_html.h` (dashboard fetches, OTA target, coredump `href`; `doAct()` now takes a
+  path instead of a verb), `api/openapi.yaml` (paths + per-group `tags:`, `action` split into four
+  documented operations), `api/schemas/state.schema.json`, `lib/autolee_logic/state_json.h`,
+  `tools/mock_server.py` and the doc references. `api/asyncapi.yaml` is unaffected (only
+  `/api/v1/events`). `max_uri_handlers` raised 26 → 32 to cover the three extra routes.
 
 Explicitly deferred (rationale in `docs/review-2026-07-25.md`'s Copilot-comparison section, not
 repeated here): splitting `main/` into ESP-IDF `components/` (already native), `esp_event`

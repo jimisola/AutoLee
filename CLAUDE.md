@@ -100,7 +100,7 @@ every StallGuard SPI read** to prevent bus contention — preserve this when tou
   `esp_app_desc_t.version` at build time from `git describe --always --tags --dirty` (no
   `version.txt`, no `VERSION` in `project()`, no `PROJECT_VER`). The firmware reads it via
   `esp_app_get_description()->version` — the boot banner in `app_main.cpp`, `/api/v1/state`'s
-  `version`, and `/api/v1/info`'s `version` all report that same string. Never add a version
+  `version`, and `/api/v1/diagnostics/info`'s `version` all report that same string. Never add a version
   macro/constant to the source; releasing is just `git tag X.Y.Z && git push --tags` plus a GitHub
   Release. Tags are **bare** full three-part semver (`2.0.0`, never `2.0` or `v2.0.0` — semver.org:
   "v1.2.3 is not a semantic version") — the web UI adds a display-only `v` when rendering

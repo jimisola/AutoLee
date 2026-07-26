@@ -103,7 +103,7 @@ configurable.
 - The firmware version is **derived from git** — ESP-IDF populates `esp_app_desc_t.version` at
   build time from `git describe --always --tags --dirty`. The firmware reads it via
   `esp_app_get_description()->version`, so the serial boot banner, `/api/v1/state`'s `version`
-  and `/api/v1/info`'s `version` all report the same string (`2.0.0` at a tag, otherwise a commit
+  and `/api/v1/diagnostics/info`'s `version` all report the same string (`2.0.0` at a tag, otherwise a commit
   hash, `-dirty` when the tree is modified). There is no version constant in the source.
 - **Tags are bare, full three-part semver, `X.Y.Z`** — no `v` prefix, and never the `X.Y` shorthand
   (e.g. `2.0.0`, not `2.0` or `v2.0.0`). Semver.org's own FAQ is explicit that `v1.2.3` "is not a

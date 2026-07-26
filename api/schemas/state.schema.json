@@ -24,7 +24,7 @@
     "calibrated": { "type": "boolean" },
     "defaultPassword": {
       "type": "boolean",
-      "description": "True while the web/API password is still the factory default (\"autolee\"). While true, the firmware refuses every state-changing write except POST /api/v1/web_password with 403 - set a real password to clear this."
+      "description": "True while the web/API password is still the factory default (\"autolee\"). While true, the firmware refuses every state-changing write except POST /api/v1/system/web_password with 403 - set a real password to clear this."
     },
     "positionStale": {
       "type": "boolean",

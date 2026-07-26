@@ -23,7 +23,7 @@ struct DeviceState {
   const char *state;  // "IDLE" | "RUNNING" | "STOPPING" | "CALIBRATING" | "STALLED" | "HOMING"
   // True while the web/API password is still the factory default (see
   // main/config.h's WEB_AUTH_DEFAULT_PASS). While true, the firmware refuses
-  // every state-changing write except POST /api/v1/web_password itself -
+  // every state-changing write except POST /api/v1/system/web_password itself -
   // this is the "force-change-on-first-use" half of docs/PLAN.md's #1c;
   // the dashboard uses this flag to show a "set a password" banner instead
   // of relying on the operator having read the boot log.

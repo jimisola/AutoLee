@@ -46,17 +46,17 @@ LOG = ["mock server started"]
 def apply_action(path: str, q: dict) -> None:
     """Mutate the mock state just enough to see the UI react."""
     with STATE_LOCK:
-        if path == "/api/v1/toggle_run":
+        if path == "/api/v1/motion/toggle_run":
             STATE["state"] = "IDLE" if STATE["state"] == "RUNNING" else "RUNNING"
-        elif path == "/api/v1/profile" and "idx" in q:
+        elif path == "/api/v1/motion/profile" and "idx" in q:
             idx = int(q["idx"][0])
             STATE["profileIdx"] = idx
             STATE["profileName"] = STATE["profiles"][idx]["name"]
             STATE["speed"] = STATE["profiles"][idx]["hz"]
             STATE["sgTrip"] = STATE["profiles"][idx]["sg"]
-        elif path == "/api/v1/current" and "ma" in q:
+        elif path == "/api/v1/motion/current" and "ma" in q:
             STATE["currentMa"] = int(q["ma"][0])
-        elif path == "/api/v1/batch":
+        elif path == "/api/v1/motion/batch":
             if q.get("action", [""])[0] == "start":
                 STATE["batchActive"] = True
                 STATE["batchCount"] = 0
@@ -64,7 +64,7 @@ def apply_action(path: str, q: dict) -> None:
                 STATE["batchActive"] = False
             elif "delta" in q:
                 STATE["batchTarget"] = max(0, STATE["batchTarget"] + int(q["delta"][0]))
-        elif path == "/api/v1/action" and q.get("do", [""])[0] == "reset_counter":
+        elif path == "/api/v1/motion/reset_counter":
             STATE["counter"] = 0
         LOG.append(f"POST {path} {dict((k, v[0]) for k, v in q.items())}")
 

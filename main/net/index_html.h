@@ -80,11 +80,11 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <div class="jam-alert" id="jamAlert">
 <div style="color:#FF4444;font-weight:700;margin-bottom:4px" id="jamTitle">&#9888; JAM DETECTED</div>
 <div style="color:#aaa;font-size:.8em;margin-bottom:8px" id="jamMsg">Motor stalled and backed off.</div>
-<button class="btn btn-blue" onclick="doAct('return_home')" id="bh">Return Home</button>
+<button class="btn btn-blue" onclick="doAct('/api/v1/motion/return_home')" id="bh">Return Home</button>
 </div>
 <div class="row ctr" style="margin-top:10px;gap:8px">
-<button class="btn btn-dark" onclick="doAct('calibrate')" id="bc">Calibrate</button>
-<button class="btn btn-red" onclick="doAct('reset_counter')">Reset Counter</button></div>
+<button class="btn btn-dark" onclick="doAct('/api/v1/motion/calibrate')" id="bc">Calibrate</button>
+<button class="btn btn-red" onclick="doAct('/api/v1/motion/reset_counter')">Reset Counter</button></div>
 <hr>
 <h2 style="margin-top:8px">Batch Run</h2>
 <div class="sr"><span class="l">Target</span><span class="v" id="btv">OFF</span></div>
@@ -201,7 +201,7 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <div class="sec">
 <h2>Log</h2>
 <div class="log" id="logBox"></div>
-<button class="btn btn-dark btn-sm" onclick="document.getElementById('logBox').textContent='';fetch('/api/v1/log_clear',{method:'POST'})" style="margin-top:8px;width:100%">Clear Log</button>
+<button class="btn btn-dark btn-sm" onclick="document.getElementById('logBox').textContent='';fetch('/api/v1/system/log_clear',{method:'POST'})" style="margin-top:8px;width:100%">Clear Log</button>
 </div>
 
 <!-- NAV FOOTER -->
@@ -225,7 +225,7 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <input type="file" id="fw" accept=".bin" style="display:none" onchange="upFW(this.files[0])">
 <div class="pbar" id="pb"><div class="fill" id="pf"></div></div>
 <div id="otaS"></div>
-<a class="btn btn-dark btn-sm" href="/api/v1/coredump" style="display:block;margin-top:10px;text-align:center;text-decoration:none">Download Core Dump</a>
+<a class="btn btn-dark btn-sm" href="/api/v1/diagnostics/coredump" style="display:block;margin-top:10px;text-align:center;text-decoration:none">Download Core Dump</a>
 </div>
 
 <!-- NAV FOOTER -->
@@ -404,31 +404,31 @@ function upd(d){
   }else{['ru','rd','rt','eu','ed'].forEach(i=>document.getElementById(i).textContent='-')}
 }
 
-function toggleRun(){fetch('/api/v1/toggle_run',{method:'POST'})}
-function setSg(p){const v=parseInt(document.getElementById('sgIn'+p).value)||0;fetch('/api/v1/sg_trip?profile='+p+'&value='+v,{method:'POST'})}
-function setWz(d){fetch('/api/v1/work_zone?delta='+d,{method:'POST'})}
-function setBatch(d){fetch('/api/v1/batch?delta='+d,{method:'POST'})}
-function doBatch(a){fetch('/api/v1/batch?action='+a,{method:'POST'})}
-function setProfile(i){fetch('/api/v1/profile?idx='+i,{method:'POST'})}
-function setCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none';fetch('/api/v1/current?ma='+v,{method:'POST'})}
-function adj(w,d){fetch('/api/v1/endpoint?which='+w+'&delta='+d,{method:'POST'})}
-function doAct(a){fetch('/api/v1/action?do='+a,{method:'POST'})}
+function toggleRun(){fetch('/api/v1/motion/toggle_run',{method:'POST'})}
+function setSg(p){const v=parseInt(document.getElementById('sgIn'+p).value)||0;fetch('/api/v1/motion/sg_trip?profile='+p+'&value='+v,{method:'POST'})}
+function setWz(d){fetch('/api/v1/motion/work_zone?delta='+d,{method:'POST'})}
+function setBatch(d){fetch('/api/v1/motion/batch?delta='+d,{method:'POST'})}
+function doBatch(a){fetch('/api/v1/motion/batch?action='+a,{method:'POST'})}
+function setProfile(i){fetch('/api/v1/motion/profile?idx='+i,{method:'POST'})}
+function setCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none';fetch('/api/v1/motion/current?ma='+v,{method:'POST'})}
+function adj(w,d){fetch('/api/v1/motion/endpoint?which='+w+'&delta='+d,{method:'POST'})}
+function doAct(p){fetch(p,{method:'POST'})}
 function resetSettings(){
   if(!confirm('Discard the stored calibration and all tuning, and restore factory defaults?\n\nThe press will be UNCALIBRATED and must be recalibrated before it can run. WiFi and the web password are not affected.'))return;
-  doAct('reset_settings')}
+  doAct('/api/v1/settings/reset')}
 function saveWifi(){
   const s=document.getElementById('ns').value,p=document.getElementById('np').value;
   if(!s){alert('SSID required');return}
-  fetch('/api/v1/wifi?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p),{method:'POST'})
+  fetch('/api/v1/wifi/save?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p),{method:'POST'})
   .then(()=>{alert('Saved! Rebooting...');setTimeout(()=>location.reload(),5000)})}
 function resetWifi(){
   if(!confirm('Clear saved WiFi credentials and reboot into setup mode?'))return;
-  fetch('/api/v1/wifi_reset',{method:'POST'})
+  fetch('/api/v1/wifi/reset',{method:'POST'})
   .then(()=>{alert('WiFi cleared! Rebooting into setup mode...');setTimeout(()=>location.reload(),5000)})}
 function saveWebPassword(){
   const p=document.getElementById('wpNew').value,m=document.getElementById('wpMsg');
   if(!p){m.textContent='Enter a new password.';m.style.color='#FF4444';return}
-  fetch('/api/v1/web_password?pass='+encodeURIComponent(p),{method:'POST'})
+  fetch('/api/v1/system/web_password?pass='+encodeURIComponent(p),{method:'POST'})
   .then(r=>{if(r.ok){document.getElementById('wpNew').value='';m.style.color='#00FF00';
     m.textContent='Password changed. The browser will ask for it on your next action.'}
     else{m.style.color='#FF4444';r.text().then(t=>m.textContent='Failed: '+t)}})
@@ -439,7 +439,7 @@ function upFW(f){
   const ua=document.getElementById('ua'),pb=document.getElementById('pb'),pf=document.getElementById('pf'),st=document.getElementById('otaS');
   ua.classList.add('on');ua.textContent=f.name;pb.style.display='block';pf.style.width='0%';
   st.textContent='Uploading...';st.style.color='#888';
-  const x=new XMLHttpRequest();x.open('POST','/api/v1/ota');
+  const x=new XMLHttpRequest();x.open('POST','/api/v1/system/ota');
   x.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);pf.style.width=p+'%';st.textContent='Uploading... '+p+'%'}};
   x.onload=()=>{if(x.status===200){pf.style.width='100%';st.textContent='Success! Rebooting...';st.style.color='#00FF00';setTimeout(()=>location.reload(),5000)}
   else{st.textContent='Error: '+x.responseText;st.style.color='#FF4444'}};

@@ -21,7 +21,7 @@ CONFIG_HTTPD_WS_SUPPORT=y
 # nonce, response hash, qop, nc, cnonce) is often 300-400 bytes, and a real
 # browser adds its own User-Agent/Accept/Sec-Fetch-*/etc. on top - together
 # routinely over 512. Reproduced on hardware as a raw "Header fields are too
-# long" rejection (HTTP 431) on /api/v1/coredump once it became Digest-gated;
+# long" rejection (HTTP 431) on /api/v1/diagnostics/coredump once it became Digest-gated;
 # curl-based auth testing never hit this because curl sends much leaner
 # headers. Applies to every Digest-gated route, not just this one.
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048

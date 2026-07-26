@@ -43,7 +43,7 @@ static const esp_partition_t *s_ota_partition = nullptr;
 static AuthenticationMiddleware s_auth;
 
 // True while the effective web password is still WEB_AUTH_DEFAULT_PASS. Set at
-// boot from loadWebPassword() and kept in sync by the /api/v1/web_password
+// boot from loadWebPassword() and kept in sync by the /api/v1/system/web_password
 // handler. Read by buildStateJSON() (the "defaultPassword" field) and by the
 // write-gate middleware below - see the #1c comment near s_auth.addMiddleware
 // for why every state-changing route (bar the password endpoint itself) is
@@ -75,7 +75,7 @@ static inline uint32_t millis() {
 }
 
 // ==========================================================================
-//  DIAGNOSTICS (/api/v1/info, /api/v1/coredump)
+//  DIAGNOSTICS (/api/v1/diagnostics/info, /api/v1/diagnostics/coredump)
 // ==========================================================================
 static const char *resetReasonStr(esp_reset_reason_t r) {
   switch (r) {
@@ -124,7 +124,7 @@ static std::string buildStateJSON() {
                                                       : "IDLE";
 
   autolee::DeviceState st{};
-  // Same git-derived string /api/v1/info reports (esp_app_desc_t.version).
+  // Same git-derived string /api/v1/diagnostics/info reports (esp_app_desc_t.version).
   st.version = esp_app_get_description()->version;
   st.state = stateStr;
   st.counter = ms.counter;
@@ -328,7 +328,11 @@ void otaWatchdogTick() {
 
 // ==========================================================================
 void setupWebServer() {
-  server.config.max_uri_handlers = 26;
+  // Raised when the flat /api/v1/* routes were regrouped into nested paths and
+  // the old /api/v1/action dispatcher was split into four standalone routes
+  // (+3 handlers). Must stay above the real route count including the seven
+  // captive-portal probe handlers registered in AP mode.
+  server.config.max_uri_handlers = 32;
 
   // Default httpd config refuses a new connection outright once
   // max_open_sockets is hit, rather than recycling the oldest one. On the
@@ -361,7 +365,7 @@ void setupWebServer() {
   // digest challenge/nonce handling stays the library's, not hand-rolled.
   server.addMiddleware(
       [](PsychicRequest *req, PsychicResponse *res, PsychicMiddlewareNext next) -> esp_err_t {
-        // GET is open by default (dashboard, /api/v1/state, /api/v1/info, SSE -
+        // GET is open by default (dashboard, /api/v1/state, /api/v1/diagnostics/info, SSE -
         // none of it is more sensitive than what's already on-screen). Coredump
         // is the one GET exception: a crash dump is a raw RAM snapshot and can
         // contain the WiFi password or web password in plaintext (both are held
@@ -370,7 +374,7 @@ void setupWebServer() {
         // it's gated like a write despite being a read.
         std::string uri = req->uri();
         uri = uri.substr(0, uri.find('?'));  // drop any query string
-        if (req->method() == HTTP_GET && uri != "/api/v1/coredump") return next();
+        if (req->method() == HTTP_GET && uri != "/api/v1/diagnostics/coredump") return next();
         // Captive-portal setup endpoints are exempt while in AP-setup mode: a
         // fresh user doesn't have the (digest) web password, and WPA2 on the AP
         // is what gates access there instead. Only /save and /clear, and only
@@ -381,7 +385,7 @@ void setupWebServer() {
         // #1c (docs/PLAN.md) "force-change-on-first-use": while the password
         // is still the factory default, every state-changing route is refused
         // with a friendly 403 telling the caller to set a real password first
-        // - except /api/v1/web_password itself, which must stay reachable or
+        // - except /api/v1/system/web_password itself, which must stay reachable or
         // the operator could never get out of this state. This runs after the
         // digest challenge (wrapped as `next` below) so it only ever applies
         // to a caller who already authenticated with the (known-public)
@@ -389,13 +393,17 @@ void setupWebServer() {
         // gate on top of it: a leaked/default password otherwise still lets
         // the machine run, calibrate and accept OTA uploads forever, per the
         // #1c writeup.
-        if (uri == "/api/v1/web_password") return s_auth.run(req, res, next);
+        // NOTE: this literal MUST stay in lockstep with the route registration
+        // below. If they ever diverge, the escape hatch stops matching and a
+        // device on the factory-default password can never have it changed
+        // over the network again (recoverable only over USB/serial).
+        if (uri == "/api/v1/system/web_password") return s_auth.run(req, res, next);
         PsychicMiddlewareNext gated = [next, res]() -> esp_err_t {
           if (s_default_password_active) {
             return res->send(403, "application/json",
                               "{\"error\":\"default_password\",\"message\":\"Web password is "
                               "still the factory default - set a real one via POST "
-                              "/api/v1/web_password before using this control.\"}");
+                              "/api/v1/system/web_password before using this control.\"}");
           }
           return next();
         };
@@ -481,7 +489,7 @@ void setupWebServer() {
   // slot and whether a coredump is waiting to be pulled. A GET, so - like
   // every other read in this file - it's left open (no Digest challenge);
   // see the middleware comment above for the read/write auth split.
-  server.on("/api/v1/info", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/diagnostics/info", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
     const esp_app_desc_t *desc = esp_app_get_description();
     const esp_partition_t *running = esp_ota_get_running_partition();
 
@@ -514,7 +522,7 @@ void setupWebServer() {
   // garbage. Unlike every other GET in this file, this one IS auth-gated (see
   // the middleware above) - a coredump is a raw RAM snapshot and can contain
   // the WiFi/web password in plaintext.
-  server.on("/api/v1/coredump", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) -> esp_err_t {
+  server.on("/api/v1/diagnostics/coredump", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) -> esp_err_t {
     if (esp_core_dump_image_check() != ESP_OK) {
       return res->send(404, "text/plain", "no core dump present");
     }
@@ -553,13 +561,13 @@ void setupWebServer() {
     return err;
   });
 
-  server.on("/api/v1/toggle_run", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/motion/toggle_run", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     // Deferred to pump_task: touches the stepper, TMC5160 SPI and LVGL.
     motion_cmd::requestToggleRun();
     return res->send(200, "text/plain", "ok");
   });
 
-  server.on("/api/v1/profile", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/motion/profile", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("idx")) {
       uint8_t idx = (uint8_t)atoi(req->getParam("idx", "0"));
       // Deferred: setActiveProfile() drives the stepper and refreshes LVGL.
@@ -568,7 +576,7 @@ void setupWebServer() {
     return res->send(200, "text/plain", "ok");
   });
 
-  server.on("/api/v1/current", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/motion/current", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("ma")) {
       // Deferred: rms_current() is an SPI write that would collide with
       // pump_task's StallGuard reads on the shared display/TMC bus.
@@ -578,7 +586,7 @@ void setupWebServer() {
     return res->send(200, "text/plain", "ok");
   });
 
-  server.on("/api/v1/endpoint", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/motion/endpoint", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("which") && req->hasParam("delta") &&
         motion_state::snapshot().endpointsCalibrated) {
       std::string w = req->getParam("which", "");
@@ -599,7 +607,7 @@ void setupWebServer() {
     return res->send(200, "text/plain", "ok");
   });
 
-  server.on("/api/v1/sg_trip", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/motion/sg_trip", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     const MotionState ms = motion_state::snapshot();
     uint8_t tgt = ms.activeProfile;
     if (req->hasParam("profile")) {
@@ -628,7 +636,7 @@ void setupWebServer() {
     return res->send(200, "text/plain", "ok");
   });
 
-  server.on("/api/v1/work_zone", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/motion/work_zone", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("delta")) {
       const int32_t d = atoi(req->getParam("delta", "0"));
       {
@@ -643,7 +651,7 @@ void setupWebServer() {
     return res->send(200, "text/plain", "ok");
   });
 
-  server.on("/api/v1/batch", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/motion/batch", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("delta")) {
       const int32_t d = atoi(req->getParam("delta", "0"));
       {
@@ -673,27 +681,38 @@ void setupWebServer() {
     return res->send(200, "text/plain", "ok");
   });
 
-  server.on("/api/v1/action", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    if (req->hasParam("do")) {
-      std::string action = req->getParam("do", "");
-      if (action == "calibrate") {
-        motion_cmd::requestCalibrate();
-      } else if (action == "return_home") {
-        motion_cmd::requestReturnHome();
-      } else if (action == "reset_counter") {
-        motion_state::Guard g;
-        g_motion.counter = 0;
-      } else if (action == "reset_settings") {
-        // Deferred: erases the calibration/tuning NVS blob and re-programs the
-        // TMC5160 over the display's SPI bus - pump_task work, not HTTP-task
-        // work. Gated on IDLE at execution time (motion_cmd.cpp), not here.
-        motion_cmd::requestResetSettings();
-      }
-    }
+  // The four routes below were split out of the old single
+  // POST /api/v1/action?do=<verb> dispatcher when the flat API was regrouped
+  // into nested paths - same underlying motion_cmd calls, one route each, no
+  // query parameter.
+  server.on("/api/v1/motion/calibrate", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    motion_cmd::requestCalibrate();
     return res->send(200, "text/plain", "ok");
   });
 
-  server.on("/api/v1/wifi", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/motion/return_home", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    motion_cmd::requestReturnHome();
+    return res->send(200, "text/plain", "ok");
+  });
+
+  server.on("/api/v1/motion/reset_counter", HTTP_POST,
+            [](PsychicRequest *req, PsychicResponse *res) {
+              {
+                motion_state::Guard g;
+                g_motion.counter = 0;
+              }
+              return res->send(200, "text/plain", "ok");
+            });
+
+  server.on("/api/v1/settings/reset", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    // Deferred: erases the calibration/tuning NVS blob and re-programs the
+    // TMC5160 over the display's SPI bus - pump_task work, not HTTP-task
+    // work. Gated on IDLE at execution time (motion_cmd.cpp), not here.
+    motion_cmd::requestResetSettings();
+    return res->send(200, "text/plain", "ok");
+  });
+
+  server.on("/api/v1/wifi/save", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     if (req->hasParam("ssid")) {
       std::string ssid = req->getParam("ssid", "");
       std::string pass = req->getParam("pass", "");
@@ -705,14 +724,14 @@ void setupWebServer() {
     return res->send(400, "text/plain", "ssid required");
   });
 
-  server.on("/api/v1/wifi_reset", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/wifi/reset", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     wifi_mgr::clearCredentials();
     rebootRequested = true;
     rebootRequestMs = millis();
     return res->send(200, "text/plain", "cleared");
   });
 
-  server.on("/api/v1/log_clear", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/system/log_clear", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     // Deferred: reassigning the ring here would race webLog()'s push from
     // pump_task / the LVGL task.
     motion_cmd::requestLogClear();
@@ -722,7 +741,7 @@ void setupWebServer() {
   // Change the web password. Itself auth-gated (it's a POST), so only someone
   // who already knows the current password can set a new one. Takes effect
   // immediately - no reboot - since the middleware reads from s_auth.
-  server.on("/api/v1/web_password", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  server.on("/api/v1/system/web_password", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     std::string pass = req->getParam("pass", "");
     if (pass.empty()) return res->send(400, "text/plain", "password required");
     if (pass.length() > WEB_AUTH_PASS_MAX) return res->send(400, "text/plain", "password too long");
@@ -744,7 +763,7 @@ void setupWebServer() {
   // `final` branch, since that's where success/failure is known.
   static PsychicUploadHandler ota_upload;
   ota_upload.onUpload(handleOtaUpload);
-  server.on("/api/v1/ota", HTTP_POST, &ota_upload);
+  server.on("/api/v1/system/ota", HTTP_POST, &ota_upload);
 
   // Captive portal probe endpoints redirect to root
   if (wifi_mgr::isApMode()) {
