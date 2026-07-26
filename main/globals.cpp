@@ -1,9 +1,14 @@
 #include <cstdarg>
 #include <cstdio>
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "config.h"
 #include "globals.h"
+
+static inline uint32_t millis() {
+  return (uint32_t)(esp_timer_get_time() / 1000);
+}
 
 // The motion/endpoint/batch/profile state moved to motion_state.cpp's
 // `g_motion` (one struct behind one spinlock) - see motion_state.h.
@@ -43,12 +48,32 @@ lv_obj_t *batch_scr = nullptr;
 lv_obj_t *lbl_batch_val = nullptr;
 lv_obj_t *lbl_batch_remain = nullptr;
 
-void webLog(const char *fmt, ...) {
+static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
+  const uint32_t ms = millis();
+  const unsigned h = (ms / 3600000u) % 100u;  // wraps at 100h, plenty for uptime display
+  const unsigned m = (ms / 60000u) % 60u;
+  const unsigned s = (ms / 1000u) % 60u;
+  const char levelChar = level == LogLevel::Error ? 'E' : level == LogLevel::Warn ? 'W' : 'I';
+
   char line[LOG_LINE_LEN];
-  va_list args;
-  va_start(args, fmt);
-  vsnprintf(line, sizeof(line), fmt, args);
-  va_end(args);
+  const int prefixLen = snprintf(line, sizeof(line), "%02u:%02u:%02u %c ", h, m, s, levelChar);
+  if (prefixLen > 0 && (size_t)prefixLen < sizeof(line)) {
+    vsnprintf(line + prefixLen, sizeof(line) - (size_t)prefixLen, fmt, args);
+  }
   g_log.push(line);
   ESP_LOGI("weblog", "%s", line);
+}
+
+void webLog(const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  webLogImpl(LogLevel::Info, fmt, args);
+  va_end(args);
+}
+
+void webLogLevel(LogLevel level, const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  webLogImpl(level, fmt, args);
+  va_end(args);
 }

@@ -26,11 +26,18 @@ extern uint32_t rebootRequestMs;
 // suspend/delete/notify the task - purely a read-only diagnostics handle.
 extern TaskHandle_t g_pump_task_handle;
 
-// Log ring for the web UI's log panel + SSE "log" events.
+// Log ring for the web UI's log panel + SSE "log" events. Every pushed line
+// is prefixed "HH:MM:SS L " (uptime since boot - the board has no RTC/NTP -
+// and a single-char level: I/W/E) so the dashboard's Log page can show and
+// filter by both. webLog() is the plain call sites keep using (Info level);
+// webLogLevel() is for the handful of sites that are actually a warning or
+// an error (jam, calibration/homing failure, NVS errors, security notices).
 #include "log_ring.h"
 extern autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
 extern uint32_t logSentSerial;  // last serial# broadcast over SSE
+enum class LogLevel : uint8_t { Info, Warn, Error };
 void webLog(const char *fmt, ...);
+void webLogLevel(LogLevel level, const char *fmt, ...);
 
 // LVGL screens + widgets (defined in ui_touch.cpp; single definition site
 // matches the rest of this file since they're shared across ui_touch.cpp,

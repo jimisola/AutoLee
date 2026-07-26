@@ -44,7 +44,9 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 .pbar{width:100%;height:5px;background:#333;border-radius:3px;margin-top:6px;overflow:hidden;display:none}
 .pbar .fill{height:100%;background:var(--accent);width:0%;transition:width .3s;border-radius:3px}
 #otaS{font-size:.8em;margin-top:4px;min-height:1em}
-.log{background:#000;border-radius:8px;padding:8px;font-family:'Courier New',monospace;font-size:.7em;color:#0f0;height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.log{background:#000;border-radius:8px;padding:8px;font-family:'Courier New',monospace;font-size:.7em;color:#0f0;height:400px;overflow-y:auto}
+.log .ll{white-space:pre-wrap;word-break:break-all}
+.log .ll-W{color:#FFD37C}.log .ll-E{color:#FF6666}
 .page{display:none}.page.active{display:block}
 .nav-footer{margin-top:16px;padding:14px 0;text-align:center;border-top:1px solid var(--border)}
 .nav-footer a{color:var(--accent);text-decoration:none;font-size:.85em;font-weight:600;margin:0 10px;cursor:pointer}
@@ -110,11 +112,12 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
-<a onclick="showPage('pageConfig')">Configuration</a>
-<a onclick="showPage('pageLog')">Log</a>
-<a onclick="showPage('pageFW')">Firmware</a>
-<a onclick="showPage('pageWifi')">WiFi</a>
-<a onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
+<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageMain -->
@@ -187,11 +190,12 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
-<a onclick="showPage('pageMain')">Main</a>
-<a onclick="showPage('pageLog')">Log</a>
-<a onclick="showPage('pageFW')">Firmware</a>
-<a onclick="showPage('pageWifi')">WiFi</a>
-<a onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
+<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageConfig -->
@@ -202,17 +206,24 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 
 <div class="sec">
 <h2>Log</h2>
+<div class="row ctr" id="logFilter" style="gap:6px;margin-bottom:8px">
+<button class="btn btn-blue btn-sm" data-lvl="" onclick="setLogFilter('')">All</button>
+<button class="btn btn-dark btn-sm" data-lvl="I" onclick="setLogFilter('I')">Info</button>
+<button class="btn btn-dark btn-sm" data-lvl="W" onclick="setLogFilter('W')">Warn</button>
+<button class="btn btn-dark btn-sm" data-lvl="E" onclick="setLogFilter('E')">Error</button>
+</div>
 <div class="log" id="logBox"></div>
-<button class="btn btn-dark btn-sm" onclick="document.getElementById('logBox').textContent='';fetch('/api/v1/system/log_clear',{method:'POST'})" style="margin-top:8px;width:100%">Clear Log</button>
+<button class="btn btn-dark btn-sm" onclick="clearLog()" style="margin-top:8px;width:100%">Clear Log</button>
 </div>
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
-<a onclick="showPage('pageMain')">Main</a>
-<a onclick="showPage('pageConfig')">Configuration</a>
-<a onclick="showPage('pageFW')">Firmware</a>
-<a onclick="showPage('pageWifi')">WiFi</a>
-<a onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
+<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageLog -->
@@ -233,11 +244,12 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
-<a onclick="showPage('pageMain')">Main</a>
-<a onclick="showPage('pageConfig')">Configuration</a>
-<a onclick="showPage('pageLog')">Log</a>
-<a onclick="showPage('pageWifi')">WiFi</a>
-<a onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
+<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageFW -->
@@ -273,11 +285,12 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
-<a onclick="showPage('pageMain')">Main</a>
-<a onclick="showPage('pageConfig')">Configuration</a>
-<a onclick="showPage('pageLog')">Log</a>
-<a onclick="showPage('pageFW')">Firmware</a>
-<a onclick="showPage('pageDiag')">Diag</a>
+<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
+<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageWifi -->
@@ -325,11 +338,12 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
-<a onclick="showPage('pageMain')">Main</a>
-<a onclick="showPage('pageConfig')">Configuration</a>
-<a onclick="showPage('pageLog')">Log</a>
-<a onclick="showPage('pageFW')">Firmware</a>
-<a onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
+<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
+<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
+<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
+<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
 </div>
 
 </div><!-- /pageDiag -->
@@ -339,16 +353,47 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <script>
 let es;
 function sse(){es=new EventSource('/api/v1/events');es.onmessage=e=>{try{upd(JSON.parse(e.data))}catch(x){}};
-es.addEventListener('log',e=>{try{const d=JSON.parse(e.data);const lb=document.getElementById('logBox');lb.textContent+=d.log.join('\n')+'\n';lb.scrollTop=lb.scrollHeight}catch(x){}});
+es.addEventListener('log',e=>{try{const d=JSON.parse(e.data);addLogLines(d.log)}catch(x){}});
 es.onerror=()=>{es.close();setTimeout(sse,3000)}}
 sse();
+
+// Lines are pre-tagged by the firmware as "HH:MM:SS L message" (L = I/W/E) -
+// kept client-side (capped to match the firmware's own ring size) so the
+// level filter can re-render without losing history the DOM already dropped.
+const LOG_MAX_LINES=500;
+let logLines=[],logFilter='';
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function lineLevel(l){const m=/^\d\d:\d\d:\d\d ([IWE]) /.exec(l);return m?m[1]:'I'}
+function addLogLines(lines){
+  logLines.push(...lines);
+  if(logLines.length>LOG_MAX_LINES)logLines=logLines.slice(logLines.length-LOG_MAX_LINES);
+  renderLog();
+}
+function renderLog(){
+  const lb=document.getElementById('logBox');
+  const shown=logFilter?logLines.filter(l=>lineLevel(l)===logFilter):logLines;
+  lb.innerHTML=shown.map(l=>'<div class="ll ll-'+lineLevel(l)+'">'+escHtml(l)+'</div>').join('');
+  lb.scrollTop=lb.scrollHeight;
+}
+function setLogFilter(lvl){
+  logFilter=lvl;
+  document.querySelectorAll('#logFilter .btn').forEach(b=>b.className='btn btn-sm '+(b.dataset.lvl===lvl?'btn-blue':'btn-dark'));
+  renderLog();
+}
+function clearLog(){
+  logLines=[];
+  renderLog();
+  fetch('/api/v1/system/log_clear',{method:'POST'});
+}
 
 function showPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page===id));
   window.scrollTo(0,0);
   if(id==='pageDiag')loadDiag();
 }
+document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page==='pageMain'));
 
 function fmtMs(ms){
   if(ms<1000)return ms+'ms';

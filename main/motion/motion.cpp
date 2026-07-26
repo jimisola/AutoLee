@@ -153,7 +153,7 @@ void startRunBetweenEndpoints() {
   // calibration) re-zeroes against the UP hard stop. Bail out before touching
   // the TMC or the stepper, like the rejected-transition path below.
   if (g_motion.positionReferenceStale) {
-    webLog("Start refused: position reference unconfirmed - return home first");
+    webLogLevel(LogLevel::Warn, "Start refused: position reference unconfirmed - return home first");
     return;
   }
   const uint32_t now = millis();
@@ -345,12 +345,12 @@ void handleMotion() {
       }
 
       if (sg > RUN_SG_TRIP) {
-        webLog("SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, RUN_SG_TRIP,
-               g_motion.runSGHighCount, pos, (unsigned long)sinceChange);
+        webLogLevel(LogLevel::Warn, "SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, RUN_SG_TRIP,
+                    g_motion.runSGHighCount, pos, (unsigned long)sinceChange);
 
         if (jam) {
-          webLog("JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg, RUN_SG_TRIP, pos,
-                 g_motion.currentTarget, g_motion.runSGHighCount);
+          webLogLevel(LogLevel::Error, "JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg, RUN_SG_TRIP,
+                      pos, g_motion.currentTarget, g_motion.runSGHighCount);
 
           stepper::forceStop();
           fas_wait_for_stop();
@@ -380,7 +380,8 @@ void handleMotion() {
             // fallback can only ever be more conservative than the table.
             if (!latched) g_motion.runState = STALLED;
           }
-          if (!latched) webLog("BUG: Jam event rejected by FSM - latched STALLED anyway");
+          if (!latched)
+            webLogLevel(LogLevel::Error, "BUG: Jam event rejected by FSM - latched STALLED anyway");
           resetStallCounter();
           showJamScreen();
         }
@@ -459,7 +460,7 @@ void safeCreepHome() {
     stepper::moveTo(g_motion.endpointUp);
     fas_wait_for_stop();
   } else {
-    webLog("Creep home: FAILED to find stop!");
+    webLogLevel(LogLevel::Error, "Creep home: FAILED to find stop!");
   }
 
   tmc5160::rms_current(g_motion.runCurrentMa);
@@ -594,7 +595,7 @@ bool return_home_up_safe() {
     const long pos = stepper::getCurrentPosition();
 
     if ((now - start_ms) > HOME_TIMEOUT_MS) {
-      webLog("Home: TIMEOUT");
+      webLogLevel(LogLevel::Error, "Home: TIMEOUT");
       stepper::forceStop();
       fas_wait_for_stop();
       return false;
@@ -608,14 +609,14 @@ bool return_home_up_safe() {
     if (time_moving >= HOME_MIN_MS && moved >= HOME_MIN_MOVE) {
       const uint16_t sg = read_sg();
       if (confirm_count.feed(sg <= HOME_SG_TRIP)) {
-        webLog("Home: stall @%ld retry %d", pos, retries);
+        webLogLevel(LogLevel::Warn, "Home: stall @%ld retry %d", pos, retries);
         stepper::forceStop();
         fas_wait_for_stop();
         stepper::move(+HOME_RELEASE_STEPS);
         fas_wait_for_stop();
 
         if (retries >= HOME_MAX_RETRIES) {
-          webLog("Home: max retries");
+          webLogLevel(LogLevel::Error, "Home: max retries");
           return false;
         }
         retries++;
@@ -678,7 +679,7 @@ bool calibrateEndpointsSensorless() {
 
   long hit_up = 0;
   if (!move_until_stall(-1, hit_up)) {
-    webLog("Calibration: FAILED (no UP stop found)");
+    webLogLevel(LogLevel::Error, "Calibration: FAILED (no UP stop found)");
     tmc5160::rms_current(g_motion.runCurrentMa);
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);
@@ -697,7 +698,7 @@ bool calibrateEndpointsSensorless() {
 
   long hit_down = 0;
   if (!move_until_stall(+1, hit_down)) {
-    webLog("Calibration: FAILED (no DOWN stop found)");
+    webLogLevel(LogLevel::Error, "Calibration: FAILED (no DOWN stop found)");
     tmc5160::rms_current(g_motion.runCurrentMa);
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);

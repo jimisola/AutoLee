@@ -140,21 +140,21 @@ void applyCompiledDefaults() {
 
 void fallbackToDefaults(const char *why) {
   applyCompiledDefaults();
-  webLog("Settings: %s - using defaults, calibration cleared", why);
+  webLogLevel(LogLevel::Warn, "Settings: %s - using defaults, calibration cleared", why);
 }
 
 bool writeBlob(const Persisted &p) {
   nvs_handle_t h;
   esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &h);
   if (err != ESP_OK) {
-    webLog("Settings: NVS open failed (%d)", (int)err);
+    webLogLevel(LogLevel::Error, "Settings: NVS open failed (%d)", (int)err);
     return false;
   }
   err = nvs_set_blob(h, kKey, &p, sizeof(p));
   if (err == ESP_OK) err = nvs_commit(h);
   nvs_close(h);
   if (err != ESP_OK) {
-    webLog("Settings: NVS write failed (%d)", (int)err);
+    webLogLevel(LogLevel::Error, "Settings: NVS write failed (%d)", (int)err);
     return false;
   }
   return true;
@@ -167,7 +167,7 @@ bool eraseBlob() {
   nvs_handle_t h;
   esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &h);
   if (err != ESP_OK) {
-    webLog("Settings: NVS open failed (%d)", (int)err);
+    webLogLevel(LogLevel::Error, "Settings: NVS open failed (%d)", (int)err);
     return false;
   }
   err = nvs_erase_key(h, kKey);
@@ -175,7 +175,7 @@ bool eraseBlob() {
   if (err == ESP_OK) err = nvs_commit(h);
   nvs_close(h);
   if (err != ESP_OK) {
-    webLog("Settings: NVS erase failed (%d)", (int)err);
+    webLogLevel(LogLevel::Error, "Settings: NVS erase failed (%d)", (int)err);
     return false;
   }
   return true;
@@ -246,7 +246,8 @@ void load() {
       // from reality. apply() therefore latched g_motion.positionReferenceStale,
       // which startRunBetweenEndpoints() enforces: a Return Home (or a fresh
       // calibration) must re-reference the axis before a run is allowed.
-      webLog("Settings: position reference unknown after reboot - return home before running");
+      webLogLevel(LogLevel::Warn,
+                  "Settings: position reference unknown after reboot - return home before running");
     }
   }
 
@@ -336,9 +337,9 @@ void resetToDefaults() {
     // until one succeeds.
     if (writeBlob(def)) {
       s_lastSaved = def;
-      webLog("Settings: reset to defaults (erase failed, defaults written instead)");
+      webLogLevel(LogLevel::Warn, "Settings: reset to defaults (erase failed, defaults written instead)");
     } else {
-      webLog("Settings: reset applied in RAM but NVS write failed - will retry");
+      webLogLevel(LogLevel::Error, "Settings: reset applied in RAM but NVS write failed - will retry");
     }
   }
 }

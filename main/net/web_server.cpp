@@ -295,7 +295,7 @@ static esp_err_t handleOtaUpload(PsychicRequest *, const char *filename, uint64_
     if (!identity_ok) {
       ESP_LOGE(TAG, "OTA: rejected - project name mismatch (image='%s', running='%s')",
                written_desc.project_name, running_desc.project_name);
-      webLog("OTA rejected: firmware image identity mismatch");
+      webLogLevel(LogLevel::Error, "OTA rejected: firmware image identity mismatch");
       otaAbort("project name mismatch");  // handle still open - abort, not end
       return ESP_FAIL;
     }
@@ -376,7 +376,8 @@ void setupWebServer() {
       .setAuthFailureMessage("AutoLee: authentication required");
   s_default_password_active = (webPass == WEB_AUTH_DEFAULT_PASS);
   if (s_default_password_active) {
-    webLog("SECURITY: web password is still the factory default - change it on the WiFi page");
+    webLogLevel(LogLevel::Warn,
+                "SECURITY: web password is still the factory default - change it on the WiFi page");
   }
   // Attached once, server-wide, rather than per-endpoint: gating on the HTTP
   // method means every state-changing route is covered automatically - including
