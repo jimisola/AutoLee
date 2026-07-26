@@ -184,8 +184,8 @@ paths:
         "200": { $ref: "#/components/responses/Ok" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
-  /api/v1/settings/reset:
-    post:
+  /api/v1/settings:
+    delete:
       summary: Discard stored calibration and tuning, restore factory defaults
       description: >
         Erases this firmware's settings blob in NVS and restores the compiled-in
@@ -294,7 +294,7 @@ paths:
                     description: >
                       Lifetime counters persisted in NVS alongside the calibration
                       (see the versioned settings blob). Cleared only by
-                      `POST /api/v1/settings/reset`. The 16-bit counters wrap at 65535.
+                      `DELETE /api/v1/settings`. The 16-bit counters wrap at 65535.
                     additionalProperties: false
                     required:
                       - cycleCount
@@ -356,8 +356,31 @@ paths:
         "400": { description: Missing or over-long password }
         "500": { description: Could not persist the password to NVS }
 
-  /api/v1/system/log_clear:
-    post:
+  /api/v1/system/logs:
+    get:
+      summary: Fetch the full retained log backlog
+      description: >
+        Returns every line currently retained in the log ring, oldest first, each
+        prefixed `HH:MM:SS L ` (uptime since boot - no RTC/NTP on this board - and
+        a single-char level: I/W/E). The `/api/v1/events` SSE stream's "log" event
+        only pushes what's new since the last broadcast (a single server-wide
+        watermark), so a client connecting after boot's first one would otherwise
+        never see the early lines - this endpoint is how it catches up. A GET, so
+        left open like every other read in this file.
+      tags: [System]
+      operationId: getLogs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items: { type: string }
+    delete:
       summary: Clear the log ring buffer
       tags: [System]
       operationId: clearLog

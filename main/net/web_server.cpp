@@ -787,7 +787,10 @@ void setupWebServer() {
               return res->send(200, "text/plain", "ok");
             });
 
-  server.on("/api/v1/settings/reset", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  // DELETE, not POST: this discards the persisted calibration/tuning resource
+  // and reverts it to compiled defaults - "delete the customized settings",
+  // not an action verb, so the HTTP method carries that meaning directly.
+  server.on("/api/v1/settings", HTTP_DELETE, [](PsychicRequest *req, PsychicResponse *res) {
     // Deferred: erases the calibration/tuning NVS blob and re-programs the
     // TMC5160 over the display's SPI bus - pump_task work, not HTTP-task
     // work. Gated on IDLE at execution time (motion_cmd.cpp), not here.
@@ -814,7 +817,32 @@ void setupWebServer() {
     return res->send(200, "text/plain", "cleared");
   });
 
-  server.on("/api/v1/system/log_clear", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+  // GET returns the full retained backlog (not just what's new since the
+  // last SSE push - see the /api/v1/events log-event comment above: that
+  // counter is a single global watermark, so only the first client to
+  // connect after boot ever sees the early lines over SSE). A GET, so left
+  // open like every other read in this file.
+  server.on("/api/v1/system/logs", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
+    uint16_t size = g_log.size();
+    std::string json = "{\"logs\":[";
+    for (uint16_t i = 0; i < size; i++) {
+      if (i > 0) json += ',';
+      json += '"';
+      for (const char *p = g_log.at(i); *p; p++) {
+        if (*p == '"')
+          json += "\\\"";
+        else if (*p == '\\')
+          json += "\\\\";
+        else
+          json += *p;
+      }
+      json += '"';
+    }
+    json += "]}";
+    return res->send(200, "application/json", json.c_str());
+  });
+
+  server.on("/api/v1/system/logs", HTTP_DELETE, [](PsychicRequest *req, PsychicResponse *res) {
     // Deferred: reassigning the ring here would race webLog()'s push from
     // pump_task / the LVGL task.
     motion_cmd::requestLogClear();

@@ -49,6 +49,7 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 .log .ll-W{color:#FFD37C}.log .ll-E{color:#FF6666}
 .page{display:none}.page.active{display:block}
 .nav-footer{margin-top:16px;padding:14px 0;text-align:center;border-top:1px solid var(--border)}
+.nav-footer .nav-row{margin-bottom:8px}.nav-footer .nav-row:last-child{margin-bottom:0}
 .nav-footer a{color:var(--accent);text-decoration:none;font-size:.85em;font-weight:600;margin:0 10px;cursor:pointer}
 .nav-footer a:hover{opacity:.7}
 .nav-footer a.active{color:var(--green)}
@@ -112,12 +113,16 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
+<div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
 <a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+</div>
+<div class="nav-row">
 <a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 <a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+</div>
 </div>
 
 </div><!-- /pageMain -->
@@ -190,12 +195,16 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
+<div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
 <a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+</div>
+<div class="nav-row">
 <a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 <a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+</div>
 </div>
 
 </div><!-- /pageConfig -->
@@ -218,12 +227,16 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
+<div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
 <a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+</div>
+<div class="nav-row">
 <a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 <a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+</div>
 </div>
 
 </div><!-- /pageLog -->
@@ -244,12 +257,16 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
+<div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
 <a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+</div>
+<div class="nav-row">
 <a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 <a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+</div>
 </div>
 
 </div><!-- /pageFW -->
@@ -285,12 +302,16 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
+<div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
 <a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+</div>
+<div class="nav-row">
 <a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 <a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+</div>
 </div>
 
 </div><!-- /pageWifi -->
@@ -338,12 +359,16 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <!-- NAV FOOTER -->
 <div class="nav-footer">
+<div class="nav-row">
 <a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
 <a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
 <a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
+</div>
+<div class="nav-row">
 <a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
 <a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
 <a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
+</div>
 </div>
 
 </div><!-- /pageDiag -->
@@ -365,9 +390,19 @@ let logLines=[],logFilter='';
 function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function lineLevel(l){const m=/^\d\d:\d\d:\d\d ([IWE]) /.exec(l);return m?m[1]:'I'}
 function addLogLines(lines){
-  logLines.push(...lines);
+  for(const l of lines){if(l!==logLines[logLines.length-1])logLines.push(l)}
   if(logLines.length>LOG_MAX_LINES)logLines=logLines.slice(logLines.length-LOG_MAX_LINES);
   renderLog();
+}
+let logsLoaded=false;
+function loadLogs(){
+  // GET /api/v1/system/logs returns the full retained backlog - the SSE "log"
+  // event only pushes what's new since the last broadcast (a single global
+  // watermark), so a page opened after boot's first client would otherwise
+  // never see the early lines. Only replaces on first open; afterwards SSE
+  // keeps logLines current without needing another full re-fetch.
+  if(logsLoaded)return;
+  fetch('/api/v1/system/logs').then(r=>r.json()).then(d=>{logsLoaded=true;logLines=d.logs||[];renderLog()}).catch(()=>{});
 }
 function renderLog(){
   const lb=document.getElementById('logBox');
@@ -383,7 +418,7 @@ function setLogFilter(lvl){
 function clearLog(){
   logLines=[];
   renderLog();
-  fetch('/api/v1/system/log_clear',{method:'POST'});
+  fetch('/api/v1/system/logs',{method:'DELETE'});
 }
 
 function showPage(id){
@@ -392,6 +427,7 @@ function showPage(id){
   document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page===id));
   window.scrollTo(0,0);
   if(id==='pageDiag')loadDiag();
+  if(id==='pageLog')loadLogs();
 }
 document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page==='pageMain'));
 
@@ -557,7 +593,7 @@ function adj(w,d){fetch('/api/v1/motion/endpoint?which='+w+'&delta='+d,{method:'
 function doAct(p){fetch(p,{method:'POST'})}
 function resetSettings(){
   if(!confirm('Discard the stored calibration and all tuning, and restore factory defaults?\n\nThe press will be UNCALIBRATED and must be recalibrated before it can run. WiFi and the web password are not affected.'))return;
-  doAct('/api/v1/settings/reset')}
+  fetch('/api/v1/settings',{method:'DELETE'})}
 function saveWifi(){
   const s=document.getElementById('ns').value,p=document.getElementById('np').value;
   if(!s){alert('SSID required');return}
