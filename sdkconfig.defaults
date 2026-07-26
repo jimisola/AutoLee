@@ -55,3 +55,11 @@ CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 
 # Brownout detector (tune threshold once bench-verified against the 24V->5V + stepper draw)
 CONFIG_ESP_BROWNOUT_DET=y
+
+# Raises the compile-time ceiling so ESP_LOGD("weblog", ...) isn't compiled
+# out entirely (IDF's default maximum is Info) - webLog()'s own g_logLevel
+# check (main/globals.cpp) is the actual runtime gate; this just makes Debug
+# calls exist at all. The runtime default log level for every OTHER tag
+# stays at Info (CONFIG_LOG_DEFAULT_LEVEL, unchanged) - only "weblog"'s
+# runtime ceiling is explicitly raised, once, in webLogImpl().
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y

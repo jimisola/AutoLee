@@ -1,5 +1,6 @@
 #include <cstdarg>
 #include <cstdio>
+#include <strings.h>  // strcasecmp
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -16,6 +17,7 @@ TaskHandle_t g_pump_task_handle = nullptr;
 
 autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
 uint32_t logSentSerial = 0;
+LogLevel g_logLevel = LogLevel::Info;
 
 lv_obj_t *main_scr = nullptr, *settings_scr = nullptr, *config_scr = nullptr,
          *profile_scr = nullptr;
@@ -44,7 +46,49 @@ lv_obj_t *batch_scr = nullptr;
 lv_obj_t *lbl_batch_val = nullptr;
 lv_obj_t *lbl_batch_remain = nullptr;
 
+const char *logLevelName(LogLevel level) {
+  switch (level) {
+    case LogLevel::Debug: return "debug";
+    case LogLevel::Warn: return "warn";
+    case LogLevel::Error: return "error";
+    default: return "info";
+  }
+}
+
+bool logLevelFromName(const char *name, LogLevel &out) {
+  if (strcasecmp(name, "debug") == 0) {
+    out = LogLevel::Debug;
+  } else if (strcasecmp(name, "info") == 0) {
+    out = LogLevel::Info;
+  } else if (strcasecmp(name, "warn") == 0) {
+    out = LogLevel::Warn;
+  } else if (strcasecmp(name, "error") == 0) {
+    out = LogLevel::Error;
+  } else {
+    return false;
+  }
+  return true;
+}
+
 static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
+  // ESP-IDF gates ESP_LOG* on two independent things beyond our own check
+  // below: a compile-time ceiling (CONFIG_LOG_MAXIMUM_LEVEL, raised to Debug
+  // in sdkconfig.defaults so ESP_LOGD isn't compiled out entirely) and a
+  // per-tag runtime default (esp_log_level_set(), which otherwise defaults
+  // to CONFIG_LOG_DEFAULT_LEVEL = Info and would silently eat our own
+  // Debug-level calls). Raise the "weblog" tag's runtime ceiling once so
+  // g_logLevel is the only gate that matters - not two that can drift apart.
+  static bool tagLevelRaised = false;
+  if (!tagLevelRaised) {
+    esp_log_level_set("weblog", ESP_LOG_DEBUG);
+    tagLevelRaised = true;
+  }
+
+  // Below the configured threshold: drop before formatting anything - this
+  // is the path Debug-tier per-iteration traces take most of the time, so
+  // skipping the snprintf/ESP_LOG work (not just the ring push) matters.
+  if (level < g_logLevel) return;
+
   // Uses esp_timer_get_time() directly rather than the 32-bit millis() helper,
   // which wraps at ~49.7 days - a press left running that long would otherwise
   // have its log timestamps silently jump back to 00:00:00. Hours is
@@ -55,7 +99,10 @@ static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
   const unsigned m = (unsigned)((ms / 60000ull) % 60ull);
   const unsigned s = (unsigned)((ms / 1000ull) % 60ull);
   const unsigned msPart = (unsigned)(ms % 1000ull);
-  const char levelChar = level == LogLevel::Error ? 'E' : level == LogLevel::Warn ? 'W' : 'I';
+  const char levelChar = level == LogLevel::Error   ? 'E'
+                          : level == LogLevel::Warn  ? 'W'
+                          : level == LogLevel::Debug ? 'D'
+                                                      : 'I';
 
   // Millisecond resolution matters here: jam/stall detection and StallGuard
   // sampling happen well within a single second, so second-only timestamps
@@ -67,7 +114,15 @@ static void webLogImpl(LogLevel level, const char *fmt, va_list args) {
     vsnprintf(line + prefixLen, sizeof(line) - (size_t)prefixLen, fmt, args);
   }
   g_log.push(line);
-  ESP_LOGI("weblog", "%s", line);
+  // Mirrored to serial at matching ESP-IDF severity (not always LOGI) so
+  // esp_log_level_set()/idf.py monitor's own filtering agrees with the level
+  // embedded in the line instead of everything showing as plain Info there.
+  switch (level) {
+    case LogLevel::Debug: ESP_LOGD("weblog", "%s", line); break;
+    case LogLevel::Warn: ESP_LOGW("weblog", "%s", line); break;
+    case LogLevel::Error: ESP_LOGE("weblog", "%s", line); break;
+    default: ESP_LOGI("weblog", "%s", line); break;
+  }
 }
 
 void webLog(const char *fmt, ...) {

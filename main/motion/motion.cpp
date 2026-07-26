@@ -329,9 +329,9 @@ void handleMotion() {
       static uint32_t lastSGPrintMs = 0;
       if ((millis() - lastSGPrintMs) > RUN_SG_LOG_INTERVAL_MS) {
         int32_t distToTarget = labs(pos - g_motion.currentTarget);
-        webLog("RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u", sg, RUN_SG_TRIP, pos,
-               (long)distToTarget, (unsigned long)sinceChange, g_motion.runSGHighCount,
-               RUN_SG_HIGH_NEEDED);
+        webLogLevel(LogLevel::Debug, "RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u", sg,
+                    RUN_SG_TRIP, pos, (long)distToTarget, (unsigned long)sinceChange,
+                    g_motion.runSGHighCount, RUN_SG_HIGH_NEEDED);
         lastSGPrintMs = millis();
       }
 
@@ -496,8 +496,8 @@ static bool move_until_stall(int dir, long &hit_pos) {
   int8_t sgt = clampSgt(CAL_SGT);
   tmc_enter_sensorless_mode(sgt);
 
-  webLog("MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d", dir, (long)start_pos,
-         (unsigned long)ignore_ms, (long)ignore_dst, sgt);
+  webLogLevel(LogLevel::Debug, "MUS: dir=%d pos=%ld ign_ms=%lu ign_dst=%ld sgt=%d", dir,
+              (long)start_pos, (unsigned long)ignore_ms, (long)ignore_dst, sgt);
 
   stepper::move(target);
   const uint32_t start_ms = millis();
@@ -520,8 +520,8 @@ static bool move_until_stall(int dir, long &hit_pos) {
 
     static uint32_t lastMUSPrint = 0;
     if ((now - lastMUSPrint) > CAL_MUS_LOG_INTERVAL_MS) {
-      webLog("MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u", sg, (long)dist,
-             (unsigned long)elapsed_ms, baseline_started, dyn_ready, dyn_trip);
+      webLogLevel(LogLevel::Debug, "MUS: sg=%u dist=%ld el=%lu bl=%d dr=%d dtrip=%u", sg,
+                  (long)dist, (unsigned long)elapsed_ms, baseline_started, dyn_ready, dyn_trip);
       lastMUSPrint = now;
     }
 
@@ -529,7 +529,8 @@ static bool move_until_stall(int dir, long &hit_pos) {
             {EARLY_WINDOW_MS, EARLY_WINDOW_DST_MAX, EARLY_MIN_TIME_MS, EARLY_MIN_MOVE_STEPS},
             elapsed_ms, dist)) {
       if (confirm_early.feed(sg <= EARLY_TRIP)) {
-        webLog("MUS: EARLY HIT sg=%u pos=%ld", sg, (long)stepper::getCurrentPosition());
+        webLogLevel(LogLevel::Debug, "MUS: EARLY HIT sg=%u pos=%ld", sg,
+                    (long)stepper::getCurrentPosition());
         stepper::forceStop();
         fas_wait_for_stop();
         hit_pos = stepper::getCurrentPosition();
@@ -551,14 +552,14 @@ static bool move_until_stall(int dir, long &hit_pos) {
         uint16_t baseline = autolee::baselineAverage(base_sum, base_cnt);
         dyn_trip = autolee::dynamicTrip(baseline, CAL_REL_DROP_Q8, CAL_ABS_MIN);
         dyn_ready = true;
-        webLog("MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);
+        webLogLevel(LogLevel::Debug, "MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);
       }
     }
 
     if (dyn_ready) {
       if (confirm_dyn.feed(sg <= dyn_trip)) {
-        webLog("MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip,
-               (long)stepper::getCurrentPosition());
+        webLogLevel(LogLevel::Debug, "MUS: DYN HIT sg=%u trip=%u pos=%ld", sg, dyn_trip,
+                    (long)stepper::getCurrentPosition());
         stepper::forceStop();
         fas_wait_for_stop();
         hit_pos = stepper::getCurrentPosition();
@@ -570,7 +571,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
     delay(1);
   }
   hit_pos = stepper::getCurrentPosition();
-  webLog("MUS: NO STALL DETECTED, ended at pos=%ld", hit_pos);
+  webLogLevel(LogLevel::Debug, "MUS: NO STALL DETECTED, ended at pos=%ld", hit_pos);
   return false;
 }
 

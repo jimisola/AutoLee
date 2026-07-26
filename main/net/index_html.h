@@ -46,7 +46,7 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 #otaS{font-size:.8em;margin-top:4px;min-height:1em}
 .log{background:#000;border-radius:8px;padding:8px;font-family:'Courier New',monospace;font-size:.7em;color:#0f0;height:400px;overflow-y:auto}
 .log .ll{white-space:pre-wrap;word-break:break-all}
-.log .ll-W{color:#FFD37C}.log .ll-E{color:#FF6666}
+.log .ll-D{color:var(--muted)}.log .ll-W{color:#FFD37C}.log .ll-E{color:#FF6666}
 .page{display:none}.page.active{display:block}
 .nav-footer{margin-top:16px;padding:14px 0;text-align:center;border-top:1px solid var(--border)}
 .nav-footer .nav-row{margin-bottom:8px}.nav-footer .nav-row:last-child{margin-bottom:0}
@@ -217,12 +217,24 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <h2>Log</h2>
 <div class="row ctr" id="logFilter" style="gap:6px;margin-bottom:8px">
 <button class="btn btn-blue btn-sm" data-lvl="" onclick="setLogFilter('')">All</button>
+<button class="btn btn-dark btn-sm" data-lvl="D" onclick="setLogFilter('D')">Debug</button>
 <button class="btn btn-dark btn-sm" data-lvl="I" onclick="setLogFilter('I')">Info</button>
 <button class="btn btn-dark btn-sm" data-lvl="W" onclick="setLogFilter('W')">Warn</button>
 <button class="btn btn-dark btn-sm" data-lvl="E" onclick="setLogFilter('E')">Error</button>
 </div>
 <div class="log" id="logBox"></div>
 <button class="btn btn-dark btn-sm" onclick="clearLog()" style="margin-top:8px;width:100%">Clear Log</button>
+</div>
+
+<div class="sec">
+<h2>Server Verbosity</h2>
+<div class="hint" style="margin-bottom:8px">Minimum level actually recorded - both here and on serial. Debug adds high-frequency StallGuard/calibration-search traces; only turn it on while troubleshooting.</div>
+<div class="row ctr" id="logLevelCtl" style="gap:6px">
+<button class="btn btn-dark btn-sm" data-lvl="debug" onclick="setServerLogLevel('debug')">Debug</button>
+<button class="btn btn-dark btn-sm" data-lvl="info" onclick="setServerLogLevel('info')">Info</button>
+<button class="btn btn-dark btn-sm" data-lvl="warn" onclick="setServerLogLevel('warn')">Warn</button>
+<button class="btn btn-dark btn-sm" data-lvl="error" onclick="setServerLogLevel('error')">Error</button>
+</div>
 </div>
 
 <!-- NAV FOOTER -->
@@ -388,7 +400,7 @@ sse();
 const LOG_MAX_LINES=500;
 let logLines=[],logFilter='';
 function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function lineLevel(l){const m=/^\d+:\d\d:\d\d\.\d\d\d ([IWE]) /.exec(l);return m?m[1]:'I'}
+function lineLevel(l){const m=/^\d+:\d\d:\d\d\.\d\d\d ([DIWE]) /.exec(l);return m?m[1]:'I'}
 function addLogLines(lines){
   for(const l of lines){if(l!==logLines[logLines.length-1])logLines.push(l)}
   if(logLines.length>LOG_MAX_LINES)logLines=logLines.slice(logLines.length-LOG_MAX_LINES);
@@ -421,13 +433,22 @@ function clearLog(){
   fetch('/api/v1/system/logs',{method:'DELETE'});
 }
 
+function loadServerLogLevel(){
+  fetch('/api/v1/system/log_level').then(r=>r.json()).then(d=>{
+    document.querySelectorAll('#logLevelCtl .btn').forEach(b=>b.className='btn btn-sm '+(b.dataset.lvl===d.level?'btn-blue':'btn-dark'));
+  }).catch(()=>{});
+}
+function setServerLogLevel(level){
+  fetch('/api/v1/system/log_level?level='+level,{method:'PUT'}).then(loadServerLogLevel).catch(()=>{});
+}
+
 function showPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page===id));
   window.scrollTo(0,0);
   if(id==='pageDiag')loadDiag();
-  if(id==='pageLog')loadLogs();
+  if(id==='pageLog'){loadLogs();loadServerLogLevel()}
 }
 document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page==='pageMain'));
 

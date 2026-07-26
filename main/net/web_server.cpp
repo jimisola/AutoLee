@@ -37,6 +37,7 @@
 static const char *TAG = "web_server";
 static const char *kNvsNamespace = "autolee";
 static const char *kNvsWebPassKey = "webpass";
+static const char *kNvsLogLevelKey = "loglevel";
 
 static PsychicHttpServer server;
 static PsychicEventSource events;
@@ -72,6 +73,29 @@ static bool saveWebPassword(const std::string &pass) {
   nvs_handle_t h;
   if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return false;
   esp_err_t err = nvs_set_str(h, kNvsWebPassKey, pass.c_str());
+  if (err == ESP_OK) err = nvs_commit(h);
+  nvs_close(h);
+  return err == ESP_OK;
+}
+
+// Own NVS key, same as the web password - not part of the versioned settings
+// blob (main/settings_blob.h): this is an operator preference for how chatty
+// the log is, not calibration/tuning data, so it doesn't belong in that
+// migration chain.
+static void loadLogLevel() {
+  nvs_handle_t h;
+  if (nvs_open(kNvsNamespace, NVS_READONLY, &h) != ESP_OK) return;
+  uint8_t raw = (uint8_t)LogLevel::Info;
+  if (nvs_get_u8(h, kNvsLogLevelKey, &raw) == ESP_OK && raw <= (uint8_t)LogLevel::Error) {
+    g_logLevel = (LogLevel)raw;
+  }
+  nvs_close(h);
+}
+
+static bool saveLogLevel(LogLevel level) {
+  nvs_handle_t h;
+  if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return false;
+  esp_err_t err = nvs_set_u8(h, kNvsLogLevelKey, (uint8_t)level);
   if (err == ESP_OK) err = nvs_commit(h);
   nvs_close(h);
   return err == ESP_OK;
@@ -366,6 +390,8 @@ void setupWebServer() {
   // makes a burst of setup-page traffic recycle old sockets instead of
   // failing new ones.
   server.config.lru_purge_enable = true;
+
+  loadLogLevel();
 
   // Digest auth for every state-changing route (attached per-endpoint below).
   std::string webPass = loadWebPassword();
@@ -846,6 +872,26 @@ void setupWebServer() {
     // Deferred: reassigning the ring here would race webLog()'s push from
     // pump_task / the LVGL task.
     motion_cmd::requestLogClear();
+    return res->send(200, "text/plain", "ok");
+  });
+
+  // Minimum level pushed to the ring (web) and mirrored to serial - see the
+  // g_logLevel comment in globals.h. A GET, so left open like every other
+  // read in this file.
+  server.on("/api/v1/system/log_level", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "{\"level\":\"%s\"}", logLevelName(g_logLevel));
+    return res->send(200, "application/json", buf);
+  });
+
+  server.on("/api/v1/system/log_level", HTTP_PUT, [](PsychicRequest *req, PsychicResponse *res) {
+    std::string levelStr = req->getParam("level", "");
+    LogLevel level;
+    if (!logLevelFromName(levelStr.c_str(), level)) {
+      return res->send(400, "text/plain", "level must be debug, info, warn or error");
+    }
+    g_logLevel = level;
+    saveLogLevel(level);
     return res->send(200, "text/plain", "ok");
   });
 

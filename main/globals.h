@@ -27,15 +27,29 @@ extern uint32_t rebootRequestMs;
 extern TaskHandle_t g_pump_task_handle;
 
 // Log ring for the web UI's log panel + SSE "log" events. Every pushed line
-// is prefixed "HH:MM:SS L " (uptime since boot - the board has no RTC/NTP -
-// and a single-char level: I/W/E) so the dashboard's Log page can show and
+// is prefixed "HH:MM:SS.mmm L " (uptime since boot - the board has no RTC/NTP -
+// and a single-char level: D/I/W/E) so the dashboard's Log page can show and
 // filter by both. webLog() is the plain call sites keep using (Info level);
-// webLogLevel() is for the handful of sites that are actually a warning or
-// an error (jam, calibration/homing failure, NVS errors, security notices).
+// webLogLevel() is for sites that are actually Debug (high-frequency
+// per-iteration diagnostic traces - StallGuard sampling, calibration search),
+// a warning, or an error (jam, calibration/homing failure, NVS errors,
+// security notices).
+//
+// g_logLevel is the single shared minimum threshold for BOTH the ring (and
+// therefore the web dashboard/SSE) and the mirrored ESP_LOG* serial output -
+// a line below threshold is dropped from both, not filtered per-sink, so
+// there's one setting to reason about instead of two that can drift apart.
+// Defaults to Info (Debug traces hidden) and is runtime-settable via
+// GET/PUT /api/v1/system/log_level (main/net/web_server.cpp), persisted in
+// NVS outside the versioned settings blob - same pattern as the web
+// password, not a calibration/tuning value.
 #include "log_ring.h"
 extern autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
 extern uint32_t logSentSerial;  // last serial# broadcast over SSE
-enum class LogLevel : uint8_t { Info, Warn, Error };
+enum class LogLevel : uint8_t { Debug, Info, Warn, Error };
+extern LogLevel g_logLevel;
+const char *logLevelName(LogLevel level);
+bool logLevelFromName(const char *name, LogLevel &out);
 void webLog(const char *fmt, ...);
 void webLogLevel(LogLevel level, const char *fmt, ...);
 

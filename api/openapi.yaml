@@ -361,9 +361,9 @@ paths:
       summary: Fetch the full retained log backlog
       description: >
         Returns every line currently retained in the log ring, oldest first, each
-        prefixed `HH:MM:SS L ` (uptime since boot - no RTC/NTP on this board - and
-        a single-char level: I/W/E). The `/api/v1/events` SSE stream's "log" event
-        only pushes what's new since the last broadcast (a single server-wide
+        prefixed `H:MM:SS.mmm L ` (uptime since boot - no RTC/NTP on this board -
+        and a single-char level: D/I/W/E). The `/api/v1/events` SSE stream's "log"
+        event only pushes what's new since the last broadcast (a single server-wide
         watermark), so a client connecting after boot's first one would otherwise
         never see the early lines - this endpoint is how it catches up. A GET, so
         left open like every other read in this file.
@@ -386,6 +386,43 @@ paths:
       operationId: clearLog
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/system/log_level:
+    get:
+      summary: Get the minimum log level currently recorded
+      description: >
+        Applies to both the log ring (and therefore the web dashboard/SSE) and the
+        mirrored serial output - one shared threshold, not two that can drift
+        apart. debug < info < warn < error.
+      tags: [System]
+      operationId: getLogLevel
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  level: { type: string, enum: [debug, info, warn, error] }
+    put:
+      summary: Set the minimum log level, persisted across reboots
+      description: >
+        Debug adds high-frequency StallGuard/calibration-search traces not
+        normally needed outside active troubleshooting - see the "level" query
+        param's enum for the full set. Persisted in NVS outside the versioned
+        settings blob, same as the web password.
+      tags: [System]
+      operationId: setLogLevel
+      parameters:
+        - name: level
+          in: query
+          required: true
+          schema: { type: string, enum: [debug, info, warn, error] }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { description: Invalid level }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/system/ota:
