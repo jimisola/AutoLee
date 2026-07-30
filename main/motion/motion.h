@@ -23,8 +23,7 @@ static_assert((uint8_t)autolee::MotorState::Calibrating == (uint8_t)CALIBRATING,
               "RunState/MotorState drift");
 static_assert((uint8_t)autolee::MotorState::Stalled == (uint8_t)STALLED,
               "RunState/MotorState drift");
-static_assert((uint8_t)autolee::MotorState::Homing == (uint8_t)HOMING,
-              "RunState/MotorState drift");
+static_assert((uint8_t)autolee::MotorState::Homing == (uint8_t)HOMING, "RunState/MotorState drift");
 
 inline autolee::MotorState toMotorState(RunState s) {
   return (autolee::MotorState)s;

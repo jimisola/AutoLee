@@ -48,10 +48,14 @@ lv_obj_t *lbl_batch_remain = nullptr;
 
 const char *logLevelName(LogLevel level) {
   switch (level) {
-    case LogLevel::Debug: return "debug";
-    case LogLevel::Warn: return "warn";
-    case LogLevel::Error: return "error";
-    default: return "info";
+    case LogLevel::Debug:
+      return "debug";
+    case LogLevel::Warn:
+      return "warn";
+    case LogLevel::Error:
+      return "error";
+    default:
+      return "info";
   }
 }
 
@@ -100,16 +104,16 @@ static void webLogImpl(LogLevel level, const char *category, const char *fmt, va
   const unsigned s = (unsigned)((ms / 1000ull) % 60ull);
   const unsigned msPart = (unsigned)(ms % 1000ull);
   const char levelChar = level == LogLevel::Error   ? 'E'
-                          : level == LogLevel::Warn  ? 'W'
-                          : level == LogLevel::Debug ? 'D'
-                                                      : 'I';
+                         : level == LogLevel::Warn  ? 'W'
+                         : level == LogLevel::Debug ? 'D'
+                                                    : 'I';
 
   // Millisecond resolution matters here: jam/stall detection and StallGuard
   // sampling happen well within a single second, so second-only timestamps
   // would leave rapid-fire lines unordered relative to each other.
   char line[LOG_LINE_LEN];
-  const int prefixLen = snprintf(line, sizeof(line), "%lu:%02u:%02u.%03u %c [%s] ", h, m, s,
-                                  msPart, levelChar, category);
+  const int prefixLen = snprintf(line, sizeof(line), "%lu:%02u:%02u.%03u %c [%s] ", h, m, s, msPart,
+                                 levelChar, category);
   if (prefixLen > 0 && (size_t)prefixLen < sizeof(line)) {
     vsnprintf(line + prefixLen, sizeof(line) - (size_t)prefixLen, fmt, args);
   }
@@ -118,10 +122,18 @@ static void webLogImpl(LogLevel level, const char *category, const char *fmt, va
   // esp_log_level_set()/idf.py monitor's own filtering agrees with the level
   // embedded in the line instead of everything showing as plain Info there.
   switch (level) {
-    case LogLevel::Debug: ESP_LOGD("weblog", "%s", line); break;
-    case LogLevel::Warn: ESP_LOGW("weblog", "%s", line); break;
-    case LogLevel::Error: ESP_LOGE("weblog", "%s", line); break;
-    default: ESP_LOGI("weblog", "%s", line); break;
+    case LogLevel::Debug:
+      ESP_LOGD("weblog", "%s", line);
+      break;
+    case LogLevel::Warn:
+      ESP_LOGW("weblog", "%s", line);
+      break;
+    case LogLevel::Error:
+      ESP_LOGE("weblog", "%s", line);
+      break;
+    default:
+      ESP_LOGI("weblog", "%s", line);
+      break;
   }
 }
 

@@ -110,22 +110,38 @@ static inline uint32_t millis() {
 // ==========================================================================
 static const char *resetReasonStr(esp_reset_reason_t r) {
   switch (r) {
-    case ESP_RST_POWERON: return "POWERON";
-    case ESP_RST_EXT: return "EXT";
-    case ESP_RST_SW: return "SW";
-    case ESP_RST_PANIC: return "PANIC";
-    case ESP_RST_INT_WDT: return "INT_WDT";
-    case ESP_RST_TASK_WDT: return "TASK_WDT";
-    case ESP_RST_WDT: return "WDT";
-    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
-    case ESP_RST_BROWNOUT: return "BROWNOUT";
-    case ESP_RST_SDIO: return "SDIO";
-    case ESP_RST_USB: return "USB";
-    case ESP_RST_JTAG: return "JTAG";
-    case ESP_RST_EFUSE: return "EFUSE";
-    case ESP_RST_PWR_GLITCH: return "PWR_GLITCH";
-    case ESP_RST_CPU_LOCKUP: return "CPU_LOCKUP";
-    default: return "UNKNOWN";
+    case ESP_RST_POWERON:
+      return "POWERON";
+    case ESP_RST_EXT:
+      return "EXT";
+    case ESP_RST_SW:
+      return "SW";
+    case ESP_RST_PANIC:
+      return "PANIC";
+    case ESP_RST_INT_WDT:
+      return "INT_WDT";
+    case ESP_RST_TASK_WDT:
+      return "TASK_WDT";
+    case ESP_RST_WDT:
+      return "WDT";
+    case ESP_RST_DEEPSLEEP:
+      return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:
+      return "BROWNOUT";
+    case ESP_RST_SDIO:
+      return "SDIO";
+    case ESP_RST_USB:
+      return "USB";
+    case ESP_RST_JTAG:
+      return "JTAG";
+    case ESP_RST_EFUSE:
+      return "EFUSE";
+    case ESP_RST_PWR_GLITCH:
+      return "PWR_GLITCH";
+    case ESP_RST_CPU_LOCKUP:
+      return "CPU_LOCKUP";
+    default:
+      return "UNKNOWN";
   }
 }
 
@@ -449,9 +465,9 @@ void setupWebServer() {
         PsychicMiddlewareNext gated = [next, res]() -> esp_err_t {
           if (s_default_password_active) {
             return res->send(403, "application/json",
-                              "{\"error\":\"default_password\",\"message\":\"Web password is "
-                              "still the factory default - set a real one via POST "
-                              "/api/v1/system/web_password before using this control.\"}");
+                             "{\"error\":\"default_password\",\"message\":\"Web password is "
+                             "still the factory default - set a real one via POST "
+                             "/api/v1/system/web_password before using this control.\"}");
           }
           return next();
         };
@@ -614,13 +630,13 @@ void setupWebServer() {
              desc->version, desc->idf_ver, desc->date, desc->time, sha,
              resetReasonStr(esp_reset_reason()), (unsigned)esp_get_free_heap_size(),
              (unsigned)esp_get_minimum_free_heap_size(), (unsigned)largestFreeBlock,
-             (unsigned long long)(esp_timer_get_time() / 1000),
-             running ? running->label : "?", coredumpPresent ? "true" : "false",
-             (unsigned long)flashSizeBytes, cpuFreqMhz, wifiRssiJson,
-             (unsigned long)pumpStackHighWaterMarkBytes, (unsigned)settings_store::kVersion,
-             (long)ms.counter, (unsigned)ms.stallCount, (unsigned long)ms.totalCycleTimeMs,
-             (unsigned long)avgCycleMs, (unsigned long)ms.longestCycleMs,
-             (unsigned)ms.calibrationCount, (unsigned)ms.otaCount, (unsigned)ms.resetCount);
+             (unsigned long long)(esp_timer_get_time() / 1000), running ? running->label : "?",
+             coredumpPresent ? "true" : "false", (unsigned long)flashSizeBytes, cpuFreqMhz,
+             wifiRssiJson, (unsigned long)pumpStackHighWaterMarkBytes,
+             (unsigned)settings_store::kVersion, (long)ms.counter, (unsigned)ms.stallCount,
+             (unsigned long)ms.totalCycleTimeMs, (unsigned long)avgCycleMs,
+             (unsigned long)ms.longestCycleMs, (unsigned)ms.calibrationCount, (unsigned)ms.otaCount,
+             (unsigned)ms.resetCount);
     return res->send(200, "application/json", buf);
   });
 
@@ -631,44 +647,47 @@ void setupWebServer() {
   // garbage. Unlike every other GET in this file, this one IS auth-gated (see
   // the middleware above) - a coredump is a raw RAM snapshot and can contain
   // the WiFi/web password in plaintext.
-  server.on("/api/v1/diagnostics/coredump", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) -> esp_err_t {
-    if (esp_core_dump_image_check() != ESP_OK) {
-      return res->send(404, "text/plain", "no core dump present");
-    }
-    size_t addr = 0, size = 0;
-    if (esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) {
-      return res->send(404, "text/plain", "no core dump present");
-    }
-    const esp_partition_t *part = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
-    if (!part) {
-      return res->send(404, "text/plain", "no coredump partition");
-    }
+  server.on("/api/v1/diagnostics/coredump", HTTP_GET,
+            [](PsychicRequest *req, PsychicResponse *res) -> esp_err_t {
+              if (esp_core_dump_image_check() != ESP_OK) {
+                return res->send(404, "text/plain", "no core dump present");
+              }
+              size_t addr = 0, size = 0;
+              if (esp_core_dump_image_get(&addr, &size) != ESP_OK || size == 0) {
+                return res->send(404, "text/plain", "no core dump present");
+              }
+              const esp_partition_t *part = esp_partition_find_first(
+                  ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, nullptr);
+              if (!part) {
+                return res->send(404, "text/plain", "no coredump partition");
+              }
 
-    res->setCode(200);
-    res->setContentType("application/octet-stream");
-    res->addHeader("Content-Disposition", "attachment; filename=\"autolee_coredump.bin\"");
-    res->sendHeaders();
+              res->setCode(200);
+              res->setContentType("application/octet-stream");
+              res->addHeader("Content-Disposition",
+                             "attachment; filename=\"autolee_coredump.bin\"");
+              res->sendHeaders();
 
-    uint8_t chunk[512];
-    size_t offset = 0, remaining = size;
-    esp_err_t err = ESP_OK;
-    while (remaining > 0) {
-      size_t n = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
-      err = esp_partition_read(part, offset, chunk, n);
-      if (err != ESP_OK) {
-        ESP_LOGE(TAG, "coredump: partition read failed at offset %u (%s)", (unsigned)offset,
-                 esp_err_to_name(err));
-        break;
-      }
-      err = res->sendChunk(chunk, n);
-      if (err != ESP_OK) break;  // client likely gone; sendChunk already aborted the stream
-      offset += n;
-      remaining -= n;
-    }
-    if (err == ESP_OK) res->finishChunking();
-    return err;
-  });
+              uint8_t chunk[512];
+              size_t offset = 0, remaining = size;
+              esp_err_t err = ESP_OK;
+              while (remaining > 0) {
+                size_t n = remaining < sizeof(chunk) ? remaining : sizeof(chunk);
+                err = esp_partition_read(part, offset, chunk, n);
+                if (err != ESP_OK) {
+                  ESP_LOGE(TAG, "coredump: partition read failed at offset %u (%s)",
+                           (unsigned)offset, esp_err_to_name(err));
+                  break;
+                }
+                err = res->sendChunk(chunk, n);
+                if (err != ESP_OK)
+                  break;  // client likely gone; sendChunk already aborted the stream
+                offset += n;
+                remaining -= n;
+              }
+              if (err == ESP_OK) res->finishChunking();
+              return err;
+            });
 
   server.on("/api/v1/motion/toggle_run", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     // Deferred to pump_task: touches the stepper, TMC5160 SPI and LVGL.
@@ -898,20 +917,23 @@ void setupWebServer() {
   // Change the web password. Itself auth-gated (it's a POST), so only someone
   // who already knows the current password can set a new one. Takes effect
   // immediately - no reboot - since the middleware reads from s_auth.
-  server.on("/api/v1/system/web_password", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    std::string pass = req->getParam("pass", "");
-    if (pass.empty()) return res->send(400, "text/plain", "password required");
-    if (pass.length() > WEB_AUTH_PASS_MAX) return res->send(400, "text/plain", "password too long");
-    if (!saveWebPassword(pass)) return res->send(500, "text/plain", "could not save password");
-    s_auth.setPassword(pass.c_str());
-    // Without this, the #1c write-gate above would keep 403ing every other
-    // route forever after a real password is set - the flag was otherwise
-    // only ever refreshed at boot, so an operator who follows the "set a
-    // password" prompt would find nothing else works until a reboot.
-    s_default_password_active = (pass == WEB_AUTH_DEFAULT_PASS);
-    webLog("Security", "Web password changed");
-    return res->send(200, "text/plain", "ok");
-  });
+  server.on("/api/v1/system/web_password", HTTP_POST,
+            [](PsychicRequest *req, PsychicResponse *res) {
+              std::string pass = req->getParam("pass", "");
+              if (pass.empty()) return res->send(400, "text/plain", "password required");
+              if (pass.length() > WEB_AUTH_PASS_MAX)
+                return res->send(400, "text/plain", "password too long");
+              if (!saveWebPassword(pass))
+                return res->send(500, "text/plain", "could not save password");
+              s_auth.setPassword(pass.c_str());
+              // Without this, the #1c write-gate above would keep 403ing every other
+              // route forever after a real password is set - the flag was otherwise
+              // only ever refreshed at boot, so an operator who follows the "set a
+              // password" prompt would find nothing else works until a reboot.
+              s_default_password_active = (pass == WEB_AUTH_DEFAULT_PASS);
+              webLog("Security", "Web password changed");
+              return res->send(200, "text/plain", "ok");
+            });
 
   // OTA firmware upload. PsychicUploadHandler streams the body to
   // handleOtaUpload() and sends the HTTP response itself (200 "Upload

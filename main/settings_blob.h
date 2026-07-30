@@ -136,8 +136,8 @@ using Persisted = PersistedV2;
 // Largest blob any known version occupies - the read buffer settings_store.cpp
 // sizes its nvs_get_blob() against. Extend with max(...) when a longer version
 // is added; a stored blob bigger than this is rejected as a size mismatch.
-constexpr size_t kMaxBlobBytes =
-    sizeof(PersistedV1) > sizeof(PersistedV2) ? sizeof(PersistedV1) : sizeof(PersistedV2);
+constexpr size_t kMaxBlobBytes = sizeof(PersistedV1) > sizeof(PersistedV2) ? sizeof(PersistedV1)
+                                                                           : sizeof(PersistedV2);
 
 // ---------------------------------------------------------------------------
 //  Per-version validation
