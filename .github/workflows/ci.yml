@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Callable so release.yml can gate a release on the same checks that guard
+  # main, rather than reimplementing them and letting the two drift.
+  workflow_call:
+  # Manual runs: re-checking main without pushing anything — a suspected flake,
+  # or a newly released ESP-IDF / clang-format / spectral that could turn CI red
+  # with no commit here to hang the re-run on.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
       - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
         with:
           version: "v5.3.2"
@@ -27,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
       # host_test/ is a native host build - it only needs one vendored
       # source file from ESP-IDF (components/unity), not a toolchain.
       # install-esp-idf-action was tried first, but its cross-toolchain
@@ -71,6 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
@@ -90,3 +103,52 @@ jobs:
           jsonschema.validate(example, schema)
           print('state.example.json matches state.schema.json')
           "
+
+  # The workflows lint the firmware; nothing linted the workflows. Both tools
+  # here catch a class of mistake that otherwise only shows up as a failed
+  # release: actionlint parses the expression syntax and the shell inside `run:`
+  # (a typo'd `${{ needs.x.outputs.y }}` silently expands to the empty string
+  # rather than erroring), and zizmor audits for the CI-specific security
+  # footguns — unpinned actions, credentials left in .git/config, untrusted
+  # input interpolated into a shell.
+  #
+  # This matters more now that release.yml is workflow_dispatch-driven: it can
+  # only be exercised by actually running a release, so static checking is most
+  # of the feedback it gets.
+  #
+  # Versions are pinned because an unpinned linter fails PRs that changed
+  # nothing. Nothing updates these automatically — see .github/dependabot.yml
+  # for why, and bump them by hand when convenient.
+  workflows:
+    name: Lint the workflows themselves (actionlint, zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Checksum-verified: a GitHub release asset is mutable upstream, so the
+      # tag alone is not a pin.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          sudo mv actionlint /usr/local/bin/
+          rm actionlint.tar.gz
+
+      - name: actionlint
+        run: actionlint .github/workflows/*.yml
+
+      - name: Install zizmor
+        run: pip install zizmor==1.29.0
+
+      # --min-severity medium: the low tier is mostly stylistic and would make
+      # this job advisory in practice. yamllint already runs via pre-commit in
+      # the lint job above, so it is not repeated here.
+      - name: zizmor
+        run: zizmor --min-severity medium .github/workflows/

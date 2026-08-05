@@ -117,11 +117,12 @@ configurable.
   prefix when rendering** (`main/net/index_html.h`) — the underlying tag/version string never has
   one; release artifact filenames also keep a literal `v` (`AutoLee_v2.0.0_merged.bin`) since a
   filename is prose, not the version identifier.
-- Cutting a release is therefore just `git tag X.Y.Z && git push --tags` plus publishing a GitHub
-  Release — no source file to bump.
-- The CI release pipeline (build + `idf.py merge-bin` + GitHub Release) lives in
-  `.github/workflows/release.yml` and fires on `release: published`. It uses the tag name only to
-  name the attached artifacts.
+- There is therefore no source file to bump when releasing. **Don't tag by hand**, though: releases
+  are cut by the **Release firmware** workflow (Actions → Run workflow), which validates the
+  version, runs the full CI suite, pauses for approval, tags, builds, asserts the version baked
+  into the firmware matches the tag, publishes as a prerelease with the artifacts already
+  attached, re-verifies the published assets, and only then promotes it to latest. A hand-pushed
+  tag skips all of that. See [`RELEASING.md`](RELEASING.md).
 
 ### Two caveats worth knowing about this mechanism
 
@@ -165,7 +166,10 @@ Why ESP-IDF (and what it costs vs. the earlier PlatformIO/Arduino attempt) is re
 
 ## Conventions
 
-- [Conventional Commits](https://www.conventionalcommits.org/) for commits and PR titles.
+- [Conventional Commits](https://www.conventionalcommits.org/) for commits and PR titles. The
+  allowed types are in [`.commitlintrc.yml`](.commitlintrc.yml); the **PR title** is enforced by
+  `.github/workflows/check-semantic-pr.yml`, since that's what becomes the commit subject on
+  `main` under squash-merge.
 - Work on a branch and open a PR; don't push directly to `main`.
 - Never hardcode the firmware version anywhere — it comes from `git describe` via
   `esp_app_get_description()->version` (see "Versioning & releases" above).

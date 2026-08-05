@@ -1,48 +1,382 @@
 name: Release firmware
 
+# The whole release, start to finish, in one workflow.
+#
+# Previously this fired on `release: published` and did nothing but build. That
+# ordering was backwards in two ways. The release was public *before* the
+# firmware existed — so for the length of a cold ESP-IDF build there was a live
+# release advertising `AutoLee_vX.Y.Z_merged.bin` with no such file attached,
+# and if the build failed the release stayed public and permanently empty, with
+# a tag already pushed. And nothing verified the artifacts at all: the version
+# in the filename came from the tag name, while the version actually *inside*
+# the binary comes from `git describe` at CMake-configure time. Nothing checked
+# that those two agreed.
+#
+# The shape that fixes both is to make the release invisible until it has been
+# verified:
+#
+#   prepare  ->  checks  ->  [approval]  ->  release (prerelease + assets)
+#                                              ->  verify the published assets
+#                                              ->  promote to latest
+#
+# A prerelease is the key. It is publicly readable by exact tag, so the
+# published assets can be downloaded and checked for real, but /releases/latest
+# excludes it — so the release page's "Latest" badge, and anything that resolves
+# `latest`, cannot see it yet. If verification fails, nobody was ever served a
+# release: the tag and the prerelease stay for a human to delete or supersede.
+#
+# Not a draft, deliberately: a draft's assets are not readable without an
+# authenticated token, so the verify job could not exercise the same download
+# path a user gets. A prerelease can.
+
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Version to release. Bare, full three-part semver — 2.0.0, never 2.0 or
+          v2.0.0 (see CONTRIBUTING.md, "Versioning & releases").
+        required: true
+        type: string
+      dry-run:
+        description: "Validate and preview only — no checks run, no tag pushed, nothing published."
+        required: false
+        type: boolean
+        default: true
+
+# There is deliberately no `ref` input. The release is cut from the ref this
+# workflow was dispatched on (choose it in the "Run workflow" dropdown), because
+# that is the only way the reusable `checks` job below can be guaranteed to test
+# the same commit that gets tagged: `uses: ./.github/workflows/ci.yml` always
+# resolves to the caller's ref, not to an arbitrary input. `prepare` asserts
+# that commit is on main.
 
 permissions:
-  contents: write
+  contents: read
+
+# One release at a time. Two concurrent runs would race on the tag push and
+# could leave the second one having built artifacts for a tag it cannot create.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  build-and-attach:
+  # Resolves and validates what would be released, and writes the summary.
+  # Deliberately does nothing durable: a dry run is exactly this job and nothing
+  # else, so previewing a release costs one cheap job rather than a full
+  # ESP-IDF build.
+  prepare:
+    name: Validate the release
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      previous: ${{ steps.check.outputs.previous }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+          # Full history + tags: the checks below need to see every existing tag
+          # and to resolve main.
+          fetch-depth: 0
 
-      # The firmware version is derived from git at build time
-      # (esp_app_desc_t.version <- `git describe --always --tags --dirty`), so a
-      # clean checkout of tag X.Y.Z (bare, always full three-part semver - no "v"
-      # prefix, see CONTRIBUTING.md) always reports exactly that tag - there is
-      # no source file to cross-check. The literal "v" in the artifact filenames
-      # below is prose, not the version string - it stays even though the tag
-      # itself is bare.
-      - name: Release version
-        id: ver
+      - name: Validate version, tag and branch
+        id: check
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
         run: |
-          echo "ver=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+
+          # Bare full three-part semver. The tag string *is* the version this
+          # firmware reports (esp_app_desc_t.version, /api/v1/state, the OTA
+          # identity check), so it has to be a semver value with nothing to
+          # strip — hence no "v" and no X.Y shorthand. CONTRIBUTING.md has the
+          # full reasoning.
+          if [ "${VERSION#v}" != "$VERSION" ]; then
+            echo "::error::'$VERSION' has a 'v' prefix. Tags here are bare — use '${VERSION#v}'."
+            exit 1
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::'$VERSION' is not bare three-part semver (e.g. 2.0.0)."
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::Tag '$VERSION' already exists. Releases are immutable; pick the next version."
+            exit 1
+          fi
+
+          # Releases come off main. Reachability, not equality, so an older
+          # commit on main can still be released — and since `checks` runs at
+          # this same SHA, what is verified is what is tagged.
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not reachable from origin/main. Merge to main first."
+            exit 1
+          fi
+
+          PREVIOUS="$(git describe --tags --abbrev=0 "$SHA" 2>/dev/null || echo '(none)')"
+          {
+            echo "version=$VERSION"
+            echo "previous=$PREVIOUS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          VERSION: ${{ inputs.version }}
+          PREVIOUS: ${{ steps.check.outputs.previous }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref_name }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            MODE='dry run — nothing tagged, nothing published'
+          else
+            MODE='checks, then approval, then tag + prerelease + verify + promote'
+          fi
+          {
+            echo "### Release $VERSION"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Previous tag | \`$PREVIOUS\` |"
+            echo "| Ref | \`$REF\` @ \`${SHA:0:12}\` |"
+            echo "| Mode | $MODE |"
+            echo ""
+            echo "Artifacts that will be attached:"
+            echo ""
+            echo "- \`AutoLee_v${VERSION}_merged.bin\` — full flash image (fresh install, 4 MB)"
+            echo "- \`AutoLee_v${VERSION}_update.bin\` — app image only (OTA / re-flash)"
+            echo "- \`SHA256SUMS.txt\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The same checks that guard main, called rather than reimplemented, and run
+  # *before* the approval gate — so the reviewer is approving something already
+  # green rather than a version string.
+  checks:
+    name: Checks
+    needs: prepare
+    if: ${{ !inputs.dry-run }}
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  # THE APPROVAL GATE. `environment: stable` is what makes this job sit pending
+  # until a required reviewer approves it. By that point the summary above shows
+  # the version and the previous tag, and the checks are green.
+  #
+  # ⚠️  The `stable` environment must exist WITH a required reviewer. GitHub
+  # auto-creates a named environment on first use with NO protection rules at
+  # all, so if it has not been configured by hand this job runs straight through
+  # and the gate silently does nothing. Environment protection rules are free on
+  # public repositories. See RELEASING.md.
+  release:
+    name: Tag, build and create the prerelease
+    needs: [prepare, checks]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    environment:
+      name: stable
+      url: ${{ steps.create.outputs.url }}
+    permissions:
+      contents: write
+    outputs:
+      merged_sha256: ${{ steps.build.outputs.merged_sha256 }}
+      update_sha256: ${{ steps.build.outputs.update_sha256 }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Tagged locally first, and pushed only once the artifacts built from it
+      # have been checked. The version is baked into the binary from
+      # `git describe` at CMake-configure time, so the tag has to exist before
+      # the build for the firmware to report the right version — but nothing is
+      # published to the world until the assertions below pass.
+      - name: Create the tag locally
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
 
       - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
         with:
           version: "v5.3.2"
 
-      - name: Build
+      - name: Build and package
+        id: build
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
+          set -euo pipefail
+
+          # set-target is what runs CMake configure, and configure is when
+          # PROJECT_VER is captured from `git describe`. The tag above therefore
+          # has to already exist — it does. A fresh runner has no stale build/
+          # to serve a cached version from, which is the failure mode
+          # CONTRIBUTING.md warns about for local builds.
           idf.py set-target esp32c6
           idf.py build
 
-      - name: Merge full-flash image + rename artifacts
-        run: |
-          idf.py merge-bin -o build/AutoLee_v${{ steps.ver.outputs.ver }}_merged.bin --fill-flash-size 4MB
-          cp build/autolee.bin build/AutoLee_v${{ steps.ver.outputs.ver }}_update.bin
+          # The real assertion, and the reason this job exists at all: the
+          # version in the artifact *filename* comes from the tag, while the
+          # version inside the binary comes from `git describe` at configure
+          # time. Three documented things can make them disagree — a cached
+          # PROJECT_VER, `git describe` picking the nearest tag rather than the
+          # highest semver, and a dirty tree appending "-dirty". Read it back
+          # out of the image rather than trusting any of that.
+          BUILT="$(python3 tools/app_desc.py build/autolee.bin --field version)"
+          if [ "$BUILT" != "$VERSION" ]; then
+            echo "::error::Firmware reports version '$BUILT', not '$VERSION' — refusing to release."
+            exit 1
+          fi
+          echo "Firmware reports $BUILT ✓"
 
-      - name: Attach to the release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+          idf.py merge-bin -o "build/AutoLee_v${VERSION}_merged.bin" --fill-flash-size 4MB
+          cp build/autolee.bin "build/AutoLee_v${VERSION}_update.bin"
+
+          # The merged image is assembled by a separate esptool pass, so check
+          # it independently — a merge that picked up a stale build/autolee.bin
+          # would otherwise ship a full-flash image disagreeing with the OTA one.
+          MERGED="$(python3 tools/app_desc.py "build/AutoLee_v${VERSION}_merged.bin" --scan --field version)"
+          if [ "$MERGED" != "$VERSION" ]; then
+            echo "::error::Merged image reports version '$MERGED', not '$VERSION' — refusing to release."
+            exit 1
+          fi
+          echo "Merged image reports $MERGED ✓"
+
+          cd build
+          sha256sum "AutoLee_v${VERSION}_merged.bin" "AutoLee_v${VERSION}_update.bin" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          {
+            echo "merged_sha256=$(sha256sum "AutoLee_v${VERSION}_merged.bin" | cut -d' ' -f1)"
+            echo "update_sha256=$(sha256sum "AutoLee_v${VERSION}_update.bin" | cut -d' ' -f1)"
+          } >> "$GITHUB_OUTPUT"
+
+      # persist-credentials: false means `origin` carries no auth; push to an
+      # explicit tokenised URL rather than leaving a credential in .git/config.
+      - name: Push the tag
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$VERSION"
+
+      # --prerelease is what keeps this invisible until verified: publicly
+      # readable by exact tag, so the verify job can download it exactly as a
+      # user would, but excluded from /releases/latest.
+      #
+      # Assets are passed to `create` rather than uploaded afterwards, so the
+      # release never exists in a state where its firmware is missing — the
+      # window this whole rewrite is about.
+      - name: Create the prerelease with its artifacts
+        id: create
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          URL=$(gh release create "$VERSION" \
+            --title "$VERSION" \
+            --generate-notes \
+            --prerelease \
+            "build/AutoLee_v${VERSION}_merged.bin" \
+            "build/AutoLee_v${VERSION}_update.bin" \
+            build/SHA256SUMS.txt)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Prerelease created"
+            echo ""
+            echo "\`$VERSION\` — $URL"
+            echo ""
+            echo "Not the latest release yet: \`/releases/latest\` excludes prereleases."
+            echo "It is promoted only if the verification below passes."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Downloads the published assets over the same public path a user takes, and
+  # re-derives everything from the bytes that actually landed. This is a
+  # different claim from the build job's: that one proved the *build* was
+  # correct, this proves the *upload* was — a truncated or clobbered asset is
+  # invisible to the build and fatal to whoever flashes it.
+  verify:
+    name: Verify the published artifacts
+    needs: [prepare, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
         with:
-          fail_on_unmatched_files: true
-          files: |
-            build/AutoLee_v${{ steps.ver.outputs.ver }}_merged.bin
-            build/AutoLee_v${{ steps.ver.outputs.ver }}_update.bin
+          persist-credentials: false
+
+      - name: Download the release assets
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dl
+          gh release download "$VERSION" --dir dl
+          ls -l dl
+
+      - name: Verify checksums, sizes and embedded versions
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          MERGED_SHA256: ${{ needs.release.outputs.merged_sha256 }}
+          UPDATE_SHA256: ${{ needs.release.outputs.update_sha256 }}
+        run: |
+          set -euo pipefail
+          cd dl
+
+          # Self-consistency of the published manifest...
+          sha256sum -c SHA256SUMS.txt
+
+          # ...and that the manifest itself describes what was built, not
+          # whatever happened to be uploaded alongside it.
+          echo "${MERGED_SHA256}  AutoLee_v${VERSION}_merged.bin" | sha256sum -c -
+          echo "${UPDATE_SHA256}  AutoLee_v${VERSION}_update.bin" | sha256sum -c -
+
+          # --fill-flash-size 4MB, so anything else means the merge or the
+          # upload was truncated.
+          SIZE="$(stat -c%s "AutoLee_v${VERSION}_merged.bin")"
+          if [ "$SIZE" -ne 4194304 ]; then
+            echo "::error::Merged image is $SIZE bytes, expected 4194304 (4 MB)."
+            exit 1
+          fi
+
+          for f in "AutoLee_v${VERSION}_update.bin:" "AutoLee_v${VERSION}_merged.bin:--scan"; do
+            BIN="${f%%:*}"
+            FLAGS="${f##*:}"
+            # shellcheck disable=SC2086
+            GOT="$(python3 ../tools/app_desc.py "$BIN" $FLAGS --field version)"
+            if [ "$GOT" != "$VERSION" ]; then
+              echo "::error::$BIN reports version '$GOT', not '$VERSION'."
+              exit 1
+            fi
+            echo "$BIN reports $GOT ✓"
+          done
+
+  # The moment the release becomes real. One flag flip, with the assets already
+  # in place and checked — so there is no window in which the latest release
+  # points at firmware that has not landed.
+  promote:
+    name: Promote to latest
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Promote the prerelease
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release edit "$VERSION" --repo "$REPO" --prerelease=false --latest
+          {
+            echo "### Released"
+            echo ""
+            echo "\`$VERSION\` is now the latest release."
+          } >> "$GITHUB_STEP_SUMMARY"
