@@ -404,7 +404,10 @@ void ui_update_wifi_label() {
       // AP has no way to discover where the setup page lives, since the AP's
       // address is never shown anywhere else in AP mode: the status card that
       // normally carries the IP is hidden below in this view.
-      lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s\nhttp://%s", DEFAULT_AP_SSID,
+      // Blank line before the URL: SSID and key are what you type into the
+      // phone's WiFi dialog, the URL is what you do afterwards in a browser.
+      // Two steps, so they read as two groups rather than one list of three.
+      lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s\n\nhttp://%s", DEFAULT_AP_SSID,
                             wifi_mgr::apPassword().c_str(), wifi_mgr::ipAddress().c_str());
       lv_obj_clear_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -1006,7 +1009,7 @@ static void build_wifi_screen() {
   lv_obj_t *wc = make_content(wifi_scr);
   // Tighter row spacing than the default 10: the AP-setup view stacks title +
   // 112px QR + key + Skip and needs to fit CONTENT_H (260) without scrolling.
-  // The key label is three wrapped lines (SSID / key / setup URL - see
+  // The key label is four wrapped lines (SSID / key / blank / setup URL - see
   // ui_update_wifi_label()), so the margin here is thin. Re-check on hardware
   // before adding anything else to this view.
   lv_obj_set_style_pad_row(wc, 6, LV_PART_MAIN);
