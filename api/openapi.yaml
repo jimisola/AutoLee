@@ -1,0 +1,505 @@
+openapi: 3.1.0
+info:
+  title: AutoLee HTTP API
+  version: "1.0"
+  description: >
+    REST control surface served by the AutoLee firmware's on-device web server.
+    All mutating endpoints are POST; the canonical device state is returned by
+    `GET /api/v1/state` and pushed continuously over Server-Sent Events at `/api/v1/events`
+    (see asyncapi.yaml). Parameters are passed as query parameters.
+
+    Authentication: every state-changing endpoint (all POSTs, including the OTA
+    upload) requires HTTP Digest auth **once the device has joined a WiFi network
+    for the first time**. Before that - a factory-fresh rig, or one where the
+    operator pressed Skip on the setup screen - no authentication is required on
+    any route: the `AutoLee-Setup` AP is WPA2-PSK with a per-device key shown only
+    on the LCD and its join QR, so physical presence at the press is the gate, and
+    the rig stays fully usable with no WiFi and no password change. The first
+    successful join latches this permanently (NVS), so a later router outage that
+    drops the device back to its own AP does not reopen it. Reads (`GET
+    /api/v1/state`, the dashboard and the SSE stream) are deliberately open in
+    both modes - they expose only the cycle counter, SSID and IP. The password
+    is stored in NVS and is changeable via
+    `POST /api/v1/system/web_password`; the shipped factory default is user `autolee`,
+    password `autolee` - public knowledge, so change it when you put the rig on a
+    network. From that first join until it is changed, every state-changing endpoint except
+    `POST /api/v1/system/web_password` itself returns 403 (`DefaultPasswordActive`) -
+    the device will not run, calibrate or accept an OTA upload while the
+    factory-default password is still in effect. `GET /api/v1/state`'s
+    `defaultPassword` field reflects this.
+  license:
+    name: CC BY-NC 4.0
+    url: https://creativecommons.org/licenses/by-nc/4.0/
+servers:
+  - url: http://autolee.local
+    description: Device on the local network (mDNS)
+  - url: http://{deviceIp}
+    variables:
+      deviceIp: { default: "192.168.4.1" }
+
+tags:
+  - name: Device
+    description: Canonical device state and the live event stream.
+  - name: Motion
+    description: >
+      Everything that moves the press or tunes how it moves - run/stop, speed
+      profile, StallGuard trip and work zone, motor current, endpoint offsets,
+      batches, calibration, homing and the piece counter.
+  - name: Settings
+    description: Stored calibration/tuning as a whole (factory reset).
+  - name: WiFi
+    description: Station credentials - save and reboot, or clear and fall back to the setup AP.
+  - name: Diagnostics
+    description: Read-only build identity, runtime health and the stored core dump.
+  - name: System
+    description: >
+      Device administration - web/API password, log buffer and OTA firmware
+      upload.
+
+paths:
+  /api/v1/state:
+    get:
+      summary: Full device state
+      tags: [Device]
+      operationId: getState
+      responses:
+        "200":
+          description: Current device state
+          content:
+            application/json:
+              schema:
+                $ref: "./schemas/state.schema.json"
+
+  /api/v1/motion/toggle_run:
+    post:
+      summary: Start or stop the run
+      tags: [Motion]
+      operationId: toggleRun
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/profile:
+    post:
+      summary: Select the active speed profile
+      tags: [Motion]
+      operationId: setProfile
+      parameters:
+        - name: idx
+          in: query
+          required: true
+          schema: { type: integer, enum: [0, 1, 2] }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/sg_trip:
+    post:
+      summary: Set or adjust the StallGuard trip for a profile
+      tags: [Motion]
+      operationId: setSgTrip
+      parameters:
+        - { name: value, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1023 } }
+        - { name: delta, in: query, required: false, schema: { type: integer } }
+        - { name: profile, in: query, required: false, description: "Target profile (defaults to active)", schema: { type: integer, enum: [0, 1, 2] } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/current:
+    post:
+      summary: Set motor run current (mA)
+      tags: [Motion]
+      operationId: setCurrent
+      parameters:
+        - name: ma
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1000, maximum: 4500 }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/work_zone:
+    post:
+      summary: Adjust the SG work-zone blanking distance
+      tags: [Motion]
+      operationId: setWorkZone
+      parameters:
+        - { name: delta, in: query, required: true, schema: { type: integer } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/endpoint:
+    post:
+      summary: Adjust an endpoint offset
+      tags: [Motion]
+      operationId: adjustEndpoint
+      parameters:
+        - { name: which, in: query, required: true, schema: { type: string, enum: [up, down] } }
+        - { name: delta, in: query, required: true, schema: { type: integer } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/batch:
+    post:
+      summary: Adjust batch target or start/clear a batch
+      tags: [Motion]
+      operationId: batch
+      parameters:
+        - { name: delta, in: query, required: false, schema: { type: integer } }
+        - { name: action, in: query, required: false, schema: { type: string, enum: [start, clear] } }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/calibrate:
+    post:
+      summary: Start a sensorless endpoint calibration
+      description: >
+        Runs the StallGuard calibration that discovers the UP and DOWN hard stops
+        and stores the raw endpoints. Deferred to the motion task and re-checked
+        there; the response is 200 as soon as the request is queued.
+      tags: [Motion]
+      operationId: calibrate
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/return_home:
+    post:
+      summary: Creep to the UP hard stop and re-reference the axis
+      description: >
+        Homes the press against the UP hard stop and clears the stale-position
+        flag. Deferred to the motion task and re-checked there; the response is
+        200 as soon as the request is queued.
+      tags: [Motion]
+      operationId: returnHome
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/reset_counter:
+    post:
+      summary: Zero the piece counter
+      description: >
+        Resets the cycle counter to 0. Does not touch calibration, tuning or the
+        batch target.
+      tags: [Motion]
+      operationId: resetCounter
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/settings:
+    delete:
+      summary: Discard stored calibration and tuning, restore factory defaults
+      description: >
+        Erases this firmware's settings blob in NVS and restores the compiled-in
+        defaults (endpoints cleared, offsets, per-profile StallGuard trips, run
+        current, work zone, active profile and counter), leaving the device
+        uncalibrated. It does NOT touch the WiFi credentials, the AP key or the
+        web password. Destructive - confirm in the UI first. Deferred to the
+        motion task, where it is applied only while the machine is IDLE and is
+        silently ignored otherwise (the response is 200 either way).
+      tags: [Settings]
+      operationId: resetSettings
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/wifi/save:
+    post:
+      summary: Save WiFi credentials and reboot
+      tags: [WiFi]
+      operationId: setWifi
+      description: >
+        Credentials are sent in a form-encoded body rather than the query
+        string: a query string is recorded in browser history and in any
+        intervening proxy/server access log. The device accepts query
+        parameters too (same parser), but clients should not use them for
+        secrets. An SSID longer than 32 bytes, or a password longer than 64,
+        is rejected with 400 rather than silently truncated.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [ssid]
+              properties:
+                ssid: { type: string, minLength: 1, maxLength: 32 }
+                pass: { type: string, maxLength: 64 }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { description: SSID missing, or SSID/password too long }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/wifi/reset:
+    post:
+      summary: Clear saved WiFi and reboot into AP mode
+      tags: [WiFi]
+      operationId: resetWifi
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/diagnostics/info:
+    get:
+      summary: Firmware/hardware diagnostics
+      description: >
+        Build identity (version, IDF version, compile date/time, truncated ELF SHA-256),
+        last reset reason, heap stats, uptime, the currently-running OTA partition label,
+        whether a valid coredump is waiting in the `coredump` partition, and the
+        persisted lifetime `health` counters (jams, cycle timing, calibrations, OTA
+        updates, boots). A GET, so - like every other read on this device - it is left
+        open, not Digest-gated.
+
+        The health counters live here rather than in `GET /api/v1/state` because they
+        are support statistics, not dashboard state: they survive reboots in NVS,
+        change at most once per stroke, and would otherwise inflate a payload that is
+        polled and re-broadcast over SSE continuously.
+      tags: [Diagnostics]
+      operationId: getInfo
+      responses:
+        "200":
+          description: Diagnostics snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - version
+                  - idfVersion
+                  - compileDate
+                  - compileTime
+                  - elfSha256
+                  - resetReason
+                  - freeHeap
+                  - minFreeHeap
+                  - largestFreeBlock
+                  - uptimeMs
+                  - runningPartition
+                  - coredumpPresent
+                  - flashSizeBytes
+                  - cpuFreqMhz
+                  - wifiRssi
+                  - pumpStackHighWaterMark
+                  - settingsVersion
+                  - health
+                properties:
+                  version: { type: string, description: "esp_app_desc_t.version" }
+                  idfVersion: { type: string, description: "esp_app_desc_t.idf_ver" }
+                  compileDate: { type: string }
+                  compileTime: { type: string }
+                  elfSha256: { type: string, description: "First 8 bytes of the ELF SHA-256, hex" }
+                  resetReason: { type: string, description: "esp_reset_reason(), e.g. POWERON, PANIC, TASK_WDT" }
+                  freeHeap: { type: integer, description: "esp_get_free_heap_size(), bytes" }
+                  minFreeHeap: { type: integer, description: "esp_get_minimum_free_heap_size(), bytes" }
+                  largestFreeBlock: { type: integer, description: "heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), bytes - the largest single allocation that would currently succeed, a more useful fragmentation indicator than freeHeap alone" }
+                  uptimeMs: { type: integer, description: "esp_timer_get_time() / 1000" }
+                  runningPartition: { type: string, description: "Label of the running OTA slot, e.g. ota_0" }
+                  coredumpPresent: { type: boolean, description: "esp_core_dump_image_check() == ESP_OK" }
+                  flashSizeBytes: { type: integer, description: "esp_flash_get_size() of the main flash chip, bytes (e.g. 4194304 for the 4 MB part in partitions.csv)" }
+                  cpuFreqMhz: { type: integer, description: "esp_clk_cpu_freq() / 1000000" }
+                  wifiRssi:
+                    type: [integer, "null"]
+                    description: >
+                      esp_wifi_sta_get_ap_info().rssi (dBm) of the currently-associated AP.
+                      `null` when not connected as a station (AP-setup mode, or STA
+                      disconnected) - there is no AP to report an RSSI for.
+                  pumpStackHighWaterMark: { type: integer, description: "uxTaskGetStackHighWaterMark() for pump_task (the handleMotion()/motion_cmd dispatch loop), in bytes. Minimum-ever free stack since boot - the smaller this gets, the closer that task has come to overflowing its stack" }
+                  settingsVersion: { type: integer, description: "settings_store::kVersion - the on-flash layout version of the persisted settings/calibration blob (see main/settings_blob.h)" }
+                  health:
+                    type: object
+                    description: >
+                      Lifetime counters persisted in NVS alongside the calibration
+                      (see the versioned settings blob). Cleared only by
+                      `DELETE /api/v1/settings`. The 16-bit counters wrap at 65535.
+                    additionalProperties: false
+                    required:
+                      - cycleCount
+                      - stallCount
+                      - totalCycleTimeMs
+                      - avgCycleMs
+                      - longestCycleMs
+                      - calibrationCount
+                      - otaCount
+                      - resetCount
+                    properties:
+                      cycleCount: { type: integer, minimum: 0, description: "Successful cycles - the same piece counter as the state payload's `counter` (display-capped at 9999, zeroable via /api/v1/motion/reset_counter)" }
+                      stallCount: { type: integer, minimum: 0, description: "Jams that latched STALLED" }
+                      totalCycleTimeMs: { type: integer, minimum: 0, description: "Summed duration of every successful UP->DOWN stroke; jammed strokes are excluded" }
+                      avgCycleMs: { type: integer, minimum: 0, description: "totalCycleTimeMs / cycleCount, 0 when cycleCount is 0. Derived, not stored - skewed if the piece counter was reset or has saturated; totalCycleTimeMs and longestCycleMs stay exact" }
+                      longestCycleMs: { type: integer, minimum: 0, description: "Longest single successful stroke seen" }
+                      calibrationCount: { type: integer, minimum: 0, description: "Successful sensorless calibrations" }
+                      otaCount: { type: integer, minimum: 0, description: "Successful OTA updates (counted once the new image is set to boot)" }
+                      resetCount: { type: integer, minimum: 0, description: "Boots, counted at startup and written to flash immediately so a reset loop is visible" }
+
+  /api/v1/diagnostics/coredump:
+    get:
+      summary: Download the stored core dump, if any
+      description: >
+        Streams the raw `coredump` partition (ELF format) as a file download. Validated via
+        `esp_core_dump_image_check()` before streaming - returns 404 rather than any bytes if
+        no valid coredump is present. Decode with `idf.py coredump-info` against the matching
+        firmware ELF. **Digest-gated despite being a GET** - unlike every other read on this
+        device, a coredump is a raw RAM snapshot and can contain the WiFi or web password in
+        plaintext (both are held in local C buffers at runtime).
+      tags: [Diagnostics]
+      operationId: getCoredump
+      responses:
+        "200":
+          description: Raw coredump partition contents
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "404":
+          description: No valid core dump present
+
+  /api/v1/system/web_password:
+    post:
+      summary: Change the web UI / API password
+      description: >
+        Sets a new Digest-auth password and persists it to NVS. Takes effect
+        immediately - no reboot. Itself authenticated, so only a caller who
+        already knows the current password can change it.
+      tags: [System]
+      operationId: setWebPassword
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [pass]
+              properties:
+                pass: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { description: Missing or over-long password }
+        "500": { description: Could not persist the password to NVS }
+
+  /api/v1/system/logs:
+    get:
+      summary: Fetch the full retained log backlog
+      description: >
+        Returns every line currently retained in the log ring, oldest first, each
+        prefixed `H:MM:SS.mmm L [Category] ` (uptime since boot - no RTC/NTP on
+        this board - a single-char level: D/I/W/E, and the subsystem that logged
+        it, e.g. Motion/Settings/WiFi/OTA/Security). The `/api/v1/events` SSE stream's "log"
+        event only pushes what's new since the last broadcast (a single server-wide
+        watermark), so a client connecting after boot's first one would otherwise
+        never see the early lines - this endpoint is how it catches up. A GET, so
+        left open like every other read in this file.
+      tags: [System]
+      operationId: getLogs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items: { type: string }
+    delete:
+      summary: Clear the log ring buffer
+      tags: [System]
+      operationId: clearLog
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/system/log_level:
+    get:
+      summary: Get the minimum log level currently recorded
+      description: >
+        Applies to both the log ring (and therefore the web dashboard/SSE) and the
+        mirrored serial output - one shared threshold, not two that can drift
+        apart. debug < info < warn < error.
+      tags: [System]
+      operationId: getLogLevel
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  level: { type: string, enum: [debug, info, warn, error] }
+    put:
+      summary: Set the minimum log level, persisted across reboots
+      description: >
+        Debug adds high-frequency StallGuard/calibration-search traces not
+        normally needed outside active troubleshooting - see the "level" query
+        param's enum for the full set. Persisted in NVS outside the versioned
+        settings blob, same as the web password.
+      tags: [System]
+      operationId: setLogLevel
+      parameters:
+        - name: level
+          in: query
+          required: true
+          schema: { type: string, enum: [debug, info, warn, error] }
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "400": { description: Invalid level }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/system/ota:
+    post:
+      summary: Upload firmware (OTA)
+      tags: [System]
+      operationId: otaUpload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: App-only .bin image
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+security:
+  - digestAuth: []
+
+components:
+  securitySchemes:
+    digestAuth:
+      type: http
+      scheme: digest
+      description: >
+        Required for all POST endpoints. Digest rather than Basic because the
+        device serves plain HTTP - Basic would put the password on the wire in
+        reversible base64 on every request.
+  responses:
+    Ok:
+      description: >
+        Accepted. The updated state is pushed to all clients over `/api/v1/events`
+        (and is readable via `GET /api/v1/state`).
+    DefaultPasswordActive:
+      description: >
+        Refused: the web/API password is still the factory default. Every
+        state-changing endpoint except `POST /api/v1/system/web_password` returns this
+        until a real password is set (see `defaultPassword` in the state schema).
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [error, message]
+            properties:
+              error: { type: string, enum: [default_password] }
+              message: { type: string }

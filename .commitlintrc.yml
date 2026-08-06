@@ -1,0 +1,12 @@
+# Conventional Commits enforcement (https://www.conventionalcommits.org/).
+extends:
+  - "@commitlint/config-conventional"
+rules:
+  # Proper nouns/acronyms (PlatformIO, WiFi, ESP32) legitimately capitalise the
+  # subject, so don't enforce subject-case.
+  subject-case: [0]
+  # config-conventional defaults + "tools" (dev tooling / scripts).
+  type-enum:
+    - 2
+    - always
+    - [build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test, tools]

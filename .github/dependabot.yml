@@ -1,0 +1,53 @@
+# Dependabot covers exactly one of this repo's dependency surfaces: the
+# SHA-pinned actions in .github/workflows/. That is deliberate, not an
+# oversight — nothing else here has an ecosystem Dependabot understands:
+#
+#   * main/idf_component.yml + dependencies.lock (lvgl, esp_lvgl_port,
+#     arduinojson) are the ESP-IDF Component Manager's format. Dependabot has
+#     no ecosystem for it and neither does Renovate, so component bumps stay
+#     manual: edit the `^x.y.z` constraint, `idf.py reconfigure`, commit the
+#     regenerated dependencies.lock.
+#   * .pre-commit-config.yaml `rev:` pins — Renovate has a `pre-commit`
+#     manager, Dependabot does not.
+#   * ci.yml's Python tooling now lives in .github/requirements-ci.txt with
+#     exact pins, so the `pip` ecosystem below keeps it fresh. The remaining
+#     inline pin is `npx @stoplight/spectral-cli@6.16.3`: exact, so CI can no
+#     longer go red with no commit behind it, but still invisible to
+#     Dependabot (it would need a package.json + lockfile).
+#   * The actionlint/zizmor versions pinned in ci.yml's `workflows` job are
+#     likewise invisible here.
+#
+# So: this file keeps the action SHAs fresh, and the list above is the honest
+# remainder that a human still has to watch.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    # "/" means .github/workflows/ for this ecosystem — not the repo root.
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      # Matches .commitlintrc.yml's type-enum, so check-semantic-pr.yml passes
+      # on Dependabot's own PRs and the squash subject stays conventional.
+      prefix: chore
+      include: scope
+    groups:
+      # One PR a week rather than one per action. These are all first-party
+      # actions pinned by SHA; reviewing them together is the same work.
+      github-actions:
+        patterns:
+          - "*"
+
+  # CI-only Python tooling (gcovr, jsonschema, pre-commit). Bumps here can move
+  # the coverage number or reformat the tree, so they get their own PR rather
+  # than being grouped with the actions.
+  - package-ecosystem: pip
+    directory: "/.github"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
