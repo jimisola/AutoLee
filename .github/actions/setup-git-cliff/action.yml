@@ -1,0 +1,41 @@
+name: Setup git-cliff
+description: Install a pinned, checksum-verified git-cliff onto PATH.
+
+inputs:
+  version:
+    description: "git-cliff version, without the leading v."
+    required: false
+    default: "2.13.1"
+  sha256:
+    description: "SHA-256 of the x86_64-unknown-linux-gnu tarball. Change with `version`."
+    required: false
+    default: "9a1263f24e59a2f508c7b3d3283c9dea94a8bf697f96dbc18cc783cac6284546"
+
+runs:
+  using: composite
+  steps:
+    # Checksum-verified: a GitHub release asset is mutable upstream, so the tag
+    # alone is not a pin — and at least one caller (release.yml) runs with
+    # contents: write. Plain binary rather than orhun/git-cliff-action, because
+    # that action's `version` output is the latest existing release, not what
+    # --bumped-version computes, which is the number this repo actually needs.
+    - name: Install git-cliff
+      shell: bash
+      env:
+        GIT_CLIFF_VERSION: ${{ inputs.version }}
+        GIT_CLIFF_SHA256: ${{ inputs.sha256 }}
+      run: |
+        set -euo pipefail
+        TARBALL="$(mktemp -d)/git-cliff.tar.gz"
+        curl -fsSL -o "$TARBALL" \
+          "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        echo "${GIT_CLIFF_SHA256}  ${TARBALL}" | sha256sum -c -
+        # /usr/local/bin is on PATH and runner-writable, so no sudo and no
+        # $GITHUB_PATH write (zizmor flags the latter).
+        tar -xzf "$TARBALL" --strip-components=1 -C /usr/local/bin \
+          "git-cliff-${GIT_CLIFF_VERSION}/git-cliff"
+        rm -rf "$(dirname "$TARBALL")"
+
+    - name: Verify
+      shell: bash
+      run: git-cliff --version

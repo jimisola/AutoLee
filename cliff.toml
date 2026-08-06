@@ -1,0 +1,78 @@
+# git-cliff config: release notes and the auto-detected version bump.
+#
+# Used by .github/workflows/release.yml in two ways — `--bumped-version` to work
+# out what to release when the version input is left empty, and `--latest
+# --unreleased` to write the notes the release ships with. The mapping below is
+# pinned by lint.yml's `release-config` job, because a wrong answer here would
+# otherwise only surface as a wrong release.
+
+[changelog]
+header = ""
+# `striptags` strips the `<!-- N -->` sort prefixes below — without them, groups
+# sort alphabetically and Features ends up buried after Bug Fixes.
+# `commit.breaking` marks a `feat!:` so it doesn't render identically to an
+# ordinary `feat:` — which matters more here than in most projects, since a
+# breaking change in firmware means a board that has to be re-flashed or
+# re-wired.
+#
+# `remote.pr_number` (the `in #N` below) only resolves for a squash merge —
+# git-cliff matches a commit's SHA against a closed PR's merge_commit_sha, never
+# true for a real merge commit's constituent commits. This repo squash-merges.
+# The `replace` strips GitHub's own auto-appended " (#N)" from a squashed title
+# first, using this exact pr_number so it can't touch an unrelated "(#N)".
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}\
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}\
+- {% if commit.breaking %}**BREAKING** {% endif %}{% if commit.remote.pr_number %}{{ commit.message | replace(from=" (#" ~ commit.remote.pr_number ~ ")", to="") | upper_first }}{% else %}{{ commit.message | upper_first }}{% endif %}{% if commit.remote.username %} by @{{ commit.remote.username }}{% endif %}{% if commit.remote.pr_number %} in #{{ commit.remote.pr_number }}{% endif %}
+{% endfor %}
+{% endfor %}\
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+
+# Ordered for someone deciding whether to re-flash a press: what changed about
+# how it moves outranks what's new elsewhere.
+commit_parsers = [
+  { message = "^security", group = "<!-- 0 -->Security" },
+  { message = "^feat", group = "<!-- 1 -->Features" },
+  { message = "^fix", group = "<!-- 2 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 3 -->Performance" },
+  { message = "^refactor", group = "<!-- 4 -->Refactoring" },
+  { message = "^docs", group = "<!-- 5 -->Documentation" },
+  { message = "^test", group = "<!-- 6 -->Testing" },
+  { message = "^style", group = "<!-- 7 -->Style" },
+  { message = "^revert", group = "<!-- 8 -->Reverts" },
+  { message = "^chore", group = "<!-- 9 -->Miscellaneous" },
+  # ci/build/tools are for maintainers, not for whoever flashes the board —
+  # skipped from the release notes. protect_breaking_commits below overrides
+  # this for `!:`. `tools` is this repo's addition to config-conventional's
+  # type list (see .commitlintrc.yml).
+  { message = "^ci", group = "CI/CD", skip = true },
+  { message = "^build", group = "Build", skip = true },
+  { message = "^tools", group = "Tooling", skip = true },
+]
+
+# `build!: require ESP-IDF 5.5` must reach users despite the skip above —
+# without this, a change that breaks their ability to build ships silently.
+protect_breaking_commits = true
+
+filter_commits = false
+# Bare, full three-part semver — no `v`, no X.Y shorthand. The tag string *is*
+# the version this firmware reports (esp_app_desc_t.version), so it has to be a
+# semver value with nothing to strip; see CONTRIBUTING.md, "Versioning &
+# releases". Anchored and fully specified: the obvious "[0-9].*" would also
+# match a stray `v2.0.0` or `2.0` tag that release.yml rejects, silently making
+# it a release boundary.
+tag_pattern = "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+sort_commits = "newest"
+
+[bump]
+# Left at the default (true): this project is past 1.0.0, where a `feat!:`
+# should take the major. The 0.x carve-out that `false` exists for does not
+# apply.
+breaking_always_bump_major = true

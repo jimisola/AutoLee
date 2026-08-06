@@ -1,0 +1,87 @@
+name: Build
+
+# The things that prove the firmware works: it compiles for the target, and the
+# hardware-independent logic in lib/autolee_logic/ passes its host tests.
+#
+# Split out from the old single ci.yml so that the slow, toolchain-heavy jobs
+# and the cheap static checks (lint.yml) report separately: a clang-format nit
+# and a broken build are different failures, and having them under one check
+# name made it impossible to require only one of them in branch protection or
+# to re-run only the one that failed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Callable so release.yml can gate a release on the same checks that guard
+  # main, rather than reimplementing them and letting the two drift.
+  workflow_call:
+  # Manual runs: re-checking main without pushing anything — a suspected flake,
+  # or a newly released ESP-IDF that could turn CI red with no commit here to
+  # hang the re-run on.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    name: idf.py build (esp32c6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
+        with:
+          version: "v5.3.2"
+      - name: Build
+        run: |
+          idf.py set-target esp32c6
+          idf.py build
+
+  host-tests:
+    name: Host tests (host_test/, ctest + coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+      # host_test/ is a native host build - it only needs one vendored
+      # source file from ESP-IDF (components/unity), not a toolchain.
+      # install-esp-idf-action was tried first, but its cross-toolchain
+      # leaks into this build's `as`/`ld` resolution no matter what env
+      # vars get reset in this step (PATH, COMPILER_PATH - both tried,
+      # neither fixed "as: unrecognized option '--64'"), implying a
+      # system-level change (e.g. gcc specs) the action makes, not a
+      # process-env one. Sparse-clone just the one directory needed instead.
+      - name: Fetch Unity source (the one thing host_test/ needs from ESP-IDF)
+        # components/unity/unity in the esp-idf repo is a submodule of
+        # ThrowTheSwitch/Unity - clone that directly into the same path
+        # shape host_test/CMakeLists.txt expects ($IDF_PATH/components/
+        # unity/unity/src), instead of cloning esp-idf itself.
+        run: |
+          mkdir -p /tmp/esp-idf-unity/components/unity
+          git init -q /tmp/esp-idf-unity/components/unity/unity
+          git -C /tmp/esp-idf-unity/components/unity/unity fetch --depth 1 \
+            https://github.com/ThrowTheSwitch/Unity.git \
+            bf560290f6020737eafaa8b5cbd2177c3956c03f
+          git -C /tmp/esp-idf-unity/components/unity/unity checkout -q FETCH_HEAD
+          echo "IDF_PATH=/tmp/esp-idf-unity" >> "$GITHUB_ENV"
+      - name: Configure, build, and run
+        working-directory: host_test
+        run: |
+          cmake -B build -DAUTOLEE_COVERAGE=ON
+          cmake --build build -j
+          cd build && ctest --output-on-failure
+      - name: Coverage report
+        working-directory: host_test
+        run: |
+          pip install -r ../.github/requirements-ci.txt
+          # Regression floor, NOT a target to chase: actual coverage is ~98%,
+          # but the gate is deliberately set far below that so it only trips on
+          # a real accident (a whole suite silently stops running, or a large
+          # untested module lands). Keeping it loose avoids pressuring
+          # low-value tests just to hold a number - the real coverage figure is
+          # printed above for reviewers to judge on quality, not quantity.
+          gcovr --root .. --filter '../lib/autolee_logic/' --fail-under-line 80 build

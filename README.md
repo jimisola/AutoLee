@@ -119,8 +119,10 @@ offline/manually-installed libraries needed.
 
 ### Build & Flash
 
+Requires **ESP-IDF >= 5.3** — see Espressif's
+[installation instructions](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation).
+
 ```bash
-# Install ESP-IDF >= 5.3: https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/get-started/
 idf.py set-target esp32c6
 idf.py build
 idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS

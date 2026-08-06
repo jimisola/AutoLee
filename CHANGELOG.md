@@ -35,7 +35,12 @@ checklist and what is/isn't hardware-verified, and
   touches the stepper, TMC5160 or motion FSM.
 - Host test suite (`host_test/`) with 100% line coverage of `lib/autolee_logic/`,
   plus a coverage regression floor in CI.
-- CI (build + host tests + lint) and a release workflow with a version guard.
+- CI split into `build.yml` (firmware + host tests) and `lint.yml` (pre-commit,
+  API specs, workflow lint, release-config), plus a `workflow_dispatch` release
+  pipeline: git-cliff picks the version and writes the notes, an approval gate
+  precedes any tagging, and the published assets are downloaded back and
+  re-verified (checksums, 4 MB merged image, embedded `esp_app_desc_t.version`)
+  before the release is promoted to latest.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/wiring.md](docs/wiring.md),
   [docs/bill-of-materials.md](docs/bill-of-materials.md), and
   [docs/upstream-v1.10.0-diff.md](docs/upstream-v1.10.0-diff.md).
