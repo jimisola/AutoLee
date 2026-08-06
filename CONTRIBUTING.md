@@ -14,6 +14,7 @@ to build, test, and release the firmware.
 | `include/lv_conf.h` | LVGL config (found via `-D LV_CONF_INCLUDE_SIMPLE`, wired project-wide in the root `CMakeLists.txt`). |
 | `CMakeLists.txt`, `partitions.csv`, `sdkconfig.defaults` | ESP-IDF build config. |
 | `tools/mock_server.py` | Run the web UI on your desktop without hardware. |
+| `tools/tests/` | pytest suite covering `cliff.toml` (the release version mapping) — see [Release-config tests](#release-config-tests). |
 | `docs/` | [ARCHITECTURE.md](docs/ARCHITECTURE.md) (task model, SPI bus, motion FSM — start here), [Wiring](docs/wiring.md), [Bill of Materials](docs/bill-of-materials.md), [PLAN.md](docs/PLAN.md) (migration checklist), `adr/` (architecture decision records), and the [upstream v1.10.0 diff](docs/upstream-v1.10.0-diff.md). |
 
 ### Inside `main/`
@@ -76,6 +77,26 @@ For coverage: `cmake -B build -DAUTOLEE_COVERAGE=ON`, then run `gcovr --root .. 
 
 Keep new algorithmic logic in `lib/autolee_logic/` (not inline in `main/`) so it can be tested on
 the host and reused by the firmware.
+
+### Release-config tests
+
+`cliff.toml` decides the version a release gets when the Release workflow's `version` input is left
+empty (see [Versioning & releases](#versioning--releases)), so a mistake in it ships a wrong,
+immutable release — and it is otherwise only exercised by cutting one. `tools/tests/` pins its
+behaviour: the bump mapping [RELEASING.md](RELEASING.md) documents, the `tag_pattern`, and how the
+release notes render.
+
+```bash
+pip install pytest
+pytest tools/tests
+```
+
+These run the **real** `git-cliff` against throwaway git repos, so they need it on `PATH` — install
+it from [orhun/git-cliff](https://github.com/orhun/git-cliff/releases) (CI uses the pinned,
+checksum-verified copy from `.github/actions/setup-git-cliff`). Without it the suite skips rather
+than fails, so a contributor who does not touch `cliff.toml` needs nothing extra.
+
+Change anything in `cliff.toml` and run this suite.
 
 ### VS Code
 

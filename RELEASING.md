@@ -66,9 +66,14 @@ Two cases where you must pass the version yourself:
 - **Any deliberate jump** — declaring `1.0.0`, skipping a number, or releasing a
   version the commit history does not justify.
 
-The mapping above is pinned by the `release-config` job in
-`.github/workflows/lint.yml`, which asserts it against throwaway repos on every
-PR — otherwise a cliff.toml mistake would only surface as a wrong release.
+The mapping above is pinned by `tools/tests/test_cliff_config.py`, which runs the
+real git-cliff against throwaway repos on every PR (the `release-config` job in
+`.github/workflows/lint.yml`) — otherwise a cliff.toml mistake would only
+surface as a wrong release. Run it locally with git-cliff on `PATH`:
+
+```bash
+pytest tools/tests            # skipped, not failed, if git-cliff is missing
+```
 
 The notes are generated in the `prepare` job, shown in the job summary at the
 approval gate, and handed to the release job as an artifact — so the notes that

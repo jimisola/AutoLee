@@ -2,9 +2,10 @@
 #
 # Used by .github/workflows/release.yml in two ways — `--bumped-version` to work
 # out what to release when the version input is left empty, and `--latest
-# --unreleased` to write the notes the release ships with. The mapping below is
-# pinned by lint.yml's `release-config` job, because a wrong answer here would
-# otherwise only surface as a wrong release.
+# --unreleased` to write the notes the release ships with. Both are pinned by
+# tools/tests/test_cliff_config.py — the bump mapping, the tag_pattern and the
+# rendering of the notes — because a wrong answer here would otherwise only
+# surface as a wrong release. Change anything below and run `pytest tools/tests`.
 
 [changelog]
 header = ""

@@ -125,8 +125,14 @@ jobs:
 
   # cliff.toml decides the version a release gets when the version input is left
   # empty, so a wrong answer here ships a wrong release — and it is only
-  # exercised by cutting one. Pin the mapping RELEASING.md documents against
-  # throwaway repos instead, on every PR.
+  # exercised by cutting one. tools/tests/test_cliff_config.py pins the mapping
+  # RELEASING.md documents (plus the tag_pattern and the notes rendering)
+  # against throwaway repos instead, on every PR.
+  #
+  # A test suite rather than a lint: it executes the real git-cliff and asserts
+  # what comes back, since the failure being guarded against is a config that is
+  # correct in theory and wrong in fact. It lives in this workflow anyway
+  # because it needs no ESP-IDF — seconds, not the firmware build.
   release-config:
     name: Release version mapping (cliff.toml)
     runs-on: ubuntu-latest
@@ -134,48 +140,16 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
 
-      # Same install the release uses — this job asserts its bump mapping.
+      # Same install the release uses — these tests assert its bump mapping.
+      # Without it the suite skips itself rather than failing, so it has to be
+      # installed here for the job to mean anything.
       - uses: ./.github/actions/setup-git-cliff
 
-      - name: Assert the bump mapping RELEASING.md documents
+      - name: pytest
         run: |
-          set -euo pipefail
-
-          # Each case: a subject to commit on top of tag 1.2.3, and the version
-          # git-cliff should then compute for the next release.
-          CLIFF="$PWD/cliff.toml"
-
-          check() {
-            subject="$1"
-            expected="$2"
-            repo="$(mktemp -d)"
-            git init -q "$repo"
-            git -C "$repo" config user.name ci
-            git -C "$repo" config user.email ci@example.com
-            # A signing key configured globally (true on a maintainer's machine,
-            # where this is also runnable) would otherwise fail every commit.
-            git -C "$repo" config commit.gpgsign false
-            git -C "$repo" config tag.gpgsign false
-            git -C "$repo" commit -q --allow-empty -m "chore: init"
-            git -C "$repo" tag 1.2.3
-            git -C "$repo" commit -q --allow-empty -m "$subject"
-            got="$(git-cliff --repository "$repo" --config "$CLIFF" --bumped-version)"
-            rm -rf "$repo"
-            if [ "$got" != "$expected" ]; then
-              echo "::error::'$subject' on 1.2.3 bumped to '$got', expected '$expected'"
-              exit 1
-            fi
-            echo "'$subject' -> $got ✓"
-          }
-
-          check "fix: a bug"               1.2.4
-          check "feat: a feature"          1.3.0
-          check "feat!: a breaking change" 2.0.0
-          check "docs: a doc"              1.2.4
-          # ci/build/tools are skipped by cliff.toml, so a range containing only
-          # those bumps to nothing — auto-detect returns the tag that already
-          # exists and release.yml's "tag is free" check rejects it. That is the
-          # intended outcome (there is nothing in such a release for whoever
-          # flashes the board); pass a version explicitly to override.
-          check "ci: tweak a workflow"     1.2.3
+          pip install -r .github/requirements-ci.txt
+          python -m pytest tools/tests -v
