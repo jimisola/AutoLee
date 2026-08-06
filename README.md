@@ -90,7 +90,8 @@ The stall detection and jam protection features are designed to detect brass get
 
 ### WiFi & Networking
 - **Auto-connect** — attempts saved credentials on boot, falls back to AP if it fails
-- **Captive portal** — open AP mode (`AutoLee-Setup`, no password) with DNS redirect so any device gets the setup page automatically
+- **Captive portal** — WPA2 AP mode (`AutoLee-Setup`, per-device key shown on the LCD as a join QR) with DNS redirect so any joined device gets the setup page automatically
+- **Works with no network at all** — press Skip on the setup screen and the press is fully usable from the touch UI and from a phone on its own AP, with no web password required; being able to read the AP key off the screen *is* the access control. A web password only becomes mandatory once the device has joined a WiFi network for the first time
 - **Network scanner** — scans available WiFi networks and presents them in a dropdown
 
 ---

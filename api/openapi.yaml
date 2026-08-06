@@ -9,11 +9,20 @@ info:
     (see asyncapi.yaml). Parameters are passed as query parameters.
 
     Authentication: every state-changing endpoint (all POSTs, including the OTA
-    upload) requires HTTP Digest auth. Reads (`GET /api/v1/state`, the dashboard
-    and the SSE stream) are deliberately open - they expose only the cycle
-    counter, SSID and IP. The password is stored in NVS and is changeable via
-    `POST /api/v1/system/web_password`; the shipped factory default is public, so change
-    it on first setup. Until it is changed, every state-changing endpoint except
+    upload) requires HTTP Digest auth **once the device has joined a WiFi network
+    for the first time**. Before that - a factory-fresh rig, or one where the
+    operator pressed Skip on the setup screen - no authentication is required on
+    any route: the `AutoLee-Setup` AP is WPA2-PSK with a per-device key shown only
+    on the LCD and its join QR, so physical presence at the press is the gate, and
+    the rig stays fully usable with no WiFi and no password change. The first
+    successful join latches this permanently (NVS), so a later router outage that
+    drops the device back to its own AP does not reopen it. Reads (`GET
+    /api/v1/state`, the dashboard and the SSE stream) are deliberately open in
+    both modes - they expose only the cycle counter, SSID and IP. The password
+    is stored in NVS and is changeable via
+    `POST /api/v1/system/web_password`; the shipped factory default is user `autolee`,
+    password `autolee` - public knowledge, so change it when you put the rig on a
+    network. From that first join until it is changed, every state-changing endpoint except
     `POST /api/v1/system/web_password` itself returns 403 (`DefaultPasswordActive`) -
     the device will not run, calibrate or accept an OTA upload while the
     factory-default password is still in effect. `GET /api/v1/state`'s

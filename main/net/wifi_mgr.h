@@ -12,6 +12,12 @@ void start();  // load saved creds, try STA, fall back to AP + captive portal
 
 bool isConnected();
 bool isApMode();
+// True once the device has ever reached GOT_IP on a real network. Latched in
+// NVS and never cleared, including by clearCredentials() - a WiFi reset must not
+// discard a web password the operator already set. Drives the web auth policy:
+// false => no web password required at all (physical presence at the rig is the
+// gate), true => digest auth + force-change-on-first-use apply.
+bool hasEverJoined();
 std::string ipAddress();   // STA or AP IP, whichever is active
 std::string ssid();        // connected STA SSID, or the AP's SSID in AP mode
 std::string apPassword();  // the setup AP's WPA2 key (per-device, persisted in NVS)

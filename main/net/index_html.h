@@ -61,9 +61,11 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <h1>AutoLee</h1>
 <div class="sub">by K.L Design · <span id="ver"></span></div>
 
-<!-- Shown on every page (not just Main) while the web password is still the
-     factory default: the firmware refuses every control action with a 403
-     until it's changed - see the "defaultPassword" state field. -->
+<!-- Shown on every page (not just Main) while the device is on a real network
+     with the web password still at the factory default: the firmware refuses
+     every control action with a 403 until it's changed - see the
+     "defaultPassword" state field, which stays false in standalone AP mode
+     where no password is required at all. -->
 <div class="pw-alert" id="pwAlert">
 <div style="color:#FFD37C;font-weight:700;margin-bottom:4px">&#9888; DEFAULT PASSWORD IN USE</div>
 <div style="color:#aaa;font-size:.8em;margin-bottom:8px">Controls are locked (run, calibrate, OTA, etc.) until you set a real web password.</div>
@@ -315,7 +317,7 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <div class="sec">
 <h2>Web Password</h2>
-<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload (user: <b>autolee</b>). The factory default is publicly known &mdash; until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all.</div>
+<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload once AutoLee has joined a WiFi network for the first time (user: <b>autolee</b>, password: <b>autolee</b>). Until then &mdash; including after Skip on the setup screen &mdash; no password is asked for at all: the AP key on the screen already means you are standing at the press. That factory default is public knowledge &mdash; so once you go on a network, until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all.</div>
 <input type="password" id="wpNew" placeholder="New password">
 <button class="btn btn-blue btn-sm" onclick="saveWebPassword()" style="width:100%">Change Password</button>
 <div id="wpMsg" class="hint" style="margin-top:6px"></div>

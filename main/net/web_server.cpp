@@ -199,7 +199,12 @@ static std::string buildStateJSON() {
   st.batchTarget = ms.batchTarget;
   st.batchCount = ms.batchCount;
   st.batchActive = ms.batchActive;
-  st.defaultPassword = s_default_password_active;
+  // Drives the web UI's "DEFAULT PASSWORD IN USE / controls are locked" banner,
+  // so it must track when that is actually true. On a rig that has never joined
+  // a network nothing is locked (physical presence is the gate - see the
+  // middleware) and the banner would be a lie, so it only fires once the device
+  // has been on a network with the password still at the factory default.
+  st.defaultPassword = s_default_password_active && wifi_mgr::hasEverJoined();
 
   // 1024, not 768: the worst case (31-char git-describe version, fully-escaped
   // 32-byte SSID, saturated counters, longest profile names) lands close enough
@@ -431,9 +436,15 @@ void setupWebServer() {
       .setAuthMethod(DIGEST_AUTH)
       .setAuthFailureMessage("AutoLee: authentication required");
   s_default_password_active = (webPass == WEB_AUTH_DEFAULT_PASS);
-  if (s_default_password_active) {
+  // Only a warning on a rig that has been networked - before that the default
+  // password is by design, not a misconfiguration to nag about.
+  if (s_default_password_active && wifi_mgr::hasEverJoined()) {
     webLogLevel(LogLevel::Warn, "Security",
                 "Web password is still the factory default - change it on the WiFi page");
+  }
+  if (!wifi_mgr::hasEverJoined()) {
+    webLogLevel(LogLevel::Info, "Security",
+                "Never networked - web controls unauthenticated (AP key is the gate)");
   }
   // Attached once, server-wide, rather than per-endpoint: gating on the HTTP
   // method means every state-changing route is covered automatically - including
@@ -502,13 +513,28 @@ void setupWebServer() {
             }
           }
         }
-        // Captive-portal setup endpoints are exempt while in AP-setup mode: a
-        // fresh user doesn't have the (digest) web password, and WPA2 on the AP
-        // is what gates access there instead. Only /save and /clear, and only
-        // when unconfigured - every /api/v1/* control route stays gated.
-        if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
-          if (uri == "/save" || uri == "/clear") return next();
-        }
+        // A rig that has never been on a network is deliberately
+        // unauthenticated - EVERY route, not just the captive-portal /save and
+        // /clear.
+        //
+        // It must be fully usable with no WiFi and no password change, including
+        // straight after Skip on the setup screen: the operator is at the
+        // machine. What gates access is physical presence, not a credential -
+        // the AP is WPA2-PSK with a per-device key that exists only on the LCD
+        // and its join QR (wifi_mgr.cpp's ensureApKey()), so joining it means
+        // having stood in front of the press. The on-device touch UI has always
+        // been unauthenticated for the same reason; a phone on the device's own
+        // AP is the same trust level, and demanding a digest login there only
+        // ever locked out the operator holding the machine.
+        //
+        // The moment it first joins a real network this stops applying, for good
+        // (wifi_mgr::hasEverJoined() is latched in NVS): it is then reachable by
+        // everything on that LAN, physical presence proves nothing, and both the
+        // digest challenge and the #1c force-change gate below take effect. The
+        // latch rather than a live isApMode() check is deliberate - otherwise a
+        // router outage would drop an already-networked rig back to its own AP
+        // and silently reopen it.
+        if (!wifi_mgr::hasEverJoined()) return next();
         // #1c (docs/PLAN.md) "force-change-on-first-use": while the password
         // is still the factory default, every state-changing route is refused
         // with a friendly 403 telling the caller to set a real password first

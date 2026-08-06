@@ -193,6 +193,11 @@ static const char *WEB_AUTH_DEFAULT_PASS = "autolee";
 static const char *WEB_AUTH_REALM = "AutoLee";
 static constexpr size_t WEB_AUTH_PASS_MAX = 64;
 
+// Both of the above apply only in STA mode (device joined a real network). On
+// its own setup AP the web control surface is deliberately unauthenticated -
+// the WPA2 AP key lives only on the LCD and its join QR, so physical presence
+// at the rig is the gate. See the middleware in web_server.cpp.
+
 // ==========================================================================
 //  OTA
 // ==========================================================================

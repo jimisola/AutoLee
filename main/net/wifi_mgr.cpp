@@ -27,6 +27,16 @@ static EventGroupHandle_t s_wifi_event_group;
 // was never set anywhere, which made the wait on it purely decorative.
 static constexpr int kConnectedBit = BIT0;
 
+// Latched the first time the device ever reaches GOT_IP on a real network, and
+// never cleared afterwards (not even by clearCredentials() - see there). The web
+// auth policy hangs off this: until the rig has been on a network it is
+// physical-presence-only and needs no web password at all; once it has, a
+// password change is required. A latch rather than a live isConnected() check so
+// a router outage - which drops the device back to its own AP with the STA
+// credentials still stored - cannot silently reopen an already-networked rig.
+static const char *kNvsJoinedKey = "joined";
+static bool s_ever_joined = false;
+
 static const char *kNvsApKeyKey = "apkey";
 // Per-device WPA2 key for the setup AP. Generated once and persisted, so it's
 // stable across reboots and WiFi resets (only an NVS erase rotates it) - it's a
@@ -52,6 +62,9 @@ static esp_netif_t *s_sta_netif = nullptr;
 static esp_netif_t *s_ap_netif = nullptr;
 static std::string s_scanned_html;
 static std::string s_connected_ssid;
+
+// Defined below, but called from the event handler above it.
+static void markEverJoined();
 
 static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t event_id, void *data) {
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -82,8 +95,34 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
     (void)data;
     // (Re)connected - restore the flag so a recovered link reads as connected.
     s_connected = true;
+    markEverJoined();
     xEventGroupSetBits(s_wifi_event_group, kConnectedBit);
   }
+}
+
+bool hasEverJoined() {
+  return s_ever_joined;
+}
+
+static void loadEverJoined() {
+  nvs_handle_t h;
+  if (nvs_open(kNvsNamespace, NVS_READONLY, &h) != ESP_OK) return;
+  uint8_t raw = 0;
+  if (nvs_get_u8(h, kNvsJoinedKey, &raw) == ESP_OK) s_ever_joined = (raw != 0);
+  nvs_close(h);
+}
+
+// Called from the GOT_IP event handler, so it must stay cheap on the repeat
+// path: the in-RAM flag short-circuits every reconnect, leaving exactly one
+// flash write in the device's lifetime.
+static void markEverJoined() {
+  if (s_ever_joined) return;
+  s_ever_joined = true;
+  nvs_handle_t h;
+  if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return;
+  if (nvs_set_u8(h, kNvsJoinedKey, 1) == ESP_OK) nvs_commit(h);
+  nvs_close(h);
+  ESP_LOGW(TAG, "First join to a network - a web password change is now required");
 }
 
 static bool load_credentials(std::string &ssid, std::string &pass) {
@@ -125,6 +164,11 @@ bool saveCredentials(const std::string &ssid, const std::string &pass) {
 }
 
 void clearCredentials() {
+  // Key-scoped, and deliberately NOT touching kNvsJoinedKey: a WiFi reset puts
+  // the device back on its own AP but must not discard a web password the
+  // operator already set, nor silently drop the rig back to the
+  // no-password-required policy it had before it was ever networked. Only an NVS
+  // erase over USB resets the latch.
   nvs_handle_t h;
   if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return;
   nvs_erase_key(h, "ssid");
@@ -236,6 +280,9 @@ static bool connect_sta(const std::string &ssid, const std::string &pass, uint32
 }
 
 void start() {
+  // Before any connect attempt, so setupWebServer() sees the persisted value
+  // even on a boot that never reaches GOT_IP.
+  loadEverJoined();
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   s_sta_netif = esp_netif_create_default_wifi_sta();
