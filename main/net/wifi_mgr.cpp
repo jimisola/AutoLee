@@ -410,10 +410,17 @@ void stopForReboot() {
   //
   // Best-effort throughout: every failure here is still followed by the reset,
   // since refusing to reboot would be strictly worse than an unclean one.
-  if (s_dns_handle) {
-    stop_dns_server(s_dns_handle);
-    s_dns_handle = nullptr;
-  }
+  //
+  // The DNS responder is deliberately NOT stopped, even though it is the one
+  // task most obviously in the way. stop_dns_server() is a bare
+  // vTaskDelete(handle->task) (lib/dns_server/dns_server.c), and that task
+  // spends effectively all its time blocked inside recvfrom(). Deleting a task
+  // mid-syscall inside lwIP never releases the core lock it is holding, so the
+  // esp_wifi_stop() below - which needs that lock - then blocks forever, in
+  // pump_task, and esp_restart() is never reached at all. That turns "reboots
+  // uncleanly" into "does not reboot", which is strictly worse and was
+  // observed on hardware. The responder dies with the reset like everything
+  // else; nothing needs it shut down in an orderly way first.
   esp_wifi_disconnect();
   esp_wifi_stop();
 }

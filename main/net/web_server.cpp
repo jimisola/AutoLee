@@ -237,12 +237,32 @@ static const char WIFI_CSS[] =
     "color:#fff;font-size:16px;cursor:pointer;}"
     ".btnSave{background:#28a745;}.btnClear{background:#c0392b;}"
     ".box{max-width:420px;margin:auto;background:#1b1b1b;padding:20px;border-radius:12px;}"
-    "label{display:block;margin-top:10px;font-size:14px;color:#aaa;}";
+    "label{display:block;margin-top:10px;font-size:14px;color:#aaa;}"
+    // Reveal button, overlaid on the right-hand end of a password field. The
+    // generic `button` rule above is full-width with its own margin, so every
+    // one of those has to be undone here or the eye becomes a second bar under
+    // the input.
+    ".pw{position:relative;}"
+    ".pw input{padding-right:48px;}"
+    ".eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);"
+    "width:38px;height:38px;margin:0;padding:0;background:transparent;"
+    "font-size:19px;line-height:1;}"
+    ".sec{margin-top:20px;padding-top:14px;border-top:1px solid #333;}"
+    ".why{font-size:13px;color:#aaa;line-height:1.45;margin:6px 0 0;}";
 
 static std::string wifiConfigPage() {
+  // Joining a network is the one moment the trust model changes: until now the
+  // WPA2 AP key has been the only gate and physical presence was the whole
+  // story, but after this reboot the rig is reachable by everything on the LAN.
+  // So the password is asked for HERE, in the same transaction, rather than
+  // left to a separate trip the operator has no reason to know they must make.
+  // Only on a rig that has never joined - afterwards the password already
+  // exists and this section would just be a second, confusing way to change it.
+  const bool needWebPassword = !wifi_mgr::hasEverJoined();
+
   std::string html;
   html +=
-      "<!DOCTYPE html><html><head><meta name='viewport' "
+      "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' "
       "content='width=device-width,initial-scale=1'>";
   html += "<title>AutoLee WiFi Setup</title><style>";
   html += WIFI_CSS;
@@ -256,12 +276,35 @@ static std::string wifiConfigPage() {
       "<label>Or type SSID manually</label><input name='ssid_manual' placeholder='SSID "
       "(optional)'>";
   html +=
-      "<label>Password</label><input name='pass' type='password' placeholder='WiFi "
-      "password'>";
+      "<label>Password</label><div class='pw'><input name='pass' id='wifipw' type='password' "
+      "placeholder='WiFi password'>"
+      "<button type='button' class='eye' id='wifipwEye' onclick=\"tog('wifipw',this)\" "
+      "aria-label='Show password'>&#128065;</button></div>";
+
+  if (needWebPassword) {
+    html +=
+        "<div class='sec'><label>Device password</label><div class='pw'>"
+        "<input name='web_password' id='webpw' type='password' placeholder='At least 8 "
+        "characters' minlength='8' required>"
+        "<button type='button' class='eye' onclick=\"tog('webpw',this)\" "
+        "aria-label='Show password'>&#128065;</button></div>"
+        "<p class='why'>Once AutoLee is on your network, anything on that network can reach "
+        "it. This password is what will be asked for before it will run, calibrate or accept "
+        "a firmware update. Username is <b>autolee</b>.</p></div>";
+  }
+
   html += "<button class='btnSave' type='submit'>Save &amp; Reboot</button></form>";
   html +=
       "<form method='POST' action='/clear'><button class='btnClear' "
       "type='submit'>Clear Saved WiFi</button></form>";
+  // type='button' on the eyes keeps them out of the submit path; without it a
+  // <button> inside a <form> defaults to type='submit' and revealing the
+  // password would save and reboot the press.
+  html +=
+      "<script>function tog(id,b){var e=document.getElementById(id);"
+      "var hidden=e.type==='password';e.type=hidden?'text':'password';"
+      "b.innerHTML=hidden?'&#128584;':'&#128065;';"
+      "b.setAttribute('aria-label',hidden?'Hide password':'Show password');}</script>";
   html += "</div></body></html>";
   return html;
 }
@@ -625,6 +668,33 @@ void setupWebServer() {
           "style='color:#7cf;'>Go back</a></p></body></html>");
       return res->send();
     }
+    // The web password is validated BEFORE the credentials are stored, so a
+    // rejected password leaves nothing behind - otherwise a bad password would
+    // still have committed the SSID, and the operator would be one reboot away
+    // from a networked rig with no password set.
+    const std::string webPw = req->getParam("web_password", "");
+    const bool needWebPassword = !wifi_mgr::hasEverJoined();
+    if (needWebPassword && webPw.length() < WEB_AUTH_PASS_MIN) {
+      res->setCode(400);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Device password too short</h2>"
+          "<p>It must be at least 8 characters.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
+    if (webPw.length() > WEB_AUTH_PASS_MAX) {
+      res->setCode(400);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Device password too long</h2>"
+          "<p>It must be 64 characters or fewer.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
+
     if (!wifi_mgr::saveCredentials(finalSSID, pw)) {
       res->setCode(400);
       res->setContentType("text/html");
@@ -635,6 +705,20 @@ void setupWebServer() {
           "or fewer.</p><p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
       return res->send();
     }
+
+    // Applied only after the credentials stored cleanly, so the two land
+    // together or not at all.
+    if (!webPw.empty()) {
+      if (saveWebPassword(webPw)) {
+        s_auth.setPassword(webPw.c_str());
+        s_default_password_active = (webPw == WEB_AUTH_DEFAULT_PASS);
+        webLog("Security", "Web password set during WiFi setup");
+      } else {
+        webLogLevel(LogLevel::Error, "Security",
+                    "Could not persist the web password - the factory default still applies");
+      }
+    }
+
     res->setCode(200);
     res->setContentType("text/html");
     res->setContent(
@@ -976,9 +1060,33 @@ void setupWebServer() {
     if (req->hasParam("ssid")) {
       std::string ssid = req->getParam("ssid", "");
       std::string pass = req->getParam("pass", "");
+      // Same rule the setup page enforces, applied here too: this endpoint is
+      // reachable unauthenticated on a never-networked rig (see the middleware),
+      // so leaving it exempt would make it the obvious way to get onto a network
+      // with the factory-default password still in place.
+      const std::string webPw = req->getParam("web_password", "");
+      const bool needWebPassword = !wifi_mgr::hasEverJoined();
+      if (needWebPassword && webPw.length() < WEB_AUTH_PASS_MIN) {
+        return res->send(400, "text/plain",
+                         "web_password is required on a device that has never joined a network, "
+                         "and must be at least 8 characters");
+      }
+      if (webPw.length() > WEB_AUTH_PASS_MAX) {
+        return res->send(400, "text/plain", "web_password must be at most 64 characters");
+      }
       if (!wifi_mgr::saveCredentials(ssid, pass)) {
         return res->send(400, "text/plain",
                          "SSID must be 1-32 characters and the password at most 64");
+      }
+      if (!webPw.empty()) {
+        if (saveWebPassword(webPw)) {
+          s_auth.setPassword(webPw.c_str());
+          s_default_password_active = (webPw == WEB_AUTH_DEFAULT_PASS);
+          webLog("Security", "Web password set during WiFi setup");
+        } else {
+          webLogLevel(LogLevel::Error, "Security",
+                      "Could not persist the web password - the factory default still applies");
+        }
       }
       rebootRequested = true;
       rebootRequestMs = millis();

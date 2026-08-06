@@ -192,6 +192,11 @@ static const char *WEB_AUTH_USER = "autolee";
 static const char *WEB_AUTH_DEFAULT_PASS = "autolee";
 static const char *WEB_AUTH_REALM = "AutoLee";
 static constexpr size_t WEB_AUTH_PASS_MAX = 64;
+// Floor for a password the operator chooses themselves (the WiFi setup page and
+// POST /api/v1/system/web_password). Deliberately not applied to
+// WEB_AUTH_DEFAULT_PASS, which is shorter and is the state this floor exists to
+// get the device out of.
+static constexpr size_t WEB_AUTH_PASS_MIN = 8;
 
 // Both of the above apply only in STA mode (device joined a real network). On
 // its own setup AP the web control surface is deliberately unauthenticated -
