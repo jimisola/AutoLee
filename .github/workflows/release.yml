@@ -1,4 +1,4 @@
-name: Release firmware
+name: Release
 
 # The whole release, start to finish, in one workflow.
 #
@@ -34,10 +34,16 @@ on:
     inputs:
       version:
         description: >-
-          Version to release. Bare, full three-part semver — 2.0.0, never 2.0 or
-          v2.0.0 (see CONTRIBUTING.md, "Versioning & releases").
-        required: true
+          Version to release — bare, full three-part semver: 2.0.0, never 2.0 or
+          v2.0.0 (see CONTRIBUTING.md, "Versioning & releases"). Leave empty to
+          auto-detect from the Conventional Commits since the last tag.
+        required: false
         type: string
+      force:
+        description: "Allow a version that disagrees with the auto-detected one."
+        required: false
+        type: boolean
+        default: false
       dry-run:
         description: "Validate and preview only — no checks run, no tag pushed, nothing published."
         required: false
@@ -46,10 +52,10 @@ on:
 
 # There is deliberately no `ref` input. The release is cut from the ref this
 # workflow was dispatched on (choose it in the "Run workflow" dropdown), because
-# that is the only way the reusable `checks` job below can be guaranteed to test
-# the same commit that gets tagged: `uses: ./.github/workflows/ci.yml` always
-# resolves to the caller's ref, not to an arbitrary input. `prepare` asserts
-# that commit is on main.
+# that is the only way the reusable `checks` jobs below can be guaranteed to
+# test the same commit that gets tagged: `uses: ./.github/workflows/build.yml`
+# always resolves to the caller's ref, not to an arbitrary input. `prepare`
+# asserts that commit is on main.
 
 permissions:
   contents: read
@@ -61,46 +67,99 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Resolves and validates what would be released, and writes the summary.
-  # Deliberately does nothing durable: a dry run is exactly this job and nothing
-  # else, so previewing a release costs one cheap job rather than a full
-  # ESP-IDF build.
+  # Resolves and validates what would be released, and writes the summary
+  # including the notes. Deliberately does nothing durable: a dry run is exactly
+  # this job and nothing else, so previewing a release costs one cheap job
+  # rather than a full ESP-IDF build.
   prepare:
     name: Validate the release
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.check.outputs.version }}
-      previous: ${{ steps.check.outputs.previous }}
+      version: ${{ steps.resolve.outputs.version }}
+      auto: ${{ steps.resolve.outputs.auto }}
+      source: ${{ steps.resolve.outputs.source }}
+      previous: ${{ steps.previous.outputs.tag }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
         with:
           persist-credentials: false
-          # Full history + tags: the checks below need to see every existing tag
-          # and to resolve main.
+          # Full history + tags: git-cliff needs every commit back to the last
+          # tag to compute the bump and the notes, and the checks below need to
+          # see every existing tag and to resolve main.
           fetch-depth: 0
 
-      - name: Validate version, tag and branch
-        id: check
+      - uses: ./.github/actions/setup-git-cliff
+
+      # Shape-checks the input before anything else looks at it. Empty passes —
+      # that is the "auto-detect" case, resolved below.
+      - uses: ./.github/actions/check-version
+        with:
+          version: ${{ inputs.version }}
+
+      # Captured before the release job creates the new tag — `git describe` run
+      # after that would find the just-created tag instead.
+      - name: Record previous tag
+        id: previous
         env:
-          VERSION: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          echo "tag=$(git describe --tags --abbrev=0 "$SHA" 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve version
+        id: resolve
+        env:
+          REQUESTED: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          AUTO="$(git-cliff --config cliff.toml --bumped-version)"
+
+          if [ -z "$REQUESTED" ]; then
+            VERSION="$AUTO"
+            SOURCE="auto-detected from Conventional Commits"
+          else
+            # Already shape-checked by check-version above.
+            VERSION="$REQUESTED"
+            if [ "$VERSION" != "$AUTO" ]; then
+              if [ "$FORCE" != "true" ]; then
+                echo "::error::Version '$VERSION' disagrees with the auto-detected '$AUTO'. Re-run with force enabled if that is deliberate."
+                exit 1
+              fi
+              echo "::warning::Forcing '$VERSION' over the auto-detected '$AUTO'."
+              SOURCE="user-specified (forced over '$AUTO')"
+            else
+              SOURCE="user-specified (matches auto-detected)"
+            fi
+          fi
+
+          # Auto-detect can legitimately return nothing useful — e.g. no tags
+          # *and* no conventional commits to infer a bump from. Better to fail
+          # here than to try tagging an empty string.
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not determine a version to release. Pass one explicitly."
+            exit 1
+          fi
+
+          {
+            echo "version=$VERSION"
+            echo "auto=$AUTO"
+            echo "source=$SOURCE"
+          } >> "$GITHUB_OUTPUT"
+
+      # The auto-detected value comes from git-cliff, not from the input, so it
+      # has not been through check-version. cliff.toml's tag_pattern makes a
+      # non-semver result unlikely, but the tag is the version the firmware
+      # reports — cheap to re-assert, expensive to get wrong.
+      - uses: ./.github/actions/check-version
+        with:
+          version: ${{ steps.resolve.outputs.version }}
+
+      - name: Check the tag is free and the ref is on main
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-
-          # Bare full three-part semver. The tag string *is* the version this
-          # firmware reports (esp_app_desc_t.version, /api/v1/state, the OTA
-          # identity check), so it has to be a semver value with nothing to
-          # strip — hence no "v" and no X.Y shorthand. CONTRIBUTING.md has the
-          # full reasoning.
-          if [ "${VERSION#v}" != "$VERSION" ]; then
-            echo "::error::'$VERSION' has a 'v' prefix. Tags here are bare — use '${VERSION#v}'."
-            exit 1
-          fi
-          if ! printf '%s' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
-            echo "::error::'$VERSION' is not bare three-part semver (e.g. 2.0.0)."
-            exit 1
-          fi
-
           if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
             echo "::error::Tag '$VERSION' already exists. Releases are immutable; pick the next version."
             exit 1
@@ -114,34 +173,69 @@ jobs:
             exit 1
           fi
 
-          PREVIOUS="$(git describe --tags --abbrev=0 "$SHA" 2>/dev/null || echo '(none)')"
-          {
-            echo "version=$VERSION"
-            echo "previous=$PREVIOUS"
-          } >> "$GITHUB_OUTPUT"
+      # --strip all: no header, no footer, no version heading — the release page
+      # already shows the version. GITHUB_TOKEN lets git-cliff resolve each
+      # squashed commit to its PR number and author for the "in #N by @who"
+      # suffixes; without it the notes still render, just barer.
+      - name: Generate release notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git-cliff --config cliff.toml --latest --unreleased --strip all --output NOTES.md
+
+      # Handed to the release job rather than regenerated there: the notes the
+      # reviewer approved at the gate are then provably the notes that ship.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-notes
+          path: NOTES.md
 
       - name: Summary
+        if: always()
         env:
-          VERSION: ${{ inputs.version }}
-          PREVIOUS: ${{ steps.check.outputs.previous }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+          AUTO: ${{ steps.resolve.outputs.auto }}
+          SOURCE: ${{ steps.resolve.outputs.source }}
+          PREVIOUS: ${{ steps.previous.outputs.tag }}
           DRY_RUN: ${{ inputs.dry-run }}
           SHA: ${{ github.sha }}
           REF: ${{ github.ref_name }}
         run: |
+          # Test the value: "false" is non-empty, so ${DRY_RUN:+...} would
+          # expand for both.
           if [ "$DRY_RUN" = "true" ]; then
+            HEADING="Release (dry run)"
             MODE='dry run — nothing tagged, nothing published'
           else
+            HEADING="Release"
             MODE='checks, then approval, then tag + prerelease + verify + promote'
           fi
           {
-            echo "### Release $VERSION"
+            echo "### $HEADING ${VERSION:-(unresolved)}"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| Version | \`$VERSION\` |"
-            echo "| Previous tag | \`$PREVIOUS\` |"
+            echo "| Version | \`${VERSION:-(unresolved)}\` |"
+            echo "| Auto-detected | \`${AUTO:-(none)}\` |"
+            echo "| Source | ${SOURCE:-(unresolved)} |"
+            echo "| Previous tag | \`${PREVIOUS:-(none yet)}\` |"
             echo "| Ref | \`$REF\` @ \`${SHA:0:12}\` |"
             echo "| Mode | $MODE |"
+            echo ""
+            echo "#### Release notes"
+            echo ""
+            cat NOTES.md 2>/dev/null || echo "_(not generated — an earlier step failed)_"
+            echo ""
+            # Anything listed here but missing above was dropped as
+            # unconventional, or as a skipped ci:/build:/tools: type.
+            echo "<details><summary>Commits since \`${PREVIOUS:-the beginning}\`</summary>"
+            echo ""
+            if [ -n "$PREVIOUS" ]; then
+              git log "${PREVIOUS}..${SHA}" --format="- %h %s"
+            else
+              git log "$SHA" --format="- %h %s" | head -40
+            fi
+            echo ""
+            echo "</details>"
             echo ""
             echo "Artifacts that will be attached:"
             echo ""
@@ -153,17 +247,25 @@ jobs:
   # The same checks that guard main, called rather than reimplemented, and run
   # *before* the approval gate — so the reviewer is approving something already
   # green rather than a version string.
-  checks:
+  build:
     name: Checks
     needs: prepare
     if: ${{ !inputs.dry-run }}
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+
+  lint:
+    name: Checks
+    needs: prepare
+    if: ${{ !inputs.dry-run }}
+    uses: ./.github/workflows/lint.yml
     permissions:
       contents: read
 
   # THE APPROVAL GATE. `environment: stable` is what makes this job sit pending
   # until a required reviewer approves it. By that point the summary above shows
-  # the version and the previous tag, and the checks are green.
+  # the version, the previous tag and the notes, and the checks are green.
   #
   # ⚠️  The `stable` environment must exist WITH a required reviewer. GitHub
   # auto-creates a named environment on first use with NO protection rules at
@@ -172,7 +274,7 @@ jobs:
   # public repositories. See RELEASING.md.
   release:
     name: Tag, build and create the prerelease
-    needs: [prepare, checks]
+    needs: [prepare, build, lint]
     if: ${{ !inputs.dry-run }}
     runs-on: ubuntu-latest
     environment:
@@ -188,6 +290,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-notes
 
       # Tagged locally first, and pushed only once the artifacts built from it
       # have been checked. The version is baked into the binary from
@@ -272,6 +378,10 @@ jobs:
       # Assets are passed to `create` rather than uploaded afterwards, so the
       # release never exists in a state where its firmware is missing — the
       # window this whole rewrite is about.
+      #
+      # --notes-file, not --generate-notes: these are the git-cliff notes
+      # generated in `prepare` and shown at the approval gate, so what ships is
+      # what was approved.
       - name: Create the prerelease with its artifacts
         id: create
         env:
@@ -281,7 +391,7 @@ jobs:
           set -euo pipefail
           URL=$(gh release create "$VERSION" \
             --title "$VERSION" \
-            --generate-notes \
+            --notes-file NOTES.md \
             --prerelease \
             "build/AutoLee_v${VERSION}_merged.bin" \
             "build/AutoLee_v${VERSION}_update.bin" \

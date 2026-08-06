@@ -9,13 +9,14 @@
 #     regenerated dependencies.lock.
 #   * .pre-commit-config.yaml `rev:` pins — Renovate has a `pre-commit`
 #     manager, Dependabot does not.
-#   * ci.yml's Python tooling now lives in .github/requirements-ci.txt with
+#   * The workflows' Python tooling lives in .github/requirements-ci.txt with
 #     exact pins, so the `pip` ecosystem below keeps it fresh. The remaining
 #     inline pin is `npx @stoplight/spectral-cli@6.16.3`: exact, so CI can no
 #     longer go red with no commit behind it, but still invisible to
 #     Dependabot (it would need a package.json + lockfile).
-#   * The actionlint/zizmor versions pinned in ci.yml's `workflows` job are
-#     likewise invisible here.
+#   * The actionlint/zizmor versions pinned in lint.yml's `workflows` job, and
+#     the git-cliff version + checksum defaulted in
+#     .github/actions/setup-git-cliff, are likewise invisible here.
 #
 # So: this file keeps the action SHAs fresh, and the list above is the honest
 # remainder that a human still has to watch.

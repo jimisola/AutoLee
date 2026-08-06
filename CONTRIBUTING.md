@@ -118,8 +118,9 @@ configurable.
   one; release artifact filenames also keep a literal `v` (`AutoLee_v2.0.0_merged.bin`) since a
   filename is prose, not the version identifier.
 - There is therefore no source file to bump when releasing. **Don't tag by hand**, though: releases
-  are cut by the **Release firmware** workflow (Actions → Run workflow), which validates the
-  version, runs the full CI suite, pauses for approval, tags, builds, asserts the version baked
+  are cut by the **Release** workflow (Actions → Run workflow), which resolves the version from the
+  Conventional Commits since the last tag (or validates one you pass explicitly), runs the full CI
+  suite, pauses for approval, tags, builds, asserts the version baked
   into the firmware matches the tag, publishes as a prerelease with the artifacts already
   attached, re-verifies the published assets, and only then promotes it to latest. A hand-pushed
   tag skips all of that. See [`RELEASING.md`](RELEASING.md).
@@ -150,7 +151,7 @@ configurable.
 
 ## Local hooks (optional)
 
-Run the same formatters/linters CI uses (clang-format, ruff, yamllint, basic checks)
+Run the same formatters/linters CI's `pre-commit` job uses (clang-format, ruff, basic checks)
 automatically before each commit:
 
 ```bash
@@ -169,7 +170,10 @@ Why ESP-IDF (and what it costs vs. the earlier PlatformIO/Arduino attempt) is re
 - [Conventional Commits](https://www.conventionalcommits.org/) for commits and PR titles. The
   allowed types are in [`.commitlintrc.yml`](.commitlintrc.yml); the **PR title** is enforced by
   `.github/workflows/check-semantic-pr.yml`, since that's what becomes the commit subject on
-  `main` under squash-merge.
+  `main` under squash-merge. Those subjects are also what
+  [`cliff.toml`](cliff.toml) turns into the release version and the release notes — `fix:` takes a
+  patch, `feat:` a minor, any `!:` a major, and `ci:`/`build:`/`tools:` are left out of the notes
+  entirely unless breaking. An unconventional subject is silently dropped from the notes.
 - Work on a branch and open a PR; don't push directly to `main`.
 - Never hardcode the firmware version anywhere — it comes from `git describe` via
   `esp_app_get_description()->version` (see "Versioning & releases" above).
