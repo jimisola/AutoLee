@@ -11,5 +11,9 @@ managed_components/
 host_test/build/
 host_test/build-coverage/
 
+# tools/ (Python tooling and its pytest suite)
+__pycache__/
+.pytest_cache/
+
 # OS cruft
 .DS_Store

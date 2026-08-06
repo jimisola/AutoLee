@@ -48,6 +48,10 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
   cd host_test && cmake -B build && cmake --build build -j && cd build && ctest --output-on-failure
   ```
   Add `-DAUTOLEE_COVERAGE=ON` to the `cmake -B build` step for gcov/gcovr coverage.
+- **Release-config tests:** `tools/tests/` holds a pytest suite covering `cliff.toml` — the bump
+  mapping RELEASING.md documents, the `tag_pattern`, and how the release notes render. It runs the
+  real `git-cliff` against throwaway git repos, and skips itself if `git-cliff` is not on `PATH`.
+  Edit `cliff.toml` and run `pytest tools/tests`.
 - **LVGL setup:** `include/lv_conf.h` is found via `-D LV_CONF_INCLUDE_SIMPLE` (set project-wide in
   the root `CMakeLists.txt`) — must stay visible to every component that includes `lvgl.h`.
 
