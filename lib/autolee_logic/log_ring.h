@@ -33,6 +33,49 @@
 
 namespace autolee {
 
+// JSON-escape one log line into `out`.
+//
+// Log lines reach the ring through vsnprintf with caller-supplied arguments
+// (SSIDs, filenames, error strings), so control characters are reachable in
+// practice, not just in theory. Escaping only '"' and '\\' - as both log
+// serializers previously did - lets a raw byte < 0x20 through verbatim, which
+// is invalid JSON and breaks the *entire* payload for the dashboard's log view
+// and every SSE subscriber, not just the offending line.
+//
+// Unlike jsonEscape() in state_json.h, which drops control characters, this
+// emits the \uXXXX form: log lines are diagnostic output, so a byte that made
+// it into the ring is worth preserving rather than silently deleting.
+// `out` must have room for 6 bytes per input char plus a NUL; output is
+// truncated (never split mid-escape) if it does not.
+inline void jsonEscapeLog(const char *in, char *out, size_t outSize) {
+  static const char kHex[] = "0123456789abcdef";
+  size_t o = 0;
+  for (size_t i = 0; in[i] != '\0'; i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (c == '"' || c == '\\') {
+      if (o + 2 >= outSize) break;
+      out[o++] = '\\';
+      out[o++] = (char)c;
+    } else if (c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\f') {
+      if (o + 2 >= outSize) break;
+      out[o++] = '\\';
+      out[o++] = c == '\n' ? 'n' : c == '\r' ? 'r' : c == '\t' ? 't' : c == '\b' ? 'b' : 'f';
+    } else if (c < 0x20 || c == 0x7f) {
+      if (o + 6 >= outSize) break;
+      out[o++] = '\\';
+      out[o++] = 'u';
+      out[o++] = '0';
+      out[o++] = '0';
+      out[o++] = kHex[(c >> 4) & 0xf];
+      out[o++] = kHex[c & 0xf];
+    } else {
+      if (o + 1 >= outSize) break;
+      out[o++] = (char)c;
+    }
+  }
+  out[o] = '\0';
+}
+
 #ifdef ESP_PLATFORM
 // Disables interrupts for the critical section - safe against the
 // single-core preemption hazard described above (see header comment).
@@ -122,6 +165,21 @@ class LogRing {
     SpinLockGuard g(lock_);
     uint16_t start = (serial_ < LINES) ? 0 : head_;  // oldest slot
     return buf_[(start + i) % LINES];
+  }
+
+  // Copy line `i` into `dst`. Prefer this over at() for anything that reads the
+  // characters: at() computes the slot under the lock but hands back a raw
+  // pointer, so a concurrent push() recycling that slot can tear the line under
+  // the reader. Here the memcpy happens inside the lock. `dst` is always
+  // NUL-terminated (truncated if `n` is shorter than the line).
+  void copyLine(uint16_t i, char *dst, size_t n) const {
+    if (n == 0) return;
+    SpinLockGuard g(lock_);
+    uint16_t start = (serial_ < LINES) ? 0 : head_;
+    const char *src = buf_[(start + i) % LINES];
+    size_t copy = n - 1 < LINELEN ? n - 1 : LINELEN;
+    memcpy(dst, src, copy);
+    dst[copy] = '\0';
   }
 
   static constexpr uint16_t capacity() { return LINES; }

@@ -1,4 +1,5 @@
 #include "stepper.h"
+#include "config.h"
 #include "stepper_motor_encoder.h"
 
 #include <atomic>
@@ -25,16 +26,26 @@ static constexpr uint32_t kSamplePointsMax = 500;
 // warning - this bound is a design choice, not yet bench-verified).
 static constexpr uint32_t kCruiseChunkMs = 20;
 
-// *** PCNT range assumption: the press's mechanical travel is assumed to fit
-// in +-30000 steps (16 microsteps => ~1875 full motor steps of travel).
-// setCurrentPosition() re-zeros at every calibration, bounding drift. If a
-// future board needs more travel than this, add PCNT overflow accumulation
-// (flags.accum_count + watch points) - not implemented here. ***
-static constexpr int kPcntLimit = 30000;
+// PCNT hardware counter window. The unit is configured with accumulation
+// enabled (flags.accum_count) plus watch points on both limits, so each time
+// the hardware counter hits +-kPcntLimit the driver folds that span into a
+// software accumulator and pcnt_unit_get_count() keeps returning the true
+// running total. The effective position range is therefore int32_t, not
+// +-kPcntLimit.
+//
+// This matters because a single calibration search (CAL_SEARCH_STEPS) is
+// several times this window: previously the counter wrapped silently and
+// getCurrentPosition() was off by a multiple of 60000 for the rest of the run.
+static constexpr int kPcntLimit = STEP_COUNT_WRAP;
 
 static rmt_channel_handle_t s_rmt_chan = nullptr;
 static pcnt_unit_handle_t s_pcnt_unit = nullptr;
 static gpio_num_t s_dir_gpio = GPIO_NUM_NC;
+static gpio_num_t s_enable_gpio = GPIO_NUM_NC;
+// DRV_ENN is active low: level 0 = driver energised.
+static constexpr int kEnableAsserted = 0;
+static constexpr int kEnableDeasserted = 1;
+static std::atomic<bool> s_enabled{false};
 
 static std::atomic<uint32_t> s_speedHz{1000};
 static std::atomic<uint32_t> s_accel{4000};  // steps/s^2
@@ -156,13 +167,24 @@ static void move_task(void *) {
   }
 }
 
-void init(gpio_num_t step_gpio, gpio_num_t dir_gpio) {
+void init(gpio_num_t step_gpio, gpio_num_t dir_gpio, gpio_num_t enable_gpio) {
   s_dir_gpio = dir_gpio;
   gpio_config_t dir_cfg = {};
   dir_cfg.pin_bit_mask = 1ULL << dir_gpio;
   dir_cfg.mode = GPIO_MODE_OUTPUT;
   ESP_ERROR_CHECK(gpio_config(&dir_cfg));
   gpio_set_level(dir_gpio, 0);
+
+  // Drive DRV_ENN explicitly. The Arduino build did this via FastAccelStepper's
+  // setEnablePin()/setAutoEnable(); the port dropped the handling and kept only
+  // the #define, leaving the pin high-Z from power-on through every stop, jam
+  // latch and reboot. Assert it before the first STEP pulse can be emitted.
+  s_enable_gpio = enable_gpio;
+  gpio_config_t en_cfg = {};
+  en_cfg.pin_bit_mask = 1ULL << enable_gpio;
+  en_cfg.mode = GPIO_MODE_OUTPUT;
+  ESP_ERROR_CHECK(gpio_config(&en_cfg));
+  setEnabled(true);
 
   rmt_tx_channel_config_t tx_cfg = {};
   tx_cfg.gpio_num = step_gpio;
@@ -176,7 +198,13 @@ void init(gpio_num_t step_gpio, gpio_num_t dir_gpio) {
   pcnt_unit_config_t unit_cfg = {};
   unit_cfg.high_limit = kPcntLimit;
   unit_cfg.low_limit = -kPcntLimit;
+  // Accumulate on overflow instead of silently wrapping. Requires watch points
+  // on both limits (added below) - the driver's watch-point ISR is what folds
+  // the wrapped span into the accumulator.
+  unit_cfg.flags.accum_count = 1;
   ESP_ERROR_CHECK(pcnt_new_unit(&unit_cfg, &s_pcnt_unit));
+  ESP_ERROR_CHECK(pcnt_unit_add_watch_point(s_pcnt_unit, kPcntLimit));
+  ESP_ERROR_CHECK(pcnt_unit_add_watch_point(s_pcnt_unit, -kPcntLimit));
 
   pcnt_chan_config_t chan_cfg = {};
   chan_cfg.edge_gpio_num = step_gpio;
@@ -196,6 +224,17 @@ void init(gpio_num_t step_gpio, gpio_num_t dir_gpio) {
   xTaskCreate(move_task, "stepper_move", 4096, nullptr, 10, &s_moveTask);
 
   ESP_LOGW(TAG, "native RMT/PCNT stepper - UNVERIFIED on hardware, see stepper.h");
+}
+
+void setEnabled(bool enabled) {
+  if (s_enable_gpio == GPIO_NUM_NC) return;
+  gpio_set_level(s_enable_gpio, enabled ? kEnableAsserted : kEnableDeasserted);
+  s_enabled.store(enabled);
+  ESP_LOGI(TAG, "driver %s", enabled ? "enabled" : "disabled");
+}
+
+bool isEnabled() {
+  return s_enabled.load();
 }
 
 void setSpeedInHz(uint32_t hz) {

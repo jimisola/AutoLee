@@ -59,7 +59,7 @@ static inline void wdt_feed() {
 // driver.begin/toff/microsteps/... + engine.init.
 void motion_init() {
   tmc5160::init(SPI2_HOST, R_SENSE);
-  stepper::init((gpio_num_t)STEP_PIN, (gpio_num_t)DIR_PIN);
+  stepper::init((gpio_num_t)STEP_PIN, (gpio_num_t)DIR_PIN, (gpio_num_t)ENABLE_PIN);
   tmc5160::rms_current(g_motion.runCurrentMa);
 }
 
@@ -110,11 +110,38 @@ uint16_t read_sg() {
   for (int i = 0; i < 5; i++) s[i] = tmc5160::SG_RESULT();
   return autolee::median5(s);
 }
-static void fas_wait_for_stop() {
+// Waits for the current move to finish. Bounded: an unbounded version would
+// feed the task watchdog from inside its own spin, so a stepper that never
+// clears s_running (e.g. move_task wedged in rmt_tx_wait_all_done) would hang
+// pump_task forever *and* suppress the watchdog that exists to catch exactly
+// that. On timeout it escalates to forceStop() and gives the move a short
+// grace period; if even that doesn't clear, it gives up and returns false so
+// the caller can treat the axis as untrustworthy.
+static bool fas_wait_for_stop() {
+  const uint32_t start = millis();
   while (stepper::isRunning()) {
+    if ((millis() - start) > MOVE_WAIT_TIMEOUT_MS) {
+      webLogLevel(LogLevel::Error, "Motion", "Move did not stop within %lums - forcing stop",
+                  (unsigned long)MOVE_WAIT_TIMEOUT_MS);
+      stepper::forceStop();
+
+      const uint32_t grace = millis();
+      while (stepper::isRunning() && (millis() - grace) < MOVE_STOP_GRACE_MS) {
+        wdt_feed();
+        delay(1);
+      }
+      if (stepper::isRunning()) {
+        webLogLevel(LogLevel::Error, "Motion",
+                    "Stepper still running after forceStop - position reference lost");
+        motion_state::Guard g;
+        g_motion.positionReferenceStale = true;
+      }
+      return false;
+    }
     wdt_feed();
     delay(1);
   }
+  return true;
 }
 
 // ==========================================================================
@@ -171,6 +198,16 @@ void startRunBetweenEndpoints() {
     return;
   }
   resetStallCounter();
+
+  // sg_trip == 0 turns runtime jam detection off entirely (see handleMotion's
+  // early break). That is a legitimate setting - jam detection guards brass,
+  // not people - but it persists across reboots and was previously silent, so
+  // a press could run indefinitely with no stall detection and nothing
+  // anywhere saying so. Say it, loudly, on every run start.
+  if (RUN_SG_TRIP == 0) {
+    webLogLevel(LogLevel::Warn, "Motion",
+                "Jam detection is DISABLED (sg_trip=0) - starting run with no stall protection");
+  }
 
   tmc5160::rms_current(g_motion.runCurrentMa);
   tmc5160::semin(0);
@@ -474,9 +511,11 @@ void safeCreepHome() {
     motion_state::Guard g;
     applyMotorEventLocked(autolee::MotorEvent::HomeDone);  // HOMING -> IDLE
     // A confirmed UP hard stop + re-zero IS the position reference, so it goes
-    // live in the same transaction as the state change. Only on success: the
-    // "FAILED to find stop!" path never re-referenced anything.
-    if (found) g_motion.positionReferenceStale = false;
+    // live in the same transaction as the state change. On failure the search
+    // ran its full length without finding a stop, so the counter is no longer
+    // trustworthy - latch it stale rather than leaving a previously-good
+    // reference standing.
+    g_motion.positionReferenceStale = !found;
   }
 
   webLog("Motion", "Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
@@ -485,6 +524,10 @@ void safeCreepHome() {
   ui_update_main_warning();
   ui_update_tuning_numbers();
   ui_update_endpoint_edit_values();
+  // Tell the jam screen how this went and let it hand the display back, so a
+  // jam is not a dead end on the touch UI (it navigates only if the jam screen
+  // is still showing).
+  ui_jam_recovery_finished(found);
 }
 
 // ==========================================================================
@@ -578,70 +621,6 @@ static bool move_until_stall(int dir, long &hit_pos) {
   return false;
 }
 
-bool return_home_up_safe() {
-  if (!g_motion.endpointsCalibrated) return false;
-
-  stepper::setSpeedInHz(HOME_SPEED_HZ);
-  stepper::setAcceleration(HOME_ACCEL);
-
-  tmc_enter_sensorless_mode(clampSgt(CAL_SGT));
-
-  const uint32_t start_ms = millis();
-  uint8_t retries = 0;
-  long move_origin = stepper::getCurrentPosition();
-  uint32_t move_start_ms = millis();
-  autolee::ConfirmCounter confirm_count(HOME_CONFIRM);
-
-  stepper::moveTo(g_motion.endpointUp);
-
-  while (stepper::isRunning()) {
-    const uint32_t now = millis();
-    const long pos = stepper::getCurrentPosition();
-
-    if ((now - start_ms) > HOME_TIMEOUT_MS) {
-      webLogLevel(LogLevel::Error, "Motion", "Home: TIMEOUT");
-      stepper::forceStop();
-      fas_wait_for_stop();
-      return false;
-    }
-
-    if (nearPos(pos, g_motion.endpointUp, HOME_ARRIVAL_TOL)) break;
-
-    const int32_t moved = labs(pos - move_origin);
-    const uint32_t time_moving = now - move_start_ms;
-
-    if (time_moving >= HOME_MIN_MS && moved >= HOME_MIN_MOVE) {
-      const uint16_t sg = read_sg();
-      if (confirm_count.feed(sg <= HOME_SG_TRIP)) {
-        webLogLevel(LogLevel::Warn, "Motion", "Home: stall @%ld retry %d", pos, retries);
-        stepper::forceStop();
-        fas_wait_for_stop();
-        stepper::move(+HOME_RELEASE_STEPS);
-        fas_wait_for_stop();
-
-        if (retries >= HOME_MAX_RETRIES) {
-          webLogLevel(LogLevel::Error, "Motion", "Home: max retries");
-          return false;
-        }
-        retries++;
-        confirm_count.reset();
-        move_origin = stepper::getCurrentPosition();
-        move_start_ms = millis();
-        stepper::moveTo(g_motion.endpointUp);
-      }
-    }
-
-    wdt_feed();
-    delay(1);
-  }
-
-  fas_wait_for_stop();
-  long finalPos = stepper::getCurrentPosition();
-  webLog("Motion", "Home: pos=%ld tgt=%ld diff=%ld", finalPos, g_motion.endpointUp,
-         finalPos - g_motion.endpointUp);
-  return nearPos(finalPos, g_motion.endpointUp, HOME_FINAL_TOL);
-}
-
 void setActiveProfile(uint8_t idx) {
   if (idx >= NUM_PROFILES) return;
   {
@@ -689,6 +668,9 @@ bool calibrateEndpointsSensorless() {
     stepper::setAcceleration(RUN_DECEL);
     motion_state::Guard g;
     applyMotorEventLocked(autolee::MotorEvent::CalibrationDone);  // CALIBRATING -> IDLE
+    // The search ran its full length without finding a stop: nothing re-zeroed
+    // the axis, so whatever reference existed before is no longer trustworthy.
+    g_motion.positionReferenceStale = true;
     return false;
   }
 
@@ -708,6 +690,9 @@ bool calibrateEndpointsSensorless() {
     stepper::setAcceleration(RUN_DECEL);
     motion_state::Guard g;
     applyMotorEventLocked(autolee::MotorEvent::CalibrationDone);  // CALIBRATING -> IDLE
+    // The UP stop was found and re-zeroed, but the DOWN search then ran its
+    // full length; the counter has travelled an unbounded distance since.
+    g_motion.positionReferenceStale = true;
     return false;
   }
 

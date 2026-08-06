@@ -32,6 +32,26 @@ static inline int32_t clampi(int32_t v, int32_t lo, int32_t hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
+// Bounded LVGL port lock.
+//
+// lvgl_port_lock(0) waits forever. Most of the entry points below are reached
+// from motion_cmd::processPendingCommands() on pump_task, which is subscribed
+// to the task watchdog and is also what dispatches motion - so a stuck LVGL
+// flush holding the port mutex would block motion dispatch indefinitely, and
+// none of these call sites checked the return value to notice. A UI refresh is
+// by definition droppable, so every one of them now waits a bounded time and
+// skips the update if it can't get the lock.
+//
+// The exception is buildUI(), which constructs the screens at boot: skipping
+// that would leave the device with no UI at all, so it keeps the infinite wait
+// (and runs before pump_task exists, so nothing is watchdog-subscribed yet).
+static bool ui_lock(const char *what) {
+  if (lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) return true;
+  webLogLevel(LogLevel::Warn, "UI", "LVGL lock timeout after %ums - skipped %s",
+              (unsigned)UI_LOCK_TIMEOUT_MS, what);
+  return false;
+}
+
 // Everything in this file runs on the LVGL task (event callbacks, the 100ms
 // timer) or is called into from pump_task (motion.cpp / motion_cmd.cpp) - never
 // as the owner of the motion state. So label updates read one
@@ -49,7 +69,7 @@ void go(lv_obj_t *scr) {
   // is recursive, so re-taking is fine) and from app_main's boot-time
   // navigation on the main task (lock NOT held). Without this, that boot-time
   // go(wifi_scr) races the LVGL render task and can freeze the display blank.
-  lvgl_port_lock(0);
+  if (!ui_lock("go")) return;
   lv_scr_load(scr);
   lvgl_port_unlock();
 }
@@ -149,9 +169,25 @@ static lv_obj_t *make_card(lv_obj_t *p, int w, int h) {
 //  JAM SCREEN FUNCTIONS
 // ==========================================================================
 void showJamScreen() {
-  lvgl_port_lock(0);
+  if (!ui_lock("showJamScreen")) return;
   if (jam_status_lbl) lv_label_set_text(jam_status_lbl, "Press to return home");
   go(jam_scr);
+  lvgl_port_unlock();
+}
+
+// Called from pump_task when the jam-recovery home finishes. Without this the
+// jam screen is a dead end: its only control is "Return Home", nothing else
+// navigates off it, and the port dropped the original's status-label update -
+// so after a jam the operator got no feedback and needed a reboot or the web
+// UI to carry on. Only navigates if the jam screen is still the active one, so
+// it can't yank the display out from under someone who has navigated away.
+void ui_jam_recovery_finished(bool homed) {
+  if (!ui_lock("ui_jam_recovery_finished")) return;
+  if (jam_status_lbl) {
+    lv_label_set_text(jam_status_lbl, homed ? "Homed - returning to main"
+                                            : "Home FAILED - recalibrate before running");
+  }
+  if (homed && jam_scr && main_scr && lv_scr_act() == jam_scr) go(main_scr);
   lvgl_port_unlock();
 }
 
@@ -189,7 +225,7 @@ void ui_update_main_warning() {
   const MotionState ms = motion_state::snapshot();
   const bool calibrated = ms.endpointsCalibrated;
   const bool stale = ms.positionReferenceStale;
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_main_warning")) return;
   if (main_warn) {
     if (!calibrated) {
       if (main_warn_lbl) lv_label_set_text(main_warn_lbl, "NOT CALIBRATED");
@@ -241,7 +277,7 @@ static void ui_create_main_warning(lv_obj_t *parent) {
 
 void ui_update_speed_val() {
   const MotionState ms = motion_state::snapshot();
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_speed_val")) return;
   if (lbl_speed_val)
     lv_label_set_text_fmt(lbl_speed_val, "%s  %lukHz", ms.profiles[ms.activeProfile].name,
                           (unsigned long)(ms.profiles[ms.activeProfile].speed_hz / 1000));
@@ -250,7 +286,7 @@ void ui_update_speed_val() {
 
 void ui_update_profile_screen() {
   const MotionState ms = motion_state::snapshot();
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_profile_screen")) return;
   for (uint8_t i = 0; i < NUM_PROFILES; i++) {
     if (!profile_btns[i]) continue;
     if (i == ms.activeProfile) {
@@ -272,7 +308,7 @@ void ui_update_profile_screen() {
 
 void ui_update_tuning_numbers() {
   const MotionState ms = motion_state::snapshot();
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_tuning_numbers")) return;
   if (!ms.endpointsCalibrated) {
     if (lbl_ep_up) lv_label_set_text(lbl_ep_up, "UP: -");
     if (lbl_ep_dn) lv_label_set_text(lbl_ep_dn, "DOWN: -");
@@ -294,7 +330,7 @@ void ui_update_tuning_numbers() {
 
 void ui_update_endpoint_edit_values() {
   const MotionState ms = motion_state::snapshot();
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_endpoint_edit_values")) return;
   if (lbl_ep_up_val) lv_label_set_text_fmt(lbl_ep_up_val, "%ld", ms.endpointUp);
   if (lbl_ep_dn_val) lv_label_set_text_fmt(lbl_ep_dn_val, "%ld", ms.endpointDown);
   lvgl_port_unlock();
@@ -302,14 +338,14 @@ void ui_update_endpoint_edit_values() {
 
 void ui_update_sg_val() {
   const MotionState ms = motion_state::snapshot();
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_sg_val")) return;
   if (lbl_sg_val) lv_label_set_text_fmt(lbl_sg_val, "%u", ms.profiles[ms.activeProfile].sg_trip);
   lvgl_port_unlock();
 }
 
 void ui_update_batch_val() {
   const int32_t batchTarget = motion_state::snapshot().batchTarget;
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_batch_val")) return;
   if (lbl_batch_val) {
     if (batchTarget <= 0)
       lv_label_set_text(lbl_batch_val, "OFF");
@@ -321,7 +357,7 @@ void ui_update_batch_val() {
 
 void ui_update_batch_remain() {
   const MotionState ms = motion_state::snapshot();
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_batch_remain")) return;
   if (lbl_batch_remain) {
     if (ms.batchActive && ms.batchTarget > 0) {
       int32_t remain = ms.batchTarget - ms.batchCount;
@@ -349,7 +385,7 @@ static std::string qrEscape(const std::string &in) {
 }
 
 void ui_update_wifi_label() {
-  lvgl_port_lock(0);
+  if (!ui_lock("ui_update_wifi_label")) return;
   const bool apSetup = wifi_mgr::isApMode() && !wifi_mgr::isConnected();
 
   // AP-setup view: the join QR + the key text.
@@ -412,7 +448,7 @@ void ui_update_wifi_label() {
 }
 
 void setRunButtonState(bool running) {
-  lvgl_port_lock(0);
+  if (!ui_lock("setRunButtonState")) return;
   if (btn_run_global) {
     lv_obj_t *l = lv_obj_get_child(btn_run_global, 0);
     if (running) {
@@ -1229,6 +1265,10 @@ static void build_batch_screen() {
 }
 
 void buildUI() {
+  // Deliberately the infinite wait, unlike every refresh helper above: this
+  // constructs all the screens once at boot, so "skip it" would leave the
+  // device with no UI at all. It also runs before pump_task is created, so
+  // there is no watchdog-subscribed task to starve. See ui_lock().
   lvgl_port_lock(0);
 
   build_main_screen();

@@ -21,8 +21,11 @@ static const char *TAG = "wifi_mgr";
 static const char *kNvsNamespace = "autolee";
 
 static EventGroupHandle_t s_wifi_event_group;
+// Only a success bit: there is no failure event to signal. A disconnect is
+// always retried (see wifi_event_handler), so the sole failure path is
+// connect_sta()'s wait timing out without GOT_IP. A kFailBit existed here but
+// was never set anywhere, which made the wait on it purely decorative.
 static constexpr int kConnectedBit = BIT0;
-static constexpr int kFailBit = BIT1;
 
 static const char *kNvsApKeyKey = "apkey";
 // Per-device WPA2 key for the setup AP. Generated once and persisted, so it's
@@ -33,12 +36,12 @@ static const char *kNvsApKeyKey = "apkey";
 static std::string s_ap_key;
 
 static bool s_connected = false;
+// The single gate on auto-reconnect: while we're in captive-portal AP fallback
+// the STA interface exists only so esp_wifi_scan_start() works and must never
+// reconnect (see wifi_event_handler). Outside AP mode - both during the initial
+// connect and on an established link - a disconnect is always retried, and
+// connect_sta()'s timeout is the only failure path.
 static bool s_ap_mode = false;
-// True only once an initial STA connection has succeeded and we're committed to
-// staying on the network. Gates auto-reconnect so it can't fire during the
-// initial connect attempt (which must be allowed to time out and fall back to
-// the captive-portal AP) or in AP fallback mode.
-static bool s_sta_active = false;
 // Retry budget for the INITIAL connect. A transient STA_DISCONNECTED during
 // association (common, especially on a marginal/mesh AP) must not immediately
 // drop us to the captive-portal AP - otherwise we can end up connected to the
@@ -96,13 +99,29 @@ static bool load_credentials(std::string &ssid, std::string &pass) {
   return have_ssid;
 }
 
-void saveCredentials(const std::string &ssid, const std::string &pass) {
+bool saveCredentials(const std::string &ssid, const std::string &pass) {
+  // Reject over-length credentials here rather than letting connect_sta()'s
+  // strncpy truncate them silently: a 33-character SSID would be stored,
+  // truncated at association time, and simply fail to connect forever with
+  // nothing telling the operator why.
+  if (ssid.empty() || ssid.size() > WIFI_SSID_MAX_LEN) {
+    ESP_LOGW(TAG, "rejecting SSID of %u bytes (max %u)", (unsigned)ssid.size(),
+             (unsigned)WIFI_SSID_MAX_LEN);
+    return false;
+  }
+  if (pass.size() > WIFI_PASS_MAX_LEN) {
+    ESP_LOGW(TAG, "rejecting password of %u bytes (max %u)", (unsigned)pass.size(),
+             (unsigned)WIFI_PASS_MAX_LEN);
+    return false;
+  }
+
   nvs_handle_t h;
-  if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return;
+  if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return false;
   nvs_set_str(h, "ssid", ssid.c_str());
   nvs_set_str(h, "pass", pass.c_str());
   nvs_commit(h);
   nvs_close(h);
+  return true;
 }
 
 void clearCredentials() {
@@ -208,11 +227,11 @@ static bool connect_sta(const std::string &ssid, const std::string &pass, uint32
 
   esp_wifi_set_mode(WIFI_MODE_STA);
   esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-  xEventGroupClearBits(s_wifi_event_group, kConnectedBit | kFailBit);
+  xEventGroupClearBits(s_wifi_event_group, kConnectedBit);
   esp_wifi_start();
 
-  EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, kConnectedBit | kFailBit, pdFALSE,
-                                         pdFALSE, pdMS_TO_TICKS(timeout_ms));
+  EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, kConnectedBit, pdFALSE, pdFALSE,
+                                         pdMS_TO_TICKS(timeout_ms));
   return (bits & kConnectedBit) != 0;
 }
 
@@ -248,7 +267,6 @@ void start() {
     ESP_LOGI(TAG, "connecting to '%s'...", ssid.c_str());
     if (connect_sta(ssid, pass, 10000)) {
       s_connected = true;
-      s_sta_active = true;  // from now on, auto-reconnect if the link drops
       s_ap_mode = false;
       s_connected_ssid = ssid;
       esp_netif_ip_info_t ip_info;

@@ -70,6 +70,15 @@ input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;
 <button class="btn btn-blue btn-sm" onclick="showPage('pageWifi')">Set Password</button>
 </div>
 
+<!-- Shown whenever the active profile's StallGuard trip is 0, which switches
+     runtime jam detection off completely. The setting is persisted, so without
+     this the machine can come back from a reboot with no stall protection and
+     nothing on screen saying so. -->
+<div class="pw-alert" id="sgOffAlert" style="display:none">
+<div style="color:#FFD37C;font-weight:700;margin-bottom:4px">&#9888; JAM DETECTION DISABLED</div>
+<div style="color:#aaa;font-size:.8em">This profile's StallGuard trip is 0, so runs will not stop on a jam. Raise SG on the Config page to re-enable it.</div>
+</div>
+
 <!-- ==================== MAIN PAGE ==================== -->
 <div id="pageMain" class="page active">
 
@@ -566,6 +575,9 @@ function upd(d){
   document.getElementById('pwAlert').style.display=d.defaultPassword?'block':'none';
   document.getElementById('ctr').textContent=d.counter;
   document.getElementById('sv').textContent=d.profileName+' \u2014 '+d.speed+'Hz (SG='+d.sgTrip+')';
+  // sgTrip 0 disables runtime jam detection entirely and persists across
+  // reboots - surface it rather than leaving it as a "0" nobody reads.
+  document.getElementById('sgOffAlert').style.display=d.sgTrip===0?'block':'none';
     document.getElementById('cp').textContent=d.position;
     document.getElementById('wzv').textContent=d.workZone;
   if(d.wifiStatus){document.getElementById('wfStatus').textContent=d.wifiStatus;document.getElementById('wfSSID').textContent=d.wifiSSID;document.getElementById('wfIP').textContent=d.wifiIP}
@@ -618,7 +630,13 @@ function resetSettings(){
 function saveWifi(){
   const s=document.getElementById('ns').value,p=document.getElementById('np').value;
   if(!s){alert('SSID required');return}
-  fetch('/api/v1/wifi/save?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p),{method:'POST'})
+  // Credentials go in the BODY, not the query string: a query string lands in
+  // browser history and in any proxy/server access log along the way. The
+  // firmware reads query and form-encoded body params from the same map, so
+  // the handler is unchanged.
+  fetch('/api/v1/wifi/save',{method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)})
   .then(()=>{alert('Saved! Rebooting...');setTimeout(()=>location.reload(),5000)})}
 function resetWifi(){
   if(!confirm('Clear saved WiFi credentials and reboot into setup mode?'))return;
@@ -627,7 +645,9 @@ function resetWifi(){
 function saveWebPassword(){
   const p=document.getElementById('wpNew').value,m=document.getElementById('wpMsg');
   if(!p){m.textContent='Enter a new password.';m.style.color='#FF4444';return}
-  fetch('/api/v1/system/web_password?pass='+encodeURIComponent(p),{method:'POST'})
+  fetch('/api/v1/system/web_password',{method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'pass='+encodeURIComponent(p)})
   .then(r=>{if(r.ok){document.getElementById('wpNew').value='';m.style.color='#00FF00';
     m.textContent='Password changed. The browser will ask for it on your next action.'}
     else{m.style.color='#FF4444';r.text().then(t=>m.textContent='Failed: '+t)}})

@@ -171,8 +171,18 @@ void vTaskDelay(TickType_t ticks) {
 // ============================================================================
 namespace stepper {
 
-void init(gpio_num_t step_gpio, gpio_num_t dir_gpio) {
-  fake::rec("stepper::init(%d,%d)", (int)step_gpio, (int)dir_gpio);
+static bool s_enabled = false;
+
+void init(gpio_num_t step_gpio, gpio_num_t dir_gpio, gpio_num_t enable_gpio) {
+  fake::rec("stepper::init(%d,%d,%d)", (int)step_gpio, (int)dir_gpio, (int)enable_gpio);
+  s_enabled = true;
+}
+void setEnabled(bool enabled) {
+  s_enabled = enabled;
+  fake::rec("stepper::setEnabled(%d)", (int)enabled);
+}
+bool isEnabled() {
+  return s_enabled;
 }
 void setSpeedInHz(uint32_t hz) {
   fake::sim.speedHz = hz;
@@ -298,6 +308,9 @@ void webLogLevel(LogLevel /*level*/, const char * /*category*/, const char *fmt,
 
 void showJamScreen() {
   fake::rec("ui::showJamScreen");
+}
+void ui_jam_recovery_finished(bool homed) {
+  fake::rec("ui::jam_recovery_finished(%d)", (int)homed);
 }
 void setRunButtonState(bool running) {
   fake::rec("ui::setRunButtonState(%d)", (int)running);

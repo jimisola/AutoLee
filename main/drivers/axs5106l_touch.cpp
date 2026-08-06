@@ -87,7 +87,14 @@ void axs5106l_touch_read(void) {
   if (!s_int_flag) return;
   s_int_flag = false;
 
-  uint8_t data[14] = {0};
+  // 2 header bytes + 6 bytes per touch point. Sized from
+  // AXS5106L_MAX_TOUCH_POINTS rather than hardcoded: the loop below indexes up
+  // to data[5 + (touch_num-1)*6], which for the 5 points the guard already
+  // permits reaches data[29]. The previous fixed data[14] covered only 2
+  // points, so a 3-finger touch - or a single corrupt I2C frame reporting a
+  // high touch_num - read adjacent stack bytes and fed them to the UI as
+  // coordinates.
+  uint8_t data[2 + 6 * AXS5106L_MAX_TOUCH_POINTS] = {0};
   if (!i2c_read_reg(AXS5106L_TOUCH_DATA_REG, data, sizeof(data))) return;
 
   s_data.touch_num = data[1];

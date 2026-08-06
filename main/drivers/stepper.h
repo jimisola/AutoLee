@@ -16,7 +16,21 @@
 // (one cruise-phase chunk, see stepper.cpp's kCruiseChunkMs). ***
 namespace stepper {
 
-void init(gpio_num_t step_gpio, gpio_num_t dir_gpio);
+// `enable_gpio` drives the TMC5160's DRV_ENN input (active low - see
+// docs/wiring.md). init() configures it as an output and asserts it, so the
+// driver is energised from boot; before this it was left in its reset state
+// (high-Z) and the firmware had no way to de-energise the driver at all.
+void init(gpio_num_t step_gpio, gpio_num_t dir_gpio, gpio_num_t enable_gpio);
+
+// Energise (true) or de-energise (false) the driver's output stage.
+//
+// NOTE: de-energising drops holding current entirely - on a press whose ram
+// can back-drive, that means the ram is no longer held. Motion code does NOT
+// call this automatically (not on STALLED, not when idle); it is exposed so a
+// deliberate de-energise is possible. Changing that to an automatic policy is
+// a hardware decision - bench-verify back-drive behaviour first.
+void setEnabled(bool enabled);
+bool isEnabled();
 
 void setSpeedInHz(uint32_t hz);
 void setAcceleration(uint32_t steps_per_s2);

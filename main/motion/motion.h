@@ -64,7 +64,14 @@ void startRunBetweenEndpoints();
 void requestGracefulStop();
 bool calibrateEndpointsSensorless();
 void safeCreepHome();
-bool return_home_up_safe();
+// NOTE: there is deliberately no second "return home" entry point. An earlier
+// return_home_up_safe() lived here - a moveTo-with-stall-retry homing strategy
+// with its own host tests but no callers anywhere in main/. It bypassed the
+// motor FSM entirely (no applyMotorEventLocked, never cleared
+// positionReferenceStale) while its tests made homing coverage look broader
+// than it was. safeCreepHome() is the shipped path; it was removed rather than
+// wired in, because swapping homing strategies changes press behaviour and
+// needs bench verification, not a refactor.
 void recomputeEffectiveEndpoints();
 uint16_t read_sg();
 void setActiveProfile(uint8_t idx);

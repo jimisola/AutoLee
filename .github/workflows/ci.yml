@@ -68,7 +68,7 @@ jobs:
       - name: Coverage report
         working-directory: host_test
         run: |
-          pip install gcovr
+          pip install -r ../.github/requirements-ci.txt
           # Regression floor, NOT a target to chase: actual coverage is ~98%,
           # but the gate is deliberately set far below that so it only trips on
           # a real accident (a whole suite silently stops running, or a large
@@ -89,13 +89,13 @@ jobs:
           python-version: "3.13"
       - name: pre-commit (clang-format, ruff, yamllint, basic checks)
         run: |
-          pip install pre-commit
+          pip install -r .github/requirements-ci.txt
           pre-commit run --all-files --show-diff-on-failure
       - name: Lint API specs (spectral)
-        run: npx --yes @stoplight/spectral-cli@6 lint api/openapi.yaml api/asyncapi.yaml
+        run: npx --yes @stoplight/spectral-cli@6.16.3 lint api/openapi.yaml api/asyncapi.yaml
       - name: API contract check (state.example.json against the schema)
         run: |
-          pip install jsonschema
+          pip install -r .github/requirements-ci.txt
           python -c "
           import json, jsonschema
           schema = json.load(open('api/schemas/state.schema.json'))

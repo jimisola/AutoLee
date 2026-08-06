@@ -9,10 +9,11 @@
 #     regenerated dependencies.lock.
 #   * .pre-commit-config.yaml `rev:` pins — Renovate has a `pre-commit`
 #     manager, Dependabot does not.
-#   * ci.yml's `pip install pre-commit/gcovr/jsonschema` and its
-#     `npx @stoplight/spectral-cli@6` are inline, not manifests, so nothing
-#     can see them. They are also the reason CI can go red with no commit
-#     behind it; pinning them would need a real manifest file first.
+#   * ci.yml's Python tooling now lives in .github/requirements-ci.txt with
+#     exact pins, so the `pip` ecosystem below keeps it fresh. The remaining
+#     inline pin is `npx @stoplight/spectral-cli@6.16.3`: exact, so CI can no
+#     longer go red with no commit behind it, but still invisible to
+#     Dependabot (it would need a package.json + lockfile).
 #   * The actionlint/zizmor versions pinned in ci.yml's `workflows` job are
 #     likewise invisible here.
 #
@@ -38,3 +39,15 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # CI-only Python tooling (gcovr, jsonschema, pre-commit). Bumps here can move
+  # the coverage number or reformat the tree, so they get their own PR rather
+  # than being grouped with the actions.
+  - package-ecosystem: pip
+    directory: "/.github"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope

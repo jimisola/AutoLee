@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mock AutoLee web server — develop/preview the web UI without hardware.
 
-Serves the real embedded UI (extracted from src/web_server.cpp) and fakes the
+Serves the real embedded UI (extracted from main/net/index_html.h) and fakes the
 /api/v1/* endpoints and the /events SSE stream with schema-valid state
 (seeded from api/schemas/state.example.json). Stdlib only.
 
@@ -23,14 +23,26 @@ ROOT = Path(__file__).resolve().parent.parent
 STATE_LOCK = threading.Lock()
 
 
+INDEX_HTML_SRC = ROOT / "main" / "net" / "index_html.h"
+
+
 def load_index_html() -> str:
-    """Pull the INDEX_HTML raw string literal out of web_server.cpp."""
-    src = (ROOT / "src" / "web_server.cpp").read_text(encoding="utf-8", errors="replace")
+    """Pull the INDEX_HTML raw string literal out of main/net/index_html.h.
+
+    This used to read src/web_server.cpp, a path from the abandoned PlatformIO
+    layout that no longer exists - the read raised FileNotFoundError at import
+    time, so the tool could not start at all. PROGMEM is optional in the regex:
+    it was an Arduino-ism and the ESP-IDF port dropped it.
+    """
+    try:
+        src = INDEX_HTML_SRC.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return f"<h1>Could not find {INDEX_HTML_SRC.relative_to(ROOT)}</h1>"
     m = re.search(
-        r'INDEX_HTML\[\]\s*PROGMEM\s*=\s*R"rawliteral\((.*?)\)rawliteral"', src, re.DOTALL
+        r'INDEX_HTML\[\]\s*(?:PROGMEM\s*)?=\s*R"rawliteral\((.*?)\)rawliteral"', src, re.DOTALL
     )
     if not m:
-        return "<h1>Could not extract INDEX_HTML from web_server.cpp</h1>"
+        return f"<h1>Could not extract INDEX_HTML from {INDEX_HTML_SRC.relative_to(ROOT)}</h1>"
     return m.group(1)
 
 
@@ -95,7 +107,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
-        apply_action(u.path, parse_qs(u.query))
+        # Merge query params with a form-encoded body, matching PsychicHttp's
+        # single parameter map on the device. The dashboard sends secrets
+        # (WiFi password, web password) in the body rather than the query
+        # string, so a query-only mock would see them as missing.
+        params = parse_qs(u.query)
+        ctype = self.headers.get("Content-Type", "")
+        if ctype.startswith("application/x-www-form-urlencoded"):
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                body = self.rfile.read(length).decode("utf-8", errors="replace")
+                params.update(parse_qs(body))
+        apply_action(u.path, params)
         self._send(200, "ok")
 
     def _sse(self):

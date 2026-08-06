@@ -206,11 +206,26 @@ paths:
       summary: Save WiFi credentials and reboot
       tags: [WiFi]
       operationId: setWifi
-      parameters:
-        - { name: ssid, in: query, required: true, schema: { type: string } }
-        - { name: pass, in: query, required: false, schema: { type: string } }
+      description: >
+        Credentials are sent in a form-encoded body rather than the query
+        string: a query string is recorded in browser history and in any
+        intervening proxy/server access log. The device accepts query
+        parameters too (same parser), but clients should not use them for
+        secrets. An SSID longer than 32 bytes, or a password longer than 64,
+        is rejected with 400 rather than silently truncated.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [ssid]
+              properties:
+                ssid: { type: string, minLength: 1, maxLength: 32 }
+                pass: { type: string, maxLength: 64 }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "400": { description: SSID missing, or SSID/password too long }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/wifi/reset:
@@ -345,12 +360,15 @@ paths:
         already knows the current password can change it.
       tags: [System]
       operationId: setWebPassword
-      parameters:
-        - name: pass
-          in: query
-          required: true
-          schema: { type: string, minLength: 1, maxLength: 64 }
-          description: The new password.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [pass]
+              properties:
+                pass: { type: string, minLength: 1, maxLength: 64 }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "400": { description: Missing or over-long password }

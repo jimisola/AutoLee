@@ -4,9 +4,16 @@
 // ============================================================================
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 static const char *DEFAULT_AP_SSID = "AutoLee-Setup";
+
+// Credential limits, matching the fixed-size fields in ESP-IDF's wifi_config_t
+// (ssid[32], password[64]). Anything longer cannot be stored without silent
+// truncation, so wifi_mgr::saveCredentials() refuses it outright.
+static constexpr size_t WIFI_SSID_MAX_LEN = 32;
+static constexpr size_t WIFI_PASS_MAX_LEN = 64;
 
 // ==========================================================================
 //  PIN DEFINITIONS
@@ -68,6 +75,18 @@ static constexpr uint16_t RUN_CURRENT_MAX = 4500;
 static constexpr uint16_t CAL_CURRENT_MA = 3200;
 static constexpr uint32_t CAL_SPEED_HZ = 8000;
 static constexpr uint32_t CAL_ACCEL = 25000;
+// Hardware counter wrap point. The PCNT unit in main/drivers/stepper.cpp
+// counts in +-this window and accumulates each crossing in software, so the
+// *reported* position range is that of int32_t, not this value. Do NOT treat
+// this as a travel limit - it is only the granularity at which the hardware
+// counter hands off to the accumulator.
+static constexpr int32_t STEP_COUNT_WRAP = 30000;
+// Relative distance a single hard-stop search may travel. This legitimately
+// exceeds STEP_COUNT_WRAP (real travel is measured in the tens of thousands of
+// steps - see host_test/test_settings_blob's fixture at 41000), which is
+// exactly why the accumulation above is required: without it the *failure*
+// path, which actually travels the full distance, wrapped the counter and
+// getCurrentPosition() silently returned garbage.
 static constexpr int32_t CAL_SEARCH_STEPS = 120000;
 static constexpr uint16_t CAL_ABS_MIN = 12;
 static constexpr uint8_t CAL_REL_DROP_Q8 = 235;
@@ -189,6 +208,19 @@ static constexpr uint32_t OTA_STALE_TIMEOUT_MS = 15000;
 static constexpr uint32_t STOP_TIMEOUT_MS = 8000;
 // Position tolerance (steps) for treating the graceful stop as arrived at UP.
 static constexpr long STOP_ARRIVAL_TOL = 10;
+
+// Upper bound on how long motion code waits for an in-flight move to report
+// itself stopped. Must comfortably exceed the longest legitimate single move
+// (a full CAL_SEARCH_STEPS search at CAL_SPEED_HZ, ~3.5s) - this is a
+// stuck-stepper backstop, not a motion deadline.
+static constexpr uint32_t MOVE_WAIT_TIMEOUT_MS = 30000;
+// Grace period after the escalation forceStop() before declaring the axis lost.
+static constexpr uint32_t MOVE_STOP_GRACE_MS = 500;
+
+// How long a UI refresh waits for the LVGL port lock before giving up and
+// skipping that update. Bounded because several of these entry points are
+// reached from the watchdog-subscribed pump_task - see ui_touch.cpp's ui_lock().
+static constexpr uint32_t UI_LOCK_TIMEOUT_MS = 500;
 
 // ==========================================================================
 //  UI COUNTER / BATCH LIMITS

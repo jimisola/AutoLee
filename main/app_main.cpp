@@ -138,5 +138,7 @@ extern "C" void app_main(void) {
   }
 
   xTaskCreate(pump_task, "pump", 8192, nullptr, 5, &g_pump_task_handle);
-  xTaskCreate(sse_task, "sse", 4096, nullptr, 4, nullptr);
+  // 6144, not 4096: sse_task calls buildStateJSON(), whose state buffer grew to
+  // 1024 bytes when the truncation check was added.
+  xTaskCreate(sse_task, "sse", 6144, nullptr, 4, nullptr);
 }

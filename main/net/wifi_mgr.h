@@ -16,7 +16,10 @@ std::string ipAddress();   // STA or AP IP, whichever is active
 std::string ssid();        // connected STA SSID, or the AP's SSID in AP mode
 std::string apPassword();  // the setup AP's WPA2 key (per-device, persisted in NVS)
 
-void saveCredentials(const std::string &ssid, const std::string &pass);
+// Returns false (storing nothing) if the SSID is empty or either value exceeds
+// what the WiFi driver's fixed-size config fields can hold - see
+// WIFI_SSID_MAX_LEN / WIFI_PASS_MAX_LEN in config.h.
+bool saveCredentials(const std::string &ssid, const std::string &pass);
 void clearCredentials();
 
 // HTML <option> list from the last scan (AP mode only - see wifi_mgr.cpp).

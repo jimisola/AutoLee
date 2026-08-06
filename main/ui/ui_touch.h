@@ -12,6 +12,9 @@ void buildUI();
 // Screen navigation + UI hooks called from motion.cpp/web_server.cpp.
 void go(lv_obj_t *scr);
 void showJamScreen();
+// Reports the outcome of the jam-recovery home and, on success, returns the
+// display to the main screen (only if the jam screen is still active).
+void ui_jam_recovery_finished(bool homed);
 void setRunButtonState(bool running);
 void ui_update_main_warning();
 void ui_update_tuning_numbers();

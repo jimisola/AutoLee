@@ -377,8 +377,20 @@ static void test_stall_count_accumulates_across_runs(void) {
   TEST_ASSERT_EQUAL_UINT16(1, g_motion.stallCount);
 
   // Recover (STALLED -> IDLE via a home) and jam again.
+  // Park the carriage ABOVE the UP hard stop, and hand SG back to the
+  // hard-stop-aware default, so the recovery home actually finds the stop.
+  // Previously this ran with the carriage below the stop and SG pinned at the
+  // jam value, so safeCreepHome() searched the full CAL_SEARCH_STEPS without a
+  // hit - and the run below only started because a failed home used to leave
+  // positionReferenceStale untouched. It now latches stale on that path, which
+  // is the point of the fix.
+  fake::sim.position = 8000;
+  fake::sg_source = []() -> uint16_t {
+    return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
+  };
   givenPress(2000, 40000);
   safeCreepHome();
+  TEST_ASSERT_FALSE(g_motion.positionReferenceStale);
   TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
   fake::sim.hardStops = false;
   fake::sim.stepsPerMsOverride = 0;
@@ -723,51 +735,6 @@ static void test_calibration_clears_stale_reference(void) {
 }
 
 // --------------------------------------------------------------------------
-//  return_home_up_safe(): retry / timeout logic
-// --------------------------------------------------------------------------
-static void test_return_home_succeeds_when_travel_is_clear(void) {
-  givenCalibrated(0, 20000, 20000);
-
-  TEST_ASSERT_TRUE(return_home_up_safe());
-
-  TEST_ASSERT_EQUAL_INT32(0, fake::sim.position);
-  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
-  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::move(1200)"));
-}
-
-// An obstruction on the way home: release, retry, and give up after
-// HOME_MAX_RETRIES (so 3 stall detections in total).
-static void test_return_home_retries_then_gives_up(void) {
-  givenCalibrated(0, 20000, 20000);
-  givenPress(15000, 40000);
-  fake::sim.stepsPerMsOverride = 0;  // HOME_SPEED_HZ (8000) -> 8 steps/ms
-
-  TEST_ASSERT_FALSE(return_home_up_safe());
-
-  TEST_ASSERT_EQUAL_INT(3, fake::countOf("stepper::move(1200)"));  // HOME_RELEASE_STEPS
-  TEST_ASSERT_EQUAL_INT(3, fake::countOf("stepper::forceStop"));
-  TEST_ASSERT_EQUAL_INT(3, fake::countOf("stepper::moveTo(0)"));  // initial + 2 retries
-  TEST_ASSERT_TRUE(fake::logContains("Home: max retries"));
-  TEST_ASSERT_TRUE(fake::logContains("retry 0"));
-  TEST_ASSERT_TRUE(fake::logContains("retry 1"));
-}
-
-static void test_return_home_times_out(void) {
-  givenCalibrated(0, 20000, 20000);
-  fake::sim.stepsPerMsOverride = 1;  // 20 s of travel vs HOME_TIMEOUT_MS 15 s
-
-  TEST_ASSERT_FALSE(return_home_up_safe());
-
-  TEST_ASSERT_TRUE(fake::logContains("Home: TIMEOUT"));
-  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::forceStop"));
-}
-
-static void test_return_home_requires_calibration(void) {
-  TEST_ASSERT_FALSE(return_home_up_safe());
-  TEST_ASSERT_EQUAL_INT(0, (int)fake::events.size());
-}
-
-// --------------------------------------------------------------------------
 //  Misc dispatch
 // --------------------------------------------------------------------------
 static void test_handle_motion_is_inert_in_blocking_states(void) {
@@ -815,8 +782,10 @@ static void test_set_active_profile_pushes_new_speed(void) {
 // stepper, then the run current.
 static void test_motion_init_order(void) {
   motion_init();
-  ASSERT_BEFORE("tmc5160::init(1)", "stepper::init(5,6)");
-  ASSERT_BEFORE("stepper::init(5,6)", "tmc5160::rms_current(3500)");
+  // The enable pin (4) is part of the signature: it must actually be passed,
+  // not left as the orphan #define it was before.
+  ASSERT_BEFORE("tmc5160::init(1)", "stepper::init(5,6,4)");
+  ASSERT_BEFORE("stepper::init(5,6,4)", "tmc5160::rms_current(3500)");
 }
 
 int main(void) {
@@ -853,10 +822,6 @@ int main(void) {
   RUN_TEST(test_creep_home_from_idle_clears_stale_reference);
   RUN_TEST(test_failed_creep_home_keeps_stale_reference);
   RUN_TEST(test_calibration_clears_stale_reference);
-  RUN_TEST(test_return_home_succeeds_when_travel_is_clear);
-  RUN_TEST(test_return_home_retries_then_gives_up);
-  RUN_TEST(test_return_home_times_out);
-  RUN_TEST(test_return_home_requires_calibration);
   RUN_TEST(test_handle_motion_is_inert_in_blocking_states);
   RUN_TEST(test_effective_endpoints_are_zero_until_calibrated);
   RUN_TEST(test_set_active_profile_pushes_new_speed);

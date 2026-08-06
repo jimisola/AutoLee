@@ -201,8 +201,22 @@ static std::string buildStateJSON() {
   st.batchActive = ms.batchActive;
   st.defaultPassword = s_default_password_active;
 
-  char buf[768];
-  autolee::buildStateJson(st, buf, sizeof(buf));
+  // 1024, not 768: the worst case (31-char git-describe version, fully-escaped
+  // 32-byte SSID, saturated counters, longest profile names) lands close enough
+  // to 768 that the old margin was thin. buildStateJson() returns the snprintf
+  // length, which must be checked - a silent truncation here is malformed JSON
+  // delivered to the dashboard and to every SSE subscriber at once.
+  // Deliberately not static: buildStateJSON() is called from both the HTTP
+  // task and sse_task, so a shared buffer would race.
+  char buf[1024];
+  const int n = autolee::buildStateJson(st, buf, sizeof(buf));
+  if (n < 0 || (size_t)n >= sizeof(buf)) {
+    webLogLevel(LogLevel::Error, "Web", "State JSON truncated (%d >= %u) - sending minimal payload",
+                n, (unsigned)sizeof(buf));
+    // Valid JSON carrying the error, rather than a truncated object no
+    // consumer can parse.
+    snprintf(buf, sizeof(buf), "{\"error\":\"state truncated\"}");
+  }
   return buf;
 }
 
@@ -439,6 +453,55 @@ void setupWebServer() {
         std::string uri = req->uri();
         uri = uri.substr(0, uri.find('?'));  // drop any query string
         if (req->method() == HTTP_GET && uri != "/api/v1/diagnostics/coredump") return next();
+
+        // CSRF gate, ahead of auth.
+        //
+        // Digest auth alone does not stop a cross-site write: once the operator
+        // has authenticated in their browser, any page they later visit can
+        // auto-submit a form (or fire a no-cors fetch) at this device and the
+        // browser will answer the 401 challenge with its cached credentials.
+        // The attacker never sees the response, but the press starts - and the
+        // same trick reaches settings reset and OTA. So every state-changing
+        // request must additionally prove it did not originate cross-site.
+        //
+        // Sec-Fetch-Site is sent by all current browsers and is not settable
+        // from script. "same-origin" is the dashboard; "none" is a direct
+        // navigation or a non-browser client (curl, scripts) - both allowed.
+        // "cross-site"/"same-site" are refused.
+        //
+        // Non-browser clients that send no Sec-Fetch-Site at all still work:
+        // the header's absence is not something a browser-driven cross-site
+        // request can arrange, since browsers always send it.
+        {
+          // NOTE: PsychicRequest::headerCStr() returns a pointer into a single
+          // per-request scratch buffer that the *next* header lookup
+          // overwrites. Copy each value out before reading another one.
+          const std::string site = req->headerCStr("Sec-Fetch-Site");
+          if (!site.empty() && site != "same-origin" && site != "none") {
+            webLogLevel(LogLevel::Warn, "Security", "Blocked cross-site %s (Sec-Fetch-Site: %s)",
+                        uri.c_str(), site.c_str());
+            return res->send(403, "application/json",
+                             "{\"error\":\"cross_site\",\"message\":\"Cross-site state-changing "
+                             "requests are refused.\"}");
+          }
+          // Belt and braces for anything that sends Origin but no
+          // Sec-Fetch-Site: a same-origin Origin must match the Host header.
+          const std::string origin = req->headerCStr("Origin");
+          const std::string host = req->headerCStr("Host");
+          if (!origin.empty() && !host.empty()) {
+            // Origin is "scheme://host[:port]"; compare the authority part.
+            const size_t schemeEnd = origin.find("://");
+            const std::string originHost =
+                schemeEnd == std::string::npos ? origin : origin.substr(schemeEnd + 3);
+            if (originHost != host) {
+              webLogLevel(LogLevel::Warn, "Security", "Blocked cross-origin %s (Origin: %s)",
+                          uri.c_str(), origin.c_str());
+              return res->send(403, "application/json",
+                               "{\"error\":\"cross_site\",\"message\":\"Cross-origin "
+                               "state-changing requests are refused.\"}");
+            }
+          }
+        }
         // Captive-portal setup endpoints are exempt while in AP-setup mode: a
         // fresh user doesn't have the (digest) web password, and WPA2 on the AP
         // is what gates access there instead. Only /save and /clear, and only
@@ -514,7 +577,16 @@ void setupWebServer() {
           "style='color:#7cf;'>Go back</a></p></body></html>");
       return res->send();
     }
-    wifi_mgr::saveCredentials(finalSSID, pw);
+    if (!wifi_mgr::saveCredentials(finalSSID, pw)) {
+      res->setCode(400);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Credentials too long</h2>"
+          "<p>The network name must be 32 characters or fewer and the password 64 "
+          "or fewer.</p><p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
     res->setCode(200);
     res->setContentType("text/html");
     res->setContent(
@@ -719,6 +791,15 @@ void setupWebServer() {
         motion_state::snapshot().endpointsCalibrated) {
       std::string w = req->getParam("which", "");
       int32_t d = atoi(req->getParam("delta", "0"));
+      // Reject anything that isn't exactly "up" or "down". Falling through to
+      // the DOWN endpoint for every unrecognised value meant a typo'd or
+      // mis-cased parameter silently moved the wrong endpoint - and the DOWN
+      // endpoint is the one that determines how deep the ram travels.
+      if (w != "up" && w != "down") {
+        return res->send(400, "application/json",
+                         "{\"error\":\"bad_parameter\",\"message\":\"which must be "
+                         "'up' or 'down'\"}");
+      }
       {
         // Read-modify-write of state pump_task also reads - must be guarded.
         motion_state::Guard g;
@@ -847,7 +928,10 @@ void setupWebServer() {
     if (req->hasParam("ssid")) {
       std::string ssid = req->getParam("ssid", "");
       std::string pass = req->getParam("pass", "");
-      wifi_mgr::saveCredentials(ssid, pass);
+      if (!wifi_mgr::saveCredentials(ssid, pass)) {
+        return res->send(400, "text/plain",
+                         "SSID must be 1-32 characters and the password at most 64");
+      }
       rebootRequested = true;
       rebootRequestMs = millis();
       return res->send(200, "text/plain", "saved");
@@ -867,25 +951,38 @@ void setupWebServer() {
   // counter is a single global watermark, so only the first client to
   // connect after boot ever sees the early lines over SSE). A GET, so left
   // open like every other read in this file.
-  server.on("/api/v1/system/logs", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
-    uint16_t size = g_log.size();
-    std::string json = "{\"logs\":[";
-    for (uint16_t i = 0; i < size; i++) {
-      if (i > 0) json += ',';
-      json += '"';
-      for (const char *p = g_log.at(i); *p; p++) {
-        if (*p == '"')
-          json += "\\\"";
-        else if (*p == '\\')
-          json += "\\\\";
-        else
-          json += *p;
-      }
-      json += '"';
-    }
-    json += "]}";
-    return res->send(200, "application/json", json.c_str());
-  });
+  server.on("/api/v1/system/logs", HTTP_GET,
+            [](PsychicRequest *req, PsychicResponse *res) -> esp_err_t {
+              // Streamed, not accumulated. Building the whole ring into one
+              // std::string meant ~70 KB (LOG_LINES x LOG_LINE_LEN, more once
+              // escaped) grown one char at a time with no reserve() - on an
+              // unauthenticated GET, that is a trivial remote heap-exhaustion
+              // and fragmentation lever, and with exceptions disabled a failed
+              // allocation aborts the firmware. Same chunking the coredump
+              // handler above uses.
+              const uint16_t size = g_log.size();
+
+              res->setCode(200);
+              res->setContentType("application/json");
+              res->sendHeaders();
+
+              esp_err_t err = res->sendChunk((uint8_t *)"{\"logs\":[", 9);
+
+              char line[LOG_LINE_LEN];
+              // Worst case every char needs a 6-byte \uXXXX escape.
+              char escaped[sizeof(line) * 6 + 1];
+              for (uint16_t i = 0; i < size && err == ESP_OK; i++) {
+                g_log.copyLine(i, line, sizeof(line));
+                autolee::jsonEscapeLog(line, escaped, sizeof(escaped));
+                if (i > 0) err = res->sendChunk((uint8_t *)",", 1);
+                if (err == ESP_OK) err = res->sendChunk((uint8_t *)"\"", 1);
+                if (err == ESP_OK) err = res->sendChunk((uint8_t *)escaped, strlen(escaped));
+                if (err == ESP_OK) err = res->sendChunk((uint8_t *)"\"", 1);
+              }
+              if (err == ESP_OK) err = res->sendChunk((uint8_t *)"]}", 2);
+              if (err == ESP_OK) res->finishChunking();
+              return err;
+            });
 
   server.on("/api/v1/system/logs", HTTP_DELETE, [](PsychicRequest *req, PsychicResponse *res) {
     // Deferred: reassigning the ring here would race webLog()'s push from
@@ -997,19 +1094,21 @@ void broadcastState() {
     if (pending > 20) pending = 20;
 
     std::string logJson = "{\"log\":[";
+    // Bounded above at 20 lines, so accumulating here is fine (unlike the
+    // whole-ring GET handler, which streams). Full escaping via
+    // jsonEscapeLog(): a raw control character would otherwise invalidate the
+    // entire event for every subscriber.
+    logJson.reserve(64 + (size_t)pending * (LOG_LINE_LEN + 8));
     uint16_t size = g_log.size();
     uint16_t start = size - (uint16_t)pending;
+    char line[LOG_LINE_LEN];
+    char escaped[sizeof(line) * 6 + 1];
     for (uint16_t i = 0; i < (uint16_t)pending; i++) {
       if (i > 0) logJson += ',';
       logJson += '"';
-      for (const char *p = g_log.at(start + i); *p; p++) {
-        if (*p == '"')
-          logJson += "\\\"";
-        else if (*p == '\\')
-          logJson += "\\\\";
-        else
-          logJson += *p;
-      }
+      g_log.copyLine(start + i, line, sizeof(line));
+      autolee::jsonEscapeLog(line, escaped, sizeof(escaped));
+      logJson += escaped;
       logJson += '"';
     }
     logJson += "]}";

@@ -241,7 +241,11 @@ void dns_server_task(void *pvParameters)
             // Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
-                close(sock);
+                // Deliberately no close() here - breaking out reaches the
+                // shutdown()/close() below, and closing twice would hand the
+                // same descriptor number back to lwIP's recycler and then tear
+                // down whatever took it in the meantime (e.g. an in-flight HTTP
+                // connection on the setup AP).
                 break;
             }
             // Data received
