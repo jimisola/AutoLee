@@ -54,6 +54,25 @@ static const char *resetReasonName(esp_reset_reason_t r) {
       return "BROWNOUT (check supply)";
     case ESP_RST_SDIO:
       return "SDIO";
+    case ESP_RST_USB:
+      return "USB peripheral";
+    case ESP_RST_JTAG:
+      return "JTAG";
+    case ESP_RST_EFUSE:
+      return "efuse error";
+    // The two worth recognising on sight. A power glitch is the supply failing
+    // to hold up without dipping far enough to read as a brownout, and a CPU
+    // lockup is a double exception - the panic handler itself faulting, which
+    // leaves no core dump to decode afterwards. Both present as "the board just
+    // stopped", which is exactly the symptom this whole switch exists to name.
+    case ESP_RST_PWR_GLITCH:
+      return "POWER GLITCH (check supply)";
+    case ESP_RST_CPU_LOCKUP:
+      return "CPU LOCKUP (double exception)";
+    // ESP_RST_UNKNOWN plus anything a future IDF adds. Keeping this a `default`
+    // rather than enumerating ESP_RST_UNKNOWN alone is deliberate: a reset
+    // reason that falls through here should still print something, not silently
+    // fail to compile the day the enum grows again.
     default:
       return "unknown";
   }
