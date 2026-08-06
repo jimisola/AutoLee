@@ -21,9 +21,10 @@ first for the *why* and the per‑subsystem analysis.
 ---
 
 ## Phase 0 — Prerequisites
-- [x] Install ESP‑IDF **≥ 5.3**, set up `export.sh`. (Version pinned in `main/idf_component.yml`
+- [x] Install ESP‑IDF **≥ 6.0**, set up `export.sh`. (Version pinned in `main/idf_component.yml`
   matches what this port was built/tested against - not tied to FastAccelStepper, which was
-  dropped; see Phase 4 and ADR 0001.)
+  dropped; see Phase 4 and ADR 0001.) Originally ≥ 5.3; moved to 6.0.2 after the port, which is
+  now the floor - see Phase 9.
 - [x] `idf.py set-target esp32c6`.
 - [x] Confirm the VS Code **ESP‑IDF extension** works for Karl (Linux + Mac) — replaces the PlatformIO one.
 - **DoD:** `idf.py --version` + target set; a hello‑world builds.
@@ -133,8 +134,8 @@ Deferred low-priority cleanups from the PR #4 review (not blocking):
 - **DoD:** ✅ **core dump and OTA rollback both fully verified** (see above). Brownout tuning still needs real hardware (the press's power supply under load) - not done.
 
 ## Phase 7 — CI, release, docs, v1.10.0
-- [x] **CI**: **confirmed green in real GitHub Actions runs on PR #4** (not just locally) - `idf.py build` (via `espressif/install-esp-idf-action`, pinned to ESP-IDF v5.3.2), host tests (`host_test/` ctest + gcovr coverage), and lint (pre-commit's clang-format/ruff + Spectral on the API specs + a JSON Schema contract check). Actions pinned to commit SHAs (verified live via `gh api`, not from memory). Originally one `ci.yml`; since split into `build.yml` (firmware + host tests) and `lint.yml` (pre-commit, API specs, workflow lint, cliff.toml's bump mapping) so a formatting nit and a broken build report as separate checks and can be re-run separately.
-  - Getting host-tests green took 4 real iterations against actual CI: `install-esp-idf-action`'s cross-toolchain (Xtensa/RISC-V) leaked into `host_test/`'s native host build's `as`/`ld` resolution. Pinning `CC`/`CXX`, resetting `PATH`, and additionally resetting `COMPILER_PATH` all failed identically (`as: unrecognized option '--64'`), implying a system-level change (e.g. a gcc specs file), not a process-env one. Fixed by not using that action for this job at all - `host_test/` only needs one file from ESP-IDF (`components/unity/unity`, itself a `ThrowTheSwitch/Unity` submodule), fetched directly pinned to the exact commit ESP-IDF v5.3.2 references, verified in a fully clean (`env -i`) local simulation before trusting it in CI.
+- [x] **CI**: **confirmed green in real GitHub Actions runs on PR #4** (not just locally) - `idf.py build` (via `espressif/install-esp-idf-action`, pinned to ESP-IDF v6.0.2 - originally v5.3.2), host tests (`host_test/` ctest + gcovr coverage), and lint (pre-commit's clang-format/ruff + Spectral on the API specs + a JSON Schema contract check). Actions pinned to commit SHAs (verified live via `gh api`, not from memory). Originally one `ci.yml`; since split into `build.yml` (firmware + host tests) and `lint.yml` (pre-commit, API specs, workflow lint, cliff.toml's bump mapping) so a formatting nit and a broken build report as separate checks and can be re-run separately.
+  - Getting host-tests green took 4 real iterations against actual CI: `install-esp-idf-action`'s cross-toolchain (Xtensa/RISC-V) leaked into `host_test/`'s native host build's `as`/`ld` resolution. Pinning `CC`/`CXX`, resetting `PATH`, and additionally resetting `COMPILER_PATH` all failed identically (`as: unrecognized option '--64'`), implying a system-level change (e.g. a gcc specs file), not a process-env one. Fixed by not using that action for this job at all - `host_test/` only needs one file from ESP-IDF (`components/unity/unity`, itself a `ThrowTheSwitch/Unity` submodule), fetched directly pinned to the exact commit ESP-IDF references, verified in a fully clean (`env -i`) local simulation before trusting it in CI. (v5.3.2 and v6.0.2 point the submodule at the same Unity commit, so the 6.0 bump needed no change here.)
 - [x] **Release** (`.github/workflows/release.yml`): `idf.py build` → `idf.py merge-bin -o ..._merged.bin --fill-flash-size 4MB` (verified by hand: produces exactly a 4 MB raw image, matching the README's "flash at offset 0x0" instructions) + the app-only image as `..._update.bin`, both attached to the GitHub Release. The old `FW_VERSION`-must-match-tag guard has been dropped: the version is now derived from `git describe` at build time, so a clean checkout of tag `X.Y.Z` (bare, always full three-part semver) reports exactly that tag by construction and there is nothing left to cross-check — the workflow uses the tag only to name its artifacts. Since rewritten as a `workflow_dispatch` pipeline (validate → checks → approval gate → tag/build/prerelease → verify the published assets → promote to latest), with the version and the release notes derived from the Conventional Commits by git-cliff (`cliff.toml`) and the version read back out of the built image by `tools/app_desc.py`. **Not yet run** - untested until an actual release is cut; `dry-run` (the default) exercises everything up to the checks.
 - [x] **Docs:** README/CONTRIBUTING/CLAUDE.md already rewritten for the ESP-IDF-only layout as part of the Phase 0-3 rebase (see the `refactor!` commit); nothing further pending here.
 - [x] **v1.10.0 (was "v1.9"):** Karl's upstream release shipped, diffed, and folded into this port - see [`docs/upstream-v1.10.0-diff.md`](upstream-v1.10.0-diff.md) and the PR description's "Upstream v1.10.0 merge" section. Confirmed incorporated: three inherited bugs fixed (batch counting gated by the display counter cap, decel-blank carry-through discarding jam evidence, unescaped `&` in the WiFi scan dropdown), plus the TMC tuning delta (`TOFF` 5→4, `TBL`=1, `INTPOL`) - flagged unverified on hardware, still a Phase 4 bench item below.
@@ -485,3 +486,42 @@ ESP‑IDF `captive_portal` + `http_server` SSE examples.
       far the press travels after a jam is confirmed.
 - [ ] The TMC tuning values confirmed against the real press (torque/smoothness).
 - [ ] A safety-focused review of the whole motion path before the first run.
+
+## Phase 9 — ESP-IDF 6.0 upgrade
+- [x] **Toolchain moved 5.3.2 → 6.0.2**, floor raised to `idf: ">=6.0"` in `main/idf_component.yml`;
+  CI (`build.yml`) and `release.yml` pin `v6.0.2`. `dependencies.lock` regenerated (LVGL 8.4.0 and
+  `esp_lvgl_port` 2.8.0 resolve unchanged - no component bumps were needed).
+- [x] **Three source changes, all that 6.0 required:**
+  - `main/drivers/display_touch.cpp` — explicit `freertos/FreeRTOS.h` + `freertos/task.h`; 6.0
+    stopped re-exporting them through the `esp_lcd`/`driver` headers, so `vTaskDelay()` /
+    `pdMS_TO_TICKS()` in `jd9853_send_init_sequence()` no longer resolved.
+  - `main/drivers/display_touch.cpp` — `LCD_DC/CS/RST_GPIO` are `GPIO_NUM_*` rather than bare ints;
+    6.0 typed `esp_lcd`'s cs/dc/reset config members as `gpio_num_t`, which C++ will not implicitly
+    narrow an int into.
+  - `main/net/wifi_mgr.cpp` — a scoped `-Wmissing-field-initializers` pragma around
+    `DNS_SERVER_CONFIG_SINGLE`, which 6.0 rejects under `-Werror`. Kept at the call site so
+    `lib/dns_server/` stays byte-identical to Espressif's example, where the macro is unchanged in
+    6.0.2.
+- [x] **Notably NOT needed:** ST7789 stayed in `esp_lcd` (only NT35510 moved to the registry in
+  6.0), `esp_private/esp_clk.h` still exists, and the vendored `lib/psychic_http` + `lib/tmc_api`
+  needed nothing.
+- [x] **Verified on hardware** (WaveShare ESP32-C6, `/dev/ttyACM0`): clean boot on 6.0.2 — NVS
+  settings restored across the upgrade (`boots=14`), AXS5106L probed over I²C, LVGL UI built,
+  stepper driver enabled, WiFi associated, web server up, `app_main()` returned. `/api/v1/state`
+  and `/api/v1/diagnostics/info` both answer and report `idfVersion: v6.0.2`.
+  **The screen itself is a visual check the maintainer still has to make.**
+- [x] Host tests: 11/11 pass against 6.0.2's Unity (same submodule commit as 5.3.2, so CI's pin
+  did not move).
+- **Cost:** app image grew **1,570,384 → 1,648,352 bytes (+78 KB, +5.0%)**, leaving 16% of the OTA
+  slot free (was 20%). Attributed by diffing `idf.py size-components` between the two builds:
+  - **mbedTLS 4.x + the PSA Crypto migration, ~+45 KB** — `libmbedcrypto.a` (72,208 B) is replaced
+    by `libtfpsacrypto.a` (117,201 B). This is the dominant cause and it is called out in 6.0's own
+    release notes ("For `http_server/simple`, the flash impact increases about 41KB (~4.97%)").
+  - **WiFi/PHY blobs, ~+28 KB** — `libnet80211` +14.0 KB, `libwpa_supplicant` +8.6 KB,
+    `libphy` +2.9 KB, `libpp` +2.5 KB.
+  - **libc, ~+5.6 KB** — Picolibc (6.0's new default) is advertised as a size *reduction*; measured
+    here it is a small *increase* (`libnewlib`+`libc` 10,246 B → `libesp_libc`+`libc` 15,858 B),
+    presumably because `CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY` defaults on.
+  So the lever if the slot ever gets tight is mbedTLS, not libc. Worth knowing: this firmware
+  serves plain HTTP and uses Digest (MD5) auth — mbedTLS is pulled in because `lib/psychic_http`
+  requires `esp_https_server`, not because anything here terminates TLS.

@@ -1,5 +1,11 @@
 #include "display_touch.h"
 
+// Explicit since ESP-IDF 6.0: vTaskDelay()/pdMS_TO_TICKS() below used to arrive
+// transitively through one of the esp_lcd/driver headers. 6.0 tightened those
+// includes, so name the dependency rather than relying on it being re-exported.
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
@@ -30,9 +36,13 @@ static const char *TAG = "display_touch";
 #define LCD_SCK_GPIO 1
 #define LCD_MOSI_GPIO 2
 #define LCD_MISO_GPIO 3  // unused by the display (write-only); read back by the TMC5160 in Phase 4
-#define LCD_DC_GPIO 15
-#define LCD_CS_GPIO 14
-#define LCD_RST_GPIO 22
+// GPIO_NUM_* rather than bare ints: ESP-IDF 6.0 typed esp_lcd's cs/dc/reset
+// config members as gpio_num_t, and C++ will not implicitly narrow an int into
+// that enum. The bus pins above stay plain ints - spi_bus_config_t's members
+// are still int, and gpio_num_t converts to int implicitly.
+#define LCD_DC_GPIO GPIO_NUM_15
+#define LCD_CS_GPIO GPIO_NUM_14
+#define LCD_RST_GPIO GPIO_NUM_22
 
 #define LCD_SPI_HOST SPI2_HOST
 #define LCD_PIXEL_CLOCK_HZ (40 * 1000 * 1000)

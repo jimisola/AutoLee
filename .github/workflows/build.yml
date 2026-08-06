@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
       - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
         with:
-          version: "v5.3.2"
+          version: "v6.0.2"
       - name: Build
         run: |
           idf.py set-target esp32c6
