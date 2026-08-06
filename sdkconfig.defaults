@@ -26,6 +26,15 @@ CONFIG_HTTPD_WS_SUPPORT=y
 # headers. Applies to every Digest-gated route, not just this one.
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 
+# Socket budget for the captive portal. IDF's default of 10 leaves esp_http_server
+# only 7 usable sockets (it requires max_open_sockets <= CONFIG_LWIP_MAX_SOCKETS - 3),
+# which a phone joining the setup AP can exhaust on its own: several parallel
+# connectivity-check probes plus the page load plus the dashboard's SSE stream.
+# Hitting the ceiling made httpd purge a socket mid-response and serve a
+# half-written setup page. 16 here is what lets web_server.cpp ask for 12 - the
+# two MUST be raised together, or httpd_start() fails with ESP_ERR_INVALID_ARG.
+CONFIG_LWIP_MAX_SOCKETS=16
+
 # Use our own include/lv_conf.h instead of the LVGL component's Kconfig-
 # generated defaults. Misleadingly named: LV_CONF_SKIP=y (the component's
 # own default) means "skip lv_conf.h", not "skip Kconfig" - found the hard

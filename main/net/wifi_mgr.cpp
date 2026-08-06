@@ -45,6 +45,11 @@ static const char *kNvsApKeyKey = "apkey";
 // typed and comfortably above WPA2's 8-char minimum.
 static std::string s_ap_key;
 
+// Handle for the captive-portal DNS responder, non-null only in AP mode. Kept
+// (rather than discarded at start_dns_server()) so stopForReboot() can shut its
+// task down before the chip resets - see there.
+static dns_server_handle_t s_dns_handle = nullptr;
+
 static bool s_connected = false;
 // The single gate on auto-reconnect: while we're in captive-portal AP fallback
 // the STA interface exists only so esp_wifi_scan_start() works and must never
@@ -385,8 +390,32 @@ void start() {
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
     dns_server_config_t dns_cfg = DNS_SERVER_CONFIG_SINGLE("*", "WIFI_AP_DEF");
 #pragma GCC diagnostic pop
-    start_dns_server(&dns_cfg);
+    s_dns_handle = start_dns_server(&dns_cfg);
   }
+}
+
+void stopForReboot() {
+  // Bring the network down in an orderly way before esp_restart().
+  //
+  // esp_restart() does not unwind anything: it halts the other core, disables
+  // interrupts and resets. Doing that with the WiFi driver mid-operation - and
+  // in AP mode, with the DNS responder task blocked in recvfrom() on a socket
+  // that is about to vanish - is the documented way to get a reset that hangs
+  // instead of completing, needing a power cycle to recover.
+  //
+  // This matters most on exactly the path where it was reported: saving WiFi
+  // credentials from the captive portal is the one reboot that happens while
+  // the AP, the DNS server and an active HTTP client are all up at once. The
+  // dashboard's reboots (STA mode, no DNS task) never looked as bad.
+  //
+  // Best-effort throughout: every failure here is still followed by the reset,
+  // since refusing to reboot would be strictly worse than an unclean one.
+  if (s_dns_handle) {
+    stop_dns_server(s_dns_handle);
+    s_dns_handle = nullptr;
+  }
+  esp_wifi_disconnect();
+  esp_wifi_stop();
 }
 
 bool isConnected() {

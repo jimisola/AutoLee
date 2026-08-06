@@ -270,6 +270,12 @@ static esp_err_t redirectToRoot(PsychicRequest *req, PsychicResponse *res) {
   ESP_LOGI(TAG, "Captive portal redirect: host='%s' uri='%s' -> 302 /", req->host(), req->uri());
   res->setCode(302);
   res->addHeader("Location", "/");
+  // Release the socket immediately instead of holding it on keep-alive. These
+  // probes are one-shot by nature - the phone never reuses the connection -
+  // so a lingering one is pure occupancy, and a handful of them is exactly
+  // what starves the real page load out of the socket budget set in
+  // setupWebServer(). See the max_open_sockets comment there.
+  res->addHeader("Connection", "close");
   return res->send();
 }
 
@@ -414,16 +420,32 @@ void setupWebServer() {
   // captive-portal probe handlers registered in AP mode.
   server.config.max_uri_handlers = 32;
 
-  // Default httpd config refuses a new connection outright once
-  // max_open_sockets is hit, rather than recycling the oldest one. On the
-  // setup AP that's easy to hit: a phone runs several background
-  // connectivity-check requests against different domains in parallel (all
-  // DNS-redirected to us), plus the dashboard's own long-lived SSE stream
-  // holds a socket open indefinitely. A refused/starved connection can
-  // surface as a truncated page load (e.g. cut off before </style>) -
-  // reproduced on hardware as "sometimes the page has no CSS". LRU purge
-  // makes a burst of setup-page traffic recycle old sockets instead of
-  // failing new ones.
+  // Socket budget for the setup AP, where the pressure is worst: a phone runs
+  // several background connectivity-check requests against different domains
+  // in parallel (all DNS-redirected to us), plus the dashboard's own
+  // long-lived SSE stream holds a socket open indefinitely.
+  //
+  // These two settings are a pair, and the ORDER of the reasoning matters:
+  //
+  // lru_purge_enable alone was the first attempt at the "sometimes the setup
+  // page has no CSS" bug. It was not enough, and on its own it is actively
+  // part of the problem: it does not add capacity, it only changes the
+  // failure mode from "refuse the new connection" to "close the
+  // least-recently-used one" - and that can be a socket in the middle of
+  // sending the setup page. Reproduced on hardware as a page cut off partway
+  // through the <style> block, so no CSS applied and the tail of the
+  // stylesheet rendered as visible text ("button{width:100%..." and on).
+  // Worst on iOS, which fires the most parallel probes.
+  //
+  // max_open_sockets is what actually fixes it: with headroom over the
+  // probe burst, purging becomes rare instead of routine. 12 is bounded by
+  // LWIP - httpd requires max_open_sockets <= CONFIG_LWIP_MAX_SOCKETS - 3
+  // (three descriptors are reserved for its own control/listen sockets), and
+  // sdkconfig.defaults sets CONFIG_LWIP_MAX_SOCKETS=16. Raise both together
+  // or httpd_start() fails at boot with ESP_ERR_INVALID_ARG.
+  server.config.max_open_sockets = 12;
+  // Kept as the backstop for the case the headroom above is still exceeded:
+  // recycling the oldest socket beats refusing every new connection outright.
   server.config.lru_purge_enable = true;
 
   loadLogLevel();

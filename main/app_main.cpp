@@ -26,6 +26,28 @@ static inline uint32_t millis() {
   return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
+// Why this is worth a line in the boot banner: without it, a boot log gives no
+// way to tell a clean esp_restart() (the deferred reboot in pump_task) from a
+// brownout, a watchdog panic, or an external reset. Those have completely
+// different causes and completely different fixes, and on a board where the
+// LCD backlight and the WiFi PA come up together, brownout is a live
+// possibility rather than a theoretical one.
+static const char *resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_EXT: return "external pin";
+    case ESP_RST_SW: return "software (esp_restart)";
+    case ESP_RST_PANIC: return "panic / exception";
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT: return "other watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep wake";
+    case ESP_RST_BROWNOUT: return "BROWNOUT (check supply)";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "unknown";
+  }
+}
+
 // Replaces the Arduino loop(): handleMotion + the deferred web/UI commands
 // are pumped from here every iteration; the DNS
 // captive-portal server and web server both run their own tasks now, so
@@ -44,6 +66,13 @@ static void pump_task(void *) {
     if (rebootRequested && (millis() - rebootRequestMs) > 500) {
       if (stepper::isRunning()) stepper::forceStop();
       vTaskDelay(pdMS_TO_TICKS(100));
+      // Motor first (above), network second, reset last. See
+      // wifi_mgr::stopForReboot(): a reset taken with the AP + DNS responder
+      // still live can hang the chip hard enough to need a power cycle. That
+      // is the leading (not yet confirmed) explanation for a reported "device
+      // never came back after WiFi setup" - check the reset reason logged at
+      // boot below against a reproduction before treating it as settled.
+      wifi_mgr::stopForReboot();
       esp_restart();
     }
 
@@ -87,6 +116,7 @@ extern "C" void app_main(void) {
   // Version comes from esp_app_desc_t, auto-populated at build time from
   // `git describe --always --tags --dirty` - no source file to bump.
   ESP_LOGI(TAG, "AutoLee firmware %s (ESP-IDF)", esp_app_get_description()->version);
+  ESP_LOGI(TAG, "Reset reason: %s", resetReasonName(esp_reset_reason()));
 
   // Restore the persisted calibration/tuning subset of g_motion BEFORE
   // motion_init(), so the run current it pushes to the TMC5160 is the saved one

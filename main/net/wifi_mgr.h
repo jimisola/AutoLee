@@ -10,6 +10,12 @@ namespace wifi_mgr {
 
 void start();  // load saved creds, try STA, fall back to AP + captive portal
 
+// Orderly network shutdown, to be called immediately before esp_restart().
+// Stops the captive-portal DNS responder (AP mode only) and the WiFi driver, so
+// the reset doesn't land mid-operation - which could leave the chip hung and
+// needing a power cycle. Best-effort: never blocks the reboot on failure.
+void stopForReboot();
+
 bool isConnected();
 bool isApMode();
 // True once the device has ever reached GOT_IP on a real network. Latched in
