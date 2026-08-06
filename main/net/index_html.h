@@ -315,7 +315,7 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <div class="sec">
 <h2>Web Password</h2>
-<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload (user: <b>autolee</b>). The factory default is public &mdash; until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all.</div>
+<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload (user: <b>autolee</b>). The factory default is publicly known &mdash; until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all.</div>
 <input type="password" id="wpNew" placeholder="New password">
 <button class="btn btn-blue btn-sm" onclick="saveWebPassword()" style="width:100%">Change Password</button>
 <div id="wpMsg" class="hint" style="margin-top:6px"></div>
