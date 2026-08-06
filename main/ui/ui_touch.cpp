@@ -1308,5 +1308,19 @@ void buildUI() {
   ui_update_batch_val();
   ui_update_wifi_label();  // sets the AP-setup QR/key vs connected view
 
+  // Actually put a screen on the display. Every screen above is built with
+  // lv_obj_create(nullptr), which creates it detached - none of them becomes
+  // active on its own, and lv_scr_load() runs only via go(). Until this call
+  // the sole thing that loaded a screen at boot was app_main()'s
+  // `if (isApMode() && !isConnected()) go(wifi_scr)`, so a device that came up
+  // in STA mode showed LVGL's default empty screen: a blank panel, backlit,
+  // with a fully working UI behind it that no touch could reach because no
+  // screen was active. Reported as "screen is blankish", and it only surfaced
+  // once the rig started joining a network instead of sitting on its own AP.
+  //
+  // main_scr is the right default; app_main() still overrides it with wifi_scr
+  // for the AP-setup case, after this returns.
+  go(main_scr);
+
   lvgl_port_unlock();
 }
