@@ -34,17 +34,28 @@ static inline uint32_t millis() {
 // possibility rather than a theoretical one.
 static const char *resetReasonName(esp_reset_reason_t r) {
   switch (r) {
-    case ESP_RST_POWERON: return "power-on";
-    case ESP_RST_EXT: return "external pin";
-    case ESP_RST_SW: return "software (esp_restart)";
-    case ESP_RST_PANIC: return "panic / exception";
-    case ESP_RST_INT_WDT: return "interrupt watchdog";
-    case ESP_RST_TASK_WDT: return "task watchdog";
-    case ESP_RST_WDT: return "other watchdog";
-    case ESP_RST_DEEPSLEEP: return "deep sleep wake";
-    case ESP_RST_BROWNOUT: return "BROWNOUT (check supply)";
-    case ESP_RST_SDIO: return "SDIO";
-    default: return "unknown";
+    case ESP_RST_POWERON:
+      return "power-on";
+    case ESP_RST_EXT:
+      return "external pin";
+    case ESP_RST_SW:
+      return "software (esp_restart)";
+    case ESP_RST_PANIC:
+      return "panic / exception";
+    case ESP_RST_INT_WDT:
+      return "interrupt watchdog";
+    case ESP_RST_TASK_WDT:
+      return "task watchdog";
+    case ESP_RST_WDT:
+      return "other watchdog";
+    case ESP_RST_DEEPSLEEP:
+      return "deep sleep wake";
+    case ESP_RST_BROWNOUT:
+      return "BROWNOUT (check supply)";
+    case ESP_RST_SDIO:
+      return "SDIO";
+    default:
+      return "unknown";
   }
 }
 
@@ -108,6 +119,24 @@ static void sse_task(void *) {
 extern "C" void app_main(void) {
   esp_err_t ret = nvs_flash_init();
   if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    // This erases the WHOLE nvs partition, not one namespace: calibration, WiFi
+    // credentials, the setup-AP key, the web password and the hasEverJoined()
+    // latch all go at once. It is the correct recovery (an unreadable NVS
+    // leaves no alternative), but it used to be completely silent, which made
+    // it indistinguishable from a bug - a lifetime boot counter dropping from
+    // 14 to 1 with no explanation anywhere in the log.
+    //
+    // NEW_VERSION_FOUND in particular is not an exotic failure: it fires when
+    // the NVS on flash was written by a build using a NEWER NVS format than the
+    // running image understands. Moving forward across an ESP-IDF major is
+    // therefore safe; going back is what wipes - which includes the automatic
+    // OTA rollback, since CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE can hand
+    // control to an older image in the other slot without anyone choosing to.
+    // Calibration goes, and the security-relevant hasEverJoined() latch with it.
+    ESP_LOGW(TAG,
+             "NVS unreadable (%s) - ERASING the whole nvs partition "
+             "(calibration, WiFi creds, AP key, web password all reset)",
+             esp_err_to_name(ret));
     ESP_ERROR_CHECK(nvs_flash_erase());
     ret = nvs_flash_init();
   }
