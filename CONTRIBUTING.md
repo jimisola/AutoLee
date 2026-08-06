@@ -42,8 +42,10 @@ stays free should real on-target tests ever be added.
 Targets **ESP32-C6** with a custom partition table (`partitions.csv`): nvs + otadata + dual OTA
 app slots (~1.9 MB each) + a coredump partition.
 
+Requires **ESP-IDF >= 6.0** — see Espressif's
+[installation instructions](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation).
+
 ```bash
-# Install ESP-IDF >= 5.3: https://docs.espressif.com/projects/esp-idf/en/stable/esp32c6/get-started/
 . $HOME/esp/esp-idf/export.sh   # or wherever you installed it; adjust the path
 
 idf.py set-target esp32c6   # once, per clone
@@ -55,9 +57,13 @@ Dependencies (LVGL, `esp_lvgl_port`) are pinned in `main/idf_component.yml` and 
 automatically by the ESP-IDF Component Manager on first build; `dependencies.lock` is committed
 for reproducibility. `managed_components/` (the downloaded source) is gitignored.
 
-> ESP32-C6 needs **ESP-IDF >= 5.3**, enforced by `main/idf_component.yml`'s `idf: ">=5.3"` —
-> the version this port was built and tested against. (An earlier note credited
-> FastAccelStepper's I2S-mux driver; that library was dropped for a native RMT+PCNT
+> **ESP-IDF >= 6.0**, enforced by `main/idf_component.yml`'s `idf: ">=6.0"`; CI and releases pin
+> **v6.0.2**, the version this port is built and tested against. ESP32-C6 itself only needs 5.1+,
+> and the project sat on 5.3 until the 6.0 move — but 5.x no longer compiles this source, because
+> 6.0 typed `esp_lcd`'s cs/dc/reset config members as `gpio_num_t`, stopped re-exporting FreeRTOS
+> headers transitively, and turned on `-Werror=missing-field-initializers`. All three are handled
+> in-source (see `main/drivers/display_touch.cpp` and `main/net/wifi_mgr.cpp`). (An earlier note
+> credited FastAccelStepper's I2S-mux driver; that library was dropped for a native RMT+PCNT
 > stepper — see ADR 0001.)
 
 ### Host tests

@@ -29,9 +29,12 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
 ```
 
 - **Board:** ESP32-C6 (WaveShare 1.47" Touch LCD module).
-- **Toolchain:** ESP-IDF >= 5.3, enforced by `main/idf_component.yml`'s `idf: ">=5.3"` - the
-  version this port was built and tested against (native RMT+PCNT stepper via `main/drivers/stepper.*`,
-  not FastAccelStepper, which was dropped - see ADR 0001).
+- **Toolchain:** ESP-IDF >= 6.0, enforced by `main/idf_component.yml`'s `idf: ">=6.0"`; CI and
+  releases pin **v6.0.2**, the version this port is built and tested against (native RMT+PCNT
+  stepper via `main/drivers/stepper.*`, not FastAccelStepper, which was dropped - see ADR 0001).
+  5.x no longer builds: 6.0 typed `esp_lcd`'s cs/dc/reset config members as `gpio_num_t`, stopped
+  re-exporting FreeRTOS headers transitively, and turned on `-Werror=missing-field-initializers`
+  (see the pragma around `DNS_SERVER_CONFIG_SINGLE` in `main/net/wifi_mgr.cpp`).
   Dependencies (LVGL, `esp_lvgl_port`) are pinned in `main/idf_component.yml` and fetched by the
   Component Manager; `dependencies.lock` is committed for reproducibility.
 - **Partition scheme:** custom `partitions.csv` — nvs + otadata + dual OTA app slots (~1.9 MB

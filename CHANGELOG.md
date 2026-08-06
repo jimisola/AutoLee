@@ -35,6 +35,11 @@ checklist and what is/isn't hardware-verified, and
   touches the stepper, TMC5160 or motion FSM.
 - Host test suite (`host_test/`) with 100% line coverage of `lib/autolee_logic/`,
   plus a coverage regression floor in CI.
+- **ESP-IDF 6.0.2** is now the toolchain (floor raised to `>=6.0`; 5.x no longer
+  compiles this source). Three small source changes were needed — explicit
+  FreeRTOS includes in `display_touch.cpp`, `gpio_num_t`-typed LCD pin macros,
+  and a scoped `-Wmissing-field-initializers` pragma in `wifi_mgr.cpp`. Verified
+  booting on the real board; the app image grew ~78 KB (+5%).
 - CI split into `build.yml` (firmware + host tests) and `lint.yml` (pre-commit,
   API specs, workflow lint, release-config), plus a `workflow_dispatch` release
   pipeline: git-cliff picks the version and writes the notes, an approval gate

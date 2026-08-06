@@ -119,7 +119,7 @@ offline/manually-installed libraries needed.
 
 ### Build & Flash
 
-Requires **ESP-IDF >= 5.3** — see Espressif's
+Requires **ESP-IDF >= 6.0** (CI and releases pin v6.0.2) — see Espressif's
 [installation instructions](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html#installation).
 
 ```bash

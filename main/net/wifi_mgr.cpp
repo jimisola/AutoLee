@@ -375,7 +375,16 @@ void start() {
 
     // Redirect every DNS query to us, so any device connecting to the AP
     // is prompted into the captive portal.
+    // DNS_SERVER_CONFIG_SINGLE leaves dns_entry_pair::ip uninitialized (correct
+    // - it is only read when if_key is NULL, and it isn't here), which
+    // ESP-IDF 6.0's -Werror=missing-field-initializers rejects in C++. Scoped
+    // to this one expansion rather than fixed in lib/dns_server/, which is
+    // vendored verbatim from Espressif's captive_portal example and still
+    // carries this exact macro upstream in 6.0.2.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
     dns_server_config_t dns_cfg = DNS_SERVER_CONFIG_SINGLE("*", "WIFI_AP_DEF");
+#pragma GCC diagnostic pop
     start_dns_server(&dns_cfg);
   }
 }
