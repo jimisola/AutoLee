@@ -234,7 +234,7 @@ paths:
                 pass: { type: string, maxLength: 64 }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
-        "400": { description: SSID missing, or SSID/password too long }
+        "400": { description: "SSID missing, or SSID/password too long" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/wifi/reset:
