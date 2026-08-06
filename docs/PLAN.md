@@ -513,6 +513,15 @@ ESP‑IDF `captive_portal` + `http_server` SSE examples.
 - [x] Host tests: 11/11 pass against 6.0.2's Unity (same submodule commit as 5.3.2, so CI's pin
   did not move).
 - **Cost:** app image grew **1,570,384 → 1,648,352 bytes (+78 KB, +5.0%)**, leaving 16% of the OTA
-  slot free (was 20%). Picolibc (6.0's new default libc) is advertised as a size *reduction*; it is
-  not one here, most likely because `CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY` is on by default.
-  Turning it off is the obvious first thing to try if the slot ever gets tight.
+  slot free (was 20%). Attributed by diffing `idf.py size-components` between the two builds:
+  - **mbedTLS 4.x + the PSA Crypto migration, ~+45 KB** — `libmbedcrypto.a` (72,208 B) is replaced
+    by `libtfpsacrypto.a` (117,201 B). This is the dominant cause and it is called out in 6.0's own
+    release notes ("For `http_server/simple`, the flash impact increases about 41KB (~4.97%)").
+  - **WiFi/PHY blobs, ~+28 KB** — `libnet80211` +14.0 KB, `libwpa_supplicant` +8.6 KB,
+    `libphy` +2.9 KB, `libpp` +2.5 KB.
+  - **libc, ~+5.6 KB** — Picolibc (6.0's new default) is advertised as a size *reduction*; measured
+    here it is a small *increase* (`libnewlib`+`libc` 10,246 B → `libesp_libc`+`libc` 15,858 B),
+    presumably because `CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY` defaults on.
+  So the lever if the slot ever gets tight is mbedTLS, not libc. Worth knowing: this firmware
+  serves plain HTTP and uses Digest (MD5) auth — mbedTLS is pulled in because `lib/psychic_http`
+  requires `esp_https_server`, not because anything here terminates TLS.

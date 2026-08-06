@@ -39,7 +39,8 @@ checklist and what is/isn't hardware-verified, and
   compiles this source). Three small source changes were needed — explicit
   FreeRTOS includes in `display_touch.cpp`, `gpio_num_t`-typed LCD pin macros,
   and a scoped `-Wmissing-field-initializers` pragma in `wifi_mgr.cpp`. Verified
-  booting on the real board; the app image grew ~78 KB (+5%).
+  booting on the real board; the app image grew ~78 KB (+5%), mostly mbedTLS 4.x
+  and its PSA Crypto migration (~45 KB) plus the WiFi/PHY blobs (~28 KB).
 - CI split into `build.yml` (firmware + host tests) and `lint.yml` (pre-commit,
   API specs, workflow lint, release-config), plus a `workflow_dispatch` release
   pipeline: git-cliff picks the version and writes the notes, an approval gate
