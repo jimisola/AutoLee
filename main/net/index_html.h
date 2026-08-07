@@ -312,7 +312,9 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <select id="nsList" style="flex:1" onchange="if(this.value)document.getElementById('ns').value=this.value"></select>
 <button class="btn btn-dark btn-sm" onclick="loadWifiScan()" title="Rescan">&#8635;</button></div>
 <input type="text" id="ns" placeholder="SSID (pick above or type)">
-<input type="password" id="np" autocomplete="off" placeholder="Password">
+<div class="row" style="gap:6px;margin-bottom:6px">
+<input type="password" id="np" autocomplete="off" placeholder="Password" style="flex:1;margin:0">
+<button class="btn btn-dark btn-sm" onclick="togPw('np',this)" aria-label="Show password" title="Show/hide">&#128065;</button></div>
 <div class="row" style="gap:6px">
 <button class="btn btn-blue btn-sm" onclick="saveWifi()" style="flex:1">Save &amp; Connect</button>
 <button class="btn btn-red btn-sm" onclick="resetWifi()" style="flex:1">Reset WiFi</button></div>
@@ -665,14 +667,22 @@ function saveWifi(){
   // browser history and in any proxy/server access log along the way. The
   // firmware reads query and form-encoded body params from the same map, so
   // the handler is unchanged.
+  // Parity with the captive portal, which renders an explicit error page for a
+  // refusal. This used to alert "Connecting..." on the .then() of ANY response,
+  // so a 400 (bad SSID) or the force-change 403 read as success and the
+  // operator went off waiting for a join that was never attempted.
   fetch('/api/v1/wifi/save',{method:'POST',
     headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)})
-  .then(()=>{alert('Connecting to the new network - no reboot. If it succeeds this page goes unreachable at the old address; the new IP is on the device screen (WiFi page). If it fails, AutoLee falls back to its setup network.')})}
+  .then(r=>{if(r.ok){alert('Connecting to the new network - no reboot. If it succeeds this page goes unreachable at the old address; the new IP is on the device screen (WiFi page). If it fails, AutoLee falls back to its setup network.')}
+    else{r.text().then(t=>alert('Not saved: '+(t||('HTTP '+r.status))))}})
+  .catch(()=>alert('Request failed - AutoLee did not answer.'))}
 function resetWifi(){
   if(!confirm('Clear saved WiFi credentials and switch to setup mode? This page will go unreachable.'))return;
   fetch('/api/v1/wifi/reset',{method:'POST'})
-  .then(()=>{alert('WiFi cleared - the AutoLee-Setup network is coming up now (key on the device screen).')})}
+  .then(r=>{if(r.ok){alert('WiFi cleared - the AutoLee-Setup network is coming up now (key on the device screen).')}
+    else{r.text().then(t=>alert('Not cleared: '+(t||('HTTP '+r.status))))}})
+  .catch(()=>alert('Request failed - AutoLee did not answer.'))}
 // Shared by both password boxes. The dashboard never had a reveal control at
 // all (the captive portal always did), which is a poor place to leave it when
 // the field it hides can lock you out of the machine.

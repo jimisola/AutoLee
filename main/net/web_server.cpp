@@ -398,8 +398,13 @@ static std::string wifiConfigPage() {
                 "Reset it from the press itself: <b>Config &rarr; Reset Pwd</b>.</p></div>";
 
   html += "<button class='btnSave' type='submit'>Save &amp; Connect</button></form>";
+  // Confirmed, like the dashboard's equivalent Reset WiFi button. It fired on
+  // the first tap here - the destructive control on the page most likely to be
+  // reached by a mis-tap on a phone, on the one surface an operator lands on
+  // when something has already gone wrong.
   html +=
-      "<form method='POST' action='/clear'><button class='btnClear' "
+      "<form method='POST' action='/clear' onsubmit=\"return confirm('Clear the saved WiFi "
+      "credentials and stay on the setup network?')\"><button class='btnClear' "
       "type='submit'>Clear Saved WiFi</button></form>";
   // type='button' on the eyes keeps them out of the submit path; without it a
   // <button> inside a <form> defaults to type='submit' and revealing the
