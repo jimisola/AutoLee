@@ -43,6 +43,18 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
 - **Safety features (`sdkconfig.defaults`):** OTA rollback, task + interrupt watchdog with panic,
   core dump to flash, brownout detection — see `docs/adr/0001-*.md` for what each concretely buys
   over the old Arduino/PlatformIO setup.
+- **Editing `sdkconfig.defaults` does nothing on its own.** ESP-IDF seeds `sdkconfig` from it only
+  when `sdkconfig` does not exist, and `sdkconfig` is gitignored — so in a clone that has already
+  been built, a changed default is silently ignored and the firmware keeps the old value. Delete
+  `sdkconfig` (or `idf.py fullclean`) and rebuild, then grep the generated `sdkconfig` to confirm
+  the value actually landed. This fails quietly and looks exactly like the change not working.
+- **NVS survives a flash, and is format-versioned.** `idf.py flash` leaves the `nvs` partition
+  alone, so calibration, WiFi credentials, the setup-AP key, the web password and the
+  `hasEverJoined()` latch persist across builds. But `app_main()` erases the *whole* partition on
+  `ESP_ERR_NVS_NEW_VERSION_FOUND`, which fires when flash holds a format newer than the running
+  image — i.e. moving forward an ESP-IDF major is safe, going *back* wipes everything. That
+  includes an automatic OTA rollback into an older image. `idf.py erase-flash` when you want the
+  out-of-box state deliberately.
 - **Pure logic + tests:** hardware-independent algorithms live in `lib/autolee_logic/` (registered
   as an ESP-IDF component) and are covered by Unity suites in `host_test/`, which also holds the
   CMake + CTest harness that builds them (deliberately *not* named `test_apps/` — that ESP-IDF
@@ -55,6 +67,18 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
   mapping RELEASING.md documents, the `tag_pattern`, and how the release notes render. It runs the
   real `git-cliff` against throwaway git repos, and skips itself if `git-cliff` is not on `PATH`.
   Edit `cliff.toml` and run `pytest tools/tests`.
+- **Lint + format:** run before every commit — `.github/workflows/lint.yml` enforces exactly this
+  and it is the cheapest CI job to go red on:
+  ```bash
+  pre-commit run --all-files
+  ```
+  `.clang-format` covers `main/`, `lib/` and `host_test/`; vendored third-party code (`lib/tmc_api`,
+  `lib/psychic_http`, `lib/dns_server`, `main/drivers/stepper_motor_encoder.*`) is excluded in
+  `.pre-commit-config.yaml` and must stay byte-identical to upstream — never reformat it. The
+  clang-format hook rewrites files in place, so a first run failing and a second passing is the
+  normal path, not an error; re-stage what it changed. Two checks in that workflow are *not* in
+  `.pre-commit-config.yaml` and need running by hand if you touch what they cover: `yamllint` +
+  `actionlint` + `zizmor` over `.github/`, and `spectral` over `api/*.yaml`.
 - **LVGL setup:** `include/lv_conf.h` is found via `-D LV_CONF_INCLUDE_SIMPLE` (set project-wide in
   the root `CMakeLists.txt`) — must stay visible to every component that includes `lvgl.h`.
 

@@ -38,7 +38,7 @@ details summary:hover{opacity:.8}
 details[open] summary{margin-bottom:8px}
 .jam-alert{display:none;background:#2a1111;border:1px solid #442222;border-radius:10px;padding:12px;margin-top:10px;text-align:center}
 .pw-alert{display:none;background:#3A2B12;border:1px solid #5c431d;border-radius:10px;padding:12px;margin-bottom:10px;text-align:center}
-input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:.9em}
+input[type=text],input[type=password],select{width:100%;padding:10px;margin-bottom:6px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:.9em}
 .upload{border:2px dashed #444;border-radius:8px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;font-size:.85em}
 .upload:hover{border-color:var(--accent)}.upload.on{border-color:var(--green);color:var(--green)}
 .pbar{width:100%;height:5px;background:#333;border-radius:3px;margin-top:6px;overflow:hidden;display:none}
@@ -307,11 +307,14 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <div class="sec">
 <h2>WiFi Settings</h2>
-<div class="hint" style="margin-bottom:8px">Change WiFi credentials (reboot required)</div>
-<input type="text" id="ns" placeholder="SSID">
+<div class="hint" style="margin-bottom:8px">Change WiFi credentials (applied live, no reboot)</div>
+<div class="row" style="gap:6px;margin-bottom:6px">
+<select id="nsList" style="flex:1" onchange="if(this.value)document.getElementById('ns').value=this.value"></select>
+<button class="btn btn-dark btn-sm" onclick="loadWifiScan()" title="Rescan">&#8635;</button></div>
+<input type="text" id="ns" placeholder="SSID (pick above or type)">
 <input type="password" id="np" placeholder="Password">
 <div class="row" style="gap:6px">
-<button class="btn btn-blue btn-sm" onclick="saveWifi()" style="flex:1">Save &amp; Reboot</button>
+<button class="btn btn-blue btn-sm" onclick="saveWifi()" style="flex:1">Save &amp; Connect</button>
 <button class="btn btn-red btn-sm" onclick="resetWifi()" style="flex:1">Reset WiFi</button></div>
 </div>
 
@@ -444,6 +447,25 @@ function clearLog(){
   fetch('/api/v1/system/logs',{method:'DELETE'});
 }
 
+function loadWifiScan(){
+  const s=document.getElementById('nsList');
+  s.innerHTML='';
+  const scanning=document.createElement('option');scanning.value='';scanning.textContent='Scanning…';
+  s.appendChild(scanning);
+  fetch('/api/v1/wifi/scan').then(r=>r.json()).then(list=>{
+    s.innerHTML='';
+    const def=document.createElement('option');def.value='';
+    def.textContent=list.length?'-- available networks --':'No networks found';
+    s.appendChild(def);
+    // DOM building, not string concatenation: an SSID is attacker-chosen text
+    // off the air and must never be interpreted as markup.
+    list.forEach(n=>{
+      const o=document.createElement('option');
+      o.value=n.ssid;
+      o.textContent=n.ssid+' ('+n.rssi+' dBm'+(n.secure?'':', OPEN')+')';
+      s.appendChild(o);});
+  }).catch(()=>{s.innerHTML='';const e=document.createElement('option');e.value='';e.textContent='Scan failed - retry ↻';s.appendChild(e)});
+}
 function loadServerLogLevel(){
   fetch('/api/v1/system/log_level').then(r=>r.json()).then(d=>{
     document.querySelectorAll('#logLevelCtl .btn').forEach(b=>b.className='btn btn-sm '+(b.dataset.lvl===d.level?'btn-blue':'btn-dark'));
@@ -459,6 +481,8 @@ function showPage(id){
   document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page===id));
   window.scrollTo(0,0);
   if(id==='pageDiag')loadDiag();
+  if(id==='pageLog')loadServerLogLevel();
+  if(id==='pageWifi')loadWifiScan();
   if(id==='pageLog'){loadLogs();loadServerLogLevel()}
 }
 document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page==='pageMain'));
@@ -639,11 +663,11 @@ function saveWifi(){
   fetch('/api/v1/wifi/save',{method:'POST',
     headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)})
-  .then(()=>{alert('Saved! Rebooting...');setTimeout(()=>location.reload(),5000)})}
+  .then(()=>{alert('Connecting to the new network - no reboot. If it succeeds this page goes unreachable at the old address; the new IP is on the device screen (WiFi page). If it fails, AutoLee falls back to its setup network.')})}
 function resetWifi(){
-  if(!confirm('Clear saved WiFi credentials and reboot into setup mode?'))return;
+  if(!confirm('Clear saved WiFi credentials and switch to setup mode? This page will go unreachable.'))return;
   fetch('/api/v1/wifi/reset',{method:'POST'})
-  .then(()=>{alert('WiFi cleared! Rebooting into setup mode...');setTimeout(()=>location.reload(),5000)})}
+  .then(()=>{alert('WiFi cleared - the AutoLee-Setup network is coming up now (key on the device screen).')})}
 function saveWebPassword(){
   const p=document.getElementById('wpNew').value,m=document.getElementById('wpMsg');
   if(!p){m.textContent='Enter a new password.';m.style.color='#FF4444';return}

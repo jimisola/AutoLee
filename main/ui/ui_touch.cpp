@@ -22,6 +22,9 @@
 
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
+#include "esp_log.h"
+#include "driver/gpio.h"  // ui_log_heartbeat() reads the backlight pad directly
+#include "config.h"       // GFX_BL
 
 #include "endpoint_math.h"
 
@@ -72,6 +75,54 @@ void go(lv_obj_t *scr) {
   if (!ui_lock("go")) return;
   lv_scr_load(scr);
   lvgl_port_unlock();
+}
+
+void ui_force_full_repaint() {
+  // Repaint everything once, after boot has finished.
+  //
+  // LVGL only redraws what has been invalidated. buildUI() draws the screen
+  // once, and from then on the only thing dirtying anything is the 100ms
+  // counter timer, which touches one small label. So if that single initial
+  // full draw does not reach the panel, the display stays black indefinitely
+  // while every software indicator - active screen, child count, LVGL tick,
+  // backlight level - reads perfectly healthy. That was the observed state, and
+  // a periodic full invalidate confirmed it: the UI appeared as soon as
+  // something forced a repaint, so the content and the panel were fine all
+  // along and only the first flush was lost.
+  //
+  // Why that first flush goes missing is NOT established. buildUI() runs before
+  // the blocking WiFi connect and the web-server start, both of which are heavy
+  // and share the SPI bus with the TMC5160 via the display - so this is called
+  // once after all of it has settled, which is the point where the bus and the
+  // scheduler are quiet again. Treat this as a targeted workaround with a known
+  // symptom and an unknown cause, not as a fix for the underlying race.
+  if (!ui_lock("repaint")) return;
+  lv_obj_t *act = lv_scr_act();
+  if (act) lv_obj_invalidate(act);
+  lvgl_port_unlock();
+}
+
+void ui_log_heartbeat() {
+  // Read the backlight pin first, outside the lock: if the LVGL lock is the
+  // thing that is stuck, this is the one number still worth having, and
+  // gpio_get_level() reads the pad directly rather than a cached value.
+  const int bl = gpio_get_level((gpio_num_t)GFX_BL);
+  const uint32_t tick = lv_tick_get();
+
+  if (!ui_lock("heartbeat")) {
+    ESP_LOGW("ui", "heartbeat: LVGL LOCK BUSY - tick=%lu bl=%d", (unsigned long)tick, bl);
+    return;
+  }
+  lv_obj_t *act = lv_scr_act();
+  // Child count separates "a screen is loaded but empty" - which renders as
+  // flat black, since style_screen() paints the background black - from "the
+  // screen has its widgets and they are simply not reaching the panel".
+  const uint32_t kids = act ? (uint32_t)lv_obj_get_child_cnt(act) : 0;
+
+  lvgl_port_unlock();
+
+  ESP_LOGW("ui", "heartbeat: scr=%p main=%p match=%d kids=%lu tick=%lu bl=%d", (void *)act,
+           (void *)main_scr, act == main_scr, (unsigned long)kids, (unsigned long)tick, bl);
 }
 
 static void style_screen(lv_obj_t *scr) {
@@ -397,8 +448,18 @@ void ui_update_wifi_label() {
                             ";P:" + qrEscape(wifi_mgr::apPassword()) + ";;";
       lv_qrcode_update(wifi_qr, payload.c_str(), payload.length());
       lv_obj_clear_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
-      lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s", DEFAULT_AP_SSID,
-                            wifi_mgr::apPassword().c_str());
+      // The URL line is the fallback for when the captive portal doesn't pop
+      // by itself - which happens often enough to matter (a phone that has
+      // already "seen" this AP, a browser that suppresses the CNA, or plain
+      // Android/desktop behaviour). Without it, a device that has joined the
+      // AP has no way to discover where the setup page lives, since the AP's
+      // address is never shown anywhere else in AP mode: the status card that
+      // normally carries the IP is hidden below in this view.
+      // Blank line before the URL: SSID and key are what you type into the
+      // phone's WiFi dialog, the URL is what you do afterwards in a browser.
+      // Two steps, so they read as two groups rather than one list of three.
+      lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s\n\nhttp://%s", DEFAULT_AP_SSID,
+                            wifi_mgr::apPassword().c_str(), wifi_mgr::ipAddress().c_str());
       lv_obj_clear_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_add_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
@@ -999,6 +1060,9 @@ static void build_wifi_screen() {
   lv_obj_t *wc = make_content(wifi_scr);
   // Tighter row spacing than the default 10: the AP-setup view stacks title +
   // 112px QR + key + Skip and needs to fit CONTENT_H (260) without scrolling.
+  // The key label is four wrapped lines (SSID / key / blank / setup URL - see
+  // ui_update_wifi_label()), so the margin here is thin. Re-check on hardware
+  // before adding anything else to this view.
   lv_obj_set_style_pad_row(wc, 6, LV_PART_MAIN);
   lv_obj_t *wn = make_nav(wifi_scr);
   lv_obj_t *wt = make_title(wc, "WiFi");
@@ -1053,10 +1117,11 @@ static void build_wifi_screen() {
       b_wifi_reset,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        wifi_mgr::clearCredentials();
-        webLog("WiFi", "Credentials cleared, rebooting...");
-        rebootRequested = true;
-        rebootRequestMs = millis();
+        // Live reset, no reboot: reset_task clears the credentials and brings
+        // the setup AP up on the running WiFi driver. Runs on its own task, so
+        // this LVGL callback returns immediately; the WiFi screen's status
+        // updates via ui_update_wifi_label() when the task finishes.
+        wifi_mgr::requestResetToSetupAp();
       },
       LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(
@@ -1294,6 +1359,20 @@ void buildUI() {
   ui_update_sg_val();
   ui_update_batch_val();
   ui_update_wifi_label();  // sets the AP-setup QR/key vs connected view
+
+  // Actually put a screen on the display. Every screen above is built with
+  // lv_obj_create(nullptr), which creates it detached - none of them becomes
+  // active on its own, and lv_scr_load() runs only via go(). Until this call
+  // the sole thing that loaded a screen at boot was app_main()'s
+  // `if (isApMode() && !isConnected()) go(wifi_scr)`, so a device that came up
+  // in STA mode showed LVGL's default empty screen: a blank panel, backlit,
+  // with a fully working UI behind it that no touch could reach because no
+  // screen was active. Reported as "screen is blankish", and it only surfaced
+  // once the rig started joining a network instead of sitting on its own AP.
+  //
+  // main_scr is the right default; app_main() still overrides it with wifi_scr
+  // for the AP-setup case, after this returns.
+  go(main_scr);
 
   lvgl_port_unlock();
 }

@@ -12,6 +12,7 @@
 
 volatile bool rebootRequested = false;
 uint32_t rebootRequestMs = 0;
+volatile bool uiRepaintRequested = false;
 
 TaskHandle_t g_pump_task_handle = nullptr;
 

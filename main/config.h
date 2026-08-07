@@ -15,6 +15,20 @@ static const char *DEFAULT_AP_SSID = "AutoLee-Setup";
 static constexpr size_t WIFI_SSID_MAX_LEN = 32;
 static constexpr size_t WIFI_PASS_MAX_LEN = 64;
 
+// How long the initial STA connect may take before the device gives up and
+// starts the captive-portal AP instead. This is the ONLY failure path for the
+// initial connect - disconnects are retried unconditionally until it expires
+// (see wifi_event_handler in wifi_mgr.cpp).
+//
+// Was 10s, which turned out to be marginal on a real network: measured connects
+// on a -75 dBm guest AP took 1.8s and 5.5s, and one association reached `assoc`
+// but not `run` before the window closed - so the rig dropped to its own AP
+// despite having perfectly good credentials, which reads to the operator as
+// "the WiFi password did not work". The cost of being generous here is a slower
+// boot only when there genuinely is no network to join, and the LCD is already
+// up during the wait (buildUI() runs before this).
+static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 25000;
+
 // ==========================================================================
 //  PIN DEFINITIONS
 // ==========================================================================
@@ -192,6 +206,11 @@ static const char *WEB_AUTH_USER = "autolee";
 static const char *WEB_AUTH_DEFAULT_PASS = "autolee";
 static const char *WEB_AUTH_REALM = "AutoLee";
 static constexpr size_t WEB_AUTH_PASS_MAX = 64;
+// Floor for a password the operator chooses themselves (the WiFi setup page and
+// POST /api/v1/system/web_password). Deliberately not applied to
+// WEB_AUTH_DEFAULT_PASS, which is shorter and is the state this floor exists to
+// get the device out of.
+static constexpr size_t WEB_AUTH_PASS_MIN = 8;
 
 // Both of the above apply only in STA mode (device joined a real network). On
 // its own setup AP the web control surface is deliberately unauthenticated -

@@ -19,6 +19,11 @@
 // Deferred reboot (set from a handler, serviced by pump_task). Motion-affecting
 // requests go through motion_cmd:: instead - see main/motion/motion_cmd.h.
 extern volatile bool rebootRequested;
+// Ask sse_task to force a full LVGL repaint on its next tick. Set after WiFi
+// lifecycle transitions (see the lost-flush writeup in app_main.cpp's
+// sse_task) from contexts that must not block on the LVGL lock themselves,
+// e.g. the WiFi event task.
+extern volatile bool uiRepaintRequested;
 extern uint32_t rebootRequestMs;
 
 // pump_task's handle, captured at creation (app_main.cpp) so web_server.cpp's

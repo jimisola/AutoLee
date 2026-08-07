@@ -57,9 +57,12 @@ typedef struct __attribute__((__packed__))
 } dns_answer_t;
 
 // DNS server handle
+// `started` is volatile (local change vs. upstream): stop_dns_server() clears
+// it from another task while dns_server_task() polls it, and without volatile
+// the compiler may cache the read across the recvfrom() loop.
 struct dns_server_handle {
-    bool started;
-    TaskHandle_t task;
+    volatile bool started;
+    TaskHandle_t volatile task; // volatile: cleared by the task, polled by stop_dns_server()
     int num_of_entries;
     dns_entry_pair_t entry[];
 };
@@ -232,12 +235,30 @@ void dns_server_task(void *pvParameters)
         }
         ESP_LOGI(TAG, "Socket bound, port %d", DNS_PORT);
 
+        // Local change vs. upstream: a receive timeout, so the loop re-checks
+        // handle->started periodically instead of blocking in recvfrom()
+        // forever. Upstream's stop_dns_server() is a bare vTaskDelete() on a
+        // task that is almost always inside that recvfrom() - killing a task
+        // mid-syscall inside lwIP leaves the lwIP core lock held, and the next
+        // esp_wifi_stop()/esp_wifi_set_mode() then deadlocks (observed on
+        // hardware as a device that never completed its reboot). This timeout
+        // plus the EWOULDBLOCK check below is what makes a graceful stop
+        // possible.
+        struct timeval rcvto = { .tv_sec = 0, .tv_usec = 250 * 1000 };
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rcvto, sizeof(rcvto));
+
         while (handle->started) {
             ESP_LOGI(TAG, "Waiting for data");
             struct sockaddr_in6 source_addr; // Large enough for both IPv4 or IPv6
             socklen_t socklen = sizeof(source_addr);
             int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
 
+            // Receive timeout (see the SO_RCVTIMEO above, local change): not an
+            // error, just the periodic chance to notice handle->started went
+            // false and exit cleanly.
+            if (len < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+                continue;
+            }
             // Error occurred during receiving
             if (len < 0) {
                 ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
@@ -282,6 +303,10 @@ void dns_server_task(void *pvParameters)
             close(sock);
         }
     }
+    // Local change vs. upstream: signal stop_dns_server() that this task is
+    // done with the handle before self-deleting, so it knows when free() is
+    // safe. Must be the last touch of `handle`.
+    handle->task = NULL;
     vTaskDelete(NULL);
 }
 
@@ -294,15 +319,38 @@ dns_server_handle_t start_dns_server(dns_server_config_t *config)
     handle->num_of_entries = config->num_of_entries;
     memcpy(handle->entry, config->item, config->num_of_entries * sizeof(dns_entry_pair_t));
 
-    xTaskCreate(dns_server_task, "dns_server", 4096, handle, 5, &handle->task);
+    // Local temp (local change vs. upstream): handle->task is volatile now, and
+    // xTaskCreate wants a plain TaskHandle_t*.
+    TaskHandle_t task = NULL;
+    xTaskCreate(dns_server_task, "dns_server", 4096, handle, 5, &task);
+    handle->task = task;
     return handle;
 }
 
 void stop_dns_server(dns_server_handle_t handle)
 {
     if (handle) {
+        // Local change vs. upstream, which called vTaskDelete(handle->task)
+        // here directly: that task is almost always blocked inside recvfrom(),
+        // and deleting a task mid-syscall inside lwIP leaves the lwIP core
+        // lock held - the next wifi call then deadlocks (observed on
+        // hardware). Instead: ask the task to exit (it polls `started` every
+        // 250ms via the receive timeout above), wait for it to confirm by
+        // clearing handle->task, then free. The fallback delete only triggers
+        // if the task fails to exit in time, in which case the upstream
+        // behaviour (and its risk) is no worse than before.
         handle->started = false;
-        vTaskDelete(handle->task);
+        for (int i = 0; i < 20 && handle->task != NULL; i++) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+        // Snapshot once: handle->task is volatile and the task can clear it
+        // between a check and a use - vTaskDelete(NULL) would delete the
+        // CALLER. One read, then act only on the snapshot.
+        TaskHandle_t remaining = handle->task;
+        if (remaining != NULL) {
+            ESP_LOGE(TAG, "dns task did not exit gracefully - deleting it");
+            vTaskDelete(remaining);
+        }
         free(handle);
     }
 }

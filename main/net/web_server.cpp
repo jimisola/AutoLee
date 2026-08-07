@@ -237,12 +237,32 @@ static const char WIFI_CSS[] =
     "color:#fff;font-size:16px;cursor:pointer;}"
     ".btnSave{background:#28a745;}.btnClear{background:#c0392b;}"
     ".box{max-width:420px;margin:auto;background:#1b1b1b;padding:20px;border-radius:12px;}"
-    "label{display:block;margin-top:10px;font-size:14px;color:#aaa;}";
+    "label{display:block;margin-top:10px;font-size:14px;color:#aaa;}"
+    // Reveal button, overlaid on the right-hand end of a password field. The
+    // generic `button` rule above is full-width with its own margin, so every
+    // one of those has to be undone here or the eye becomes a second bar under
+    // the input.
+    ".pw{position:relative;}"
+    ".pw input{padding-right:48px;}"
+    ".eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);"
+    "width:38px;height:38px;margin:0;padding:0;background:transparent;"
+    "font-size:19px;line-height:1;}"
+    ".sec{margin-top:20px;padding-top:14px;border-top:1px solid #333;}"
+    ".why{font-size:13px;color:#aaa;line-height:1.45;margin:6px 0 0;}";
 
 static std::string wifiConfigPage() {
+  // Joining a network is the one moment the trust model changes: until now the
+  // WPA2 AP key has been the only gate and physical presence was the whole
+  // story, but after this reboot the rig is reachable by everything on the LAN.
+  // So the password is asked for HERE, in the same transaction, rather than
+  // left to a separate trip the operator has no reason to know they must make.
+  // Only on a rig that has never joined - afterwards the password already
+  // exists and this section would just be a second, confusing way to change it.
+  const bool needWebPassword = !wifi_mgr::hasEverJoined();
+
   std::string html;
   html +=
-      "<!DOCTYPE html><html><head><meta name='viewport' "
+      "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' "
       "content='width=device-width,initial-scale=1'>";
   html += "<title>AutoLee WiFi Setup</title><style>";
   html += WIFI_CSS;
@@ -253,15 +273,50 @@ static std::string wifiConfigPage() {
   html += "<label>Select Network</label><select name='ssid_select'>" +
           wifi_mgr::scannedOptionsHtml() + "</select>";
   html +=
+      "<a href='/?rescan=1' style='display:block;margin:4px 0 0;font-size:13px;"
+      "color:#7cf;text-decoration:none'>&#8635; Rescan networks</a>";
+  html +=
       "<label>Or type SSID manually</label><input name='ssid_manual' placeholder='SSID "
       "(optional)'>";
   html +=
-      "<label>Password</label><input name='pass' type='password' placeholder='WiFi "
-      "password'>";
-  html += "<button class='btnSave' type='submit'>Save &amp; Reboot</button></form>";
+      "<label>Password</label><div class='pw'><input name='pass' id='wifipw' type='password' "
+      "placeholder='WiFi password'>"
+      "<button type='button' class='eye' id='wifipwEye' onclick=\"tog('wifipw',this)\" "
+      "aria-label='Show password'>&#128065;</button></div>";
+
+  // Shown on every visit to this page, not only the first. Configuring WiFi is
+  // the moment to think about the password, whichever network it is - and a rig
+  // that is back on its setup AP may well be here because something went wrong,
+  // which is exactly when being unable to reset the password would strand the
+  // operator. Required the first time (nothing is set yet); optional
+  // afterwards, where blank means "keep the current one".
+  html += "<div class='sec'><label>Device password</label><div class='pw'>";
+  html += needWebPassword ? "<input name='web_password' id='webpw' type='password' "
+                            "placeholder='At least 8 characters' minlength='8' required>"
+                          : "<input name='web_password' id='webpw' type='password' "
+                            "placeholder='Leave blank to keep the current one' minlength='8'>";
+  html +=
+      "<button type='button' class='eye' onclick=\"tog('webpw',this)\" "
+      "aria-label='Show password'>&#128065;</button></div>";
+  html += needWebPassword
+              ? "<p class='why'>Once AutoLee is on your network, anything on that network can "
+                "reach it. This password is what will be asked for before it will run, "
+                "calibrate or accept a firmware update. Username is <b>autolee</b>.</p></div>"
+              : "<p class='why'>A password is already set. Type a new one here to replace it, "
+                "or leave this blank to keep it. Username is <b>autolee</b>.</p></div>";
+
+  html += "<button class='btnSave' type='submit'>Save &amp; Connect</button></form>";
   html +=
       "<form method='POST' action='/clear'><button class='btnClear' "
       "type='submit'>Clear Saved WiFi</button></form>";
+  // type='button' on the eyes keeps them out of the submit path; without it a
+  // <button> inside a <form> defaults to type='submit' and revealing the
+  // password would save and reboot the press.
+  html +=
+      "<script>function tog(id,b){var e=document.getElementById(id);"
+      "var hidden=e.type==='password';e.type=hidden?'text':'password';"
+      "b.innerHTML=hidden?'&#128584;':'&#128065;';"
+      "b.setAttribute('aria-label',hidden?'Hide password':'Show password');}</script>";
   html += "</div></body></html>";
   return html;
 }
@@ -270,6 +325,12 @@ static esp_err_t redirectToRoot(PsychicRequest *req, PsychicResponse *res) {
   ESP_LOGI(TAG, "Captive portal redirect: host='%s' uri='%s' -> 302 /", req->host(), req->uri());
   res->setCode(302);
   res->addHeader("Location", "/");
+  // Release the socket immediately instead of holding it on keep-alive. These
+  // probes are one-shot by nature - the phone never reuses the connection -
+  // so a lingering one is pure occupancy, and a handful of them is exactly
+  // what starves the real page load out of the socket budget set in
+  // setupWebServer(). See the max_open_sockets comment there.
+  res->addHeader("Connection", "close");
   return res->send();
 }
 
@@ -408,22 +469,41 @@ void otaWatchdogTick() {
 
 // ==========================================================================
 void setupWebServer() {
-  // Raised when the flat /api/v1/* routes were regrouped into nested paths and
-  // the old /api/v1/action dispatcher was split into four standalone routes
-  // (+3 handlers). Must stay above the real route count including the seven
-  // captive-portal probe handlers registered in AP mode.
-  server.config.max_uri_handlers = 32;
+  // Must stay above the real registration count - which is NOT the number of
+  // server.on() lines: the seven captive-portal probes register in a loop, in
+  // AP mode only, and a failed registration is just an "Add endpoint failed"
+  // log line, trivially missed. As of the wifi/scan route the AP-mode total is
+  // 34, which had silently outgrown the previous 32. Count with
+  // `grep -c "server.on(" web_server.cpp` + 6 (the probe loop is one line for
+  // seven routes, minus the loop line itself) and keep headroom.
+  server.config.max_uri_handlers = 44;
 
-  // Default httpd config refuses a new connection outright once
-  // max_open_sockets is hit, rather than recycling the oldest one. On the
-  // setup AP that's easy to hit: a phone runs several background
-  // connectivity-check requests against different domains in parallel (all
-  // DNS-redirected to us), plus the dashboard's own long-lived SSE stream
-  // holds a socket open indefinitely. A refused/starved connection can
-  // surface as a truncated page load (e.g. cut off before </style>) -
-  // reproduced on hardware as "sometimes the page has no CSS". LRU purge
-  // makes a burst of setup-page traffic recycle old sockets instead of
-  // failing new ones.
+  // Socket budget for the setup AP, where the pressure is worst: a phone runs
+  // several background connectivity-check requests against different domains
+  // in parallel (all DNS-redirected to us), plus the dashboard's own
+  // long-lived SSE stream holds a socket open indefinitely.
+  //
+  // These two settings are a pair, and the ORDER of the reasoning matters:
+  //
+  // lru_purge_enable alone was the first attempt at the "sometimes the setup
+  // page has no CSS" bug. It was not enough, and on its own it is actively
+  // part of the problem: it does not add capacity, it only changes the
+  // failure mode from "refuse the new connection" to "close the
+  // least-recently-used one" - and that can be a socket in the middle of
+  // sending the setup page. Reproduced on hardware as a page cut off partway
+  // through the <style> block, so no CSS applied and the tail of the
+  // stylesheet rendered as visible text ("button{width:100%..." and on).
+  // Worst on iOS, which fires the most parallel probes.
+  //
+  // max_open_sockets is what actually fixes it: with headroom over the
+  // probe burst, purging becomes rare instead of routine. 12 is bounded by
+  // LWIP - httpd requires max_open_sockets <= CONFIG_LWIP_MAX_SOCKETS - 3
+  // (three descriptors are reserved for its own control/listen sockets), and
+  // sdkconfig.defaults sets CONFIG_LWIP_MAX_SOCKETS=16. Raise both together
+  // or httpd_start() fails at boot with ESP_ERR_INVALID_ARG.
+  server.config.max_open_sockets = 12;
+  // Kept as the backstop for the case the headroom above is still exceeded:
+  // recycling the oldest socket beats refusing every new connection outright.
   server.config.lru_purge_enable = true;
 
   loadLogLevel();
@@ -535,6 +615,46 @@ void setupWebServer() {
         // router outage would drop an already-networked rig back to its own AP
         // and silently reopen it.
         if (!wifi_mgr::hasEverJoined()) return next();
+
+        // The WiFi routes stay reachable while the rig is sitting on its own
+        // setup AP, even after it has joined a network before.
+        //
+        // Without this, a rig that joined once and then could not get back on
+        // (wrong PSK, router replaced, network gone) falls back to its AP with
+        // the latch still set - so the captive portal demands the digest
+        // password before it will accept new credentials. The operator is
+        // standing at the machine, on its WPA2 AP, and cannot re-run setup.
+        // Observed exactly that way: a mistyped PSK left the device asking for
+        // a login on its own setup page.
+        //
+        // It also gives up nothing. In this state the device is on no LAN at
+        // all - the only way to reach these routes is to have joined the setup
+        // AP, whose per-device key exists solely on the LCD and its join QR, so
+        // the caller is physically at the press. That is the same gate the
+        // never-networked case above already accepts, and the same one the
+        // unauthenticated touch UI has always accepted. Everything else - run,
+        // calibrate, OTA, password change - stays gated, so this cannot be used
+        // to operate the machine, only to get it back onto a network.
+        //
+        // Deliberately NOT keyed on "no stored credentials": the case that
+        // strands an operator is stored-but-wrong credentials, which is exactly
+        // when they are stored.
+        //
+        // NOTE: like the password-endpoint literal below, these paths must stay
+        // in lockstep with the route registrations further down.
+        //
+        // The transitionInFlight() arm (review finding L3): during a live
+        // switch out of AP mode there is a window where GOT_IP has set
+        // isConnected() true while the setup AP is still up (torn down last,
+        // so the operator's portal session survives until the outcome is
+        // real). A phone still on the AP is still physically-present traffic;
+        // without this arm its POST would suddenly draw a digest challenge
+        // mid-flow.
+        if (wifi_mgr::isApMode() && (!wifi_mgr::isConnected() || wifi_mgr::transitionInFlight()) &&
+            (uri == "/save" || uri == "/clear" || uri == "/api/v1/wifi/save" ||
+             uri == "/api/v1/wifi/reset")) {
+          return next();
+        }
         // #1c (docs/PLAN.md) "force-change-on-first-use": while the password
         // is still the factory default, every state-changing route is refused
         // with a friendly 403 telling the caller to set a real password first
@@ -572,6 +692,10 @@ void setupWebServer() {
     // hitting the device - reproduced on hardware as a garbled/stale page.
     res->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
+      // Explicit rescan only - never on a plain page load: the portal is
+      // hammered by captive-probe redirects, and a 1-3s blocking scan per
+      // load would starve the very page the operator is waiting for.
+      if (req->hasParam("rescan")) wifi_mgr::rescanForPortal();
       // PsychicResponse::setContent(const char*) stores the raw pointer, it
       // doesn't copy - a temporary std::string's buffer would already be
       // freed by the time send() reads it below (reproduced on hardware:
@@ -581,6 +705,36 @@ void setupWebServer() {
       res->setCode(200);
       res->setContentType("text/html");
       res->setContent(page.c_str());
+
+      // Instrumentation for the intermittent "setup page renders unstyled with
+      // stray CSS text" bug. Sends the request itself rather than falling
+      // through, so the outcome can be logged next to what was supposed to go
+      // out. Each field is here to kill a specific hypothesis:
+      //
+      //  len vs strlen - setContent(const char*) sets Content-Length from
+      //    strlen(). An embedded NUL anywhere in the page would make the
+      //    declared length short, truncating the body mid-<style> with the
+      //    send still reporting success. If these two ever differ, that is the
+      //    bug and nothing else here matters.
+      //  opts  - the one variable-length part (the scan dropdown).
+      //  heap/largest - the 5.3 fixed per-connection header buffer is gone on
+      //    6.0, but a failed allocation under the probe burst would still cut
+      //    a response; fragmentation shows up as a small largest-block with
+      //    plenty of total free.
+      //  sock  - if a bad render carries a different socket number than the
+      //    good ones around it, LRU purge is recycling it mid-flight.
+      //  send  - ESP_OK here with a broken page on screen means the device
+      //    believes it sent everything, and the loss is below httpd.
+      const size_t declaredLen = strlen(page.c_str());
+      const int sock = req->client() ? req->client()->socket() : -1;
+      const esp_err_t sendErr = res->send();
+      ESP_LOGW(TAG, "captive page: len=%u strlen=%u opts=%u heap=%u largest=%u sock=%d send=%s",
+               (unsigned)page.length(), (unsigned)declaredLen,
+               (unsigned)wifi_mgr::scannedOptionsHtml().length(),
+               (unsigned)esp_get_free_heap_size(),
+               (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT), sock,
+               esp_err_to_name(sendErr));
+      return sendErr;
     } else {
       res->setCode(200);
       res->setContentType("text/html");
@@ -590,6 +744,19 @@ void setupWebServer() {
   });
 
   server.on("/save", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    // Refuse BEFORE validating or persisting anything (review finding M2): a
+    // 409 must not leave new credentials in NVS or a changed digest password
+    // behind while an earlier attempt is still running against the old ones.
+    if (wifi_mgr::transitionInFlight()) {
+      res->setCode(409);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Already connecting</h2>"
+          "<p>A connection attempt is in progress - give it half a minute, then try "
+          "again.</p><p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
     std::string ss = req->getParam("ssid_select", "");
     std::string sm = req->getParam("ssid_manual", "");
     std::string pw = req->getParam("pass", "");
@@ -603,6 +770,36 @@ void setupWebServer() {
           "style='color:#7cf;'>Go back</a></p></body></html>");
       return res->send();
     }
+    // The web password is validated BEFORE the credentials are stored, so a
+    // rejected password leaves nothing behind - otherwise a bad password would
+    // still have committed the SSID, and the operator would be one reboot away
+    // from a networked rig with no password set.
+    const std::string webPw = req->getParam("web_password", "");
+    const bool needWebPassword = !wifi_mgr::hasEverJoined();
+    // Required pre-join; afterwards blank means "keep the current one". Either
+    // way, anything actually typed has to clear the floor - without the
+    // !empty() arm a post-join caller could set a one-character password.
+    if ((needWebPassword || !webPw.empty()) && webPw.length() < WEB_AUTH_PASS_MIN) {
+      res->setCode(400);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Device password too short</h2>"
+          "<p>It must be at least 8 characters.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
+    if (webPw.length() > WEB_AUTH_PASS_MAX) {
+      res->setCode(400);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Device password too long</h2>"
+          "<p>It must be 64 characters or fewer.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
+
     if (!wifi_mgr::saveCredentials(finalSSID, pw)) {
       res->setCode(400);
       res->setContentType("text/html");
@@ -613,26 +810,66 @@ void setupWebServer() {
           "or fewer.</p><p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
       return res->send();
     }
+
+    // Applied only after the credentials stored cleanly, so the two land
+    // together or not at all.
+    if (!webPw.empty()) {
+      if (saveWebPassword(webPw)) {
+        s_auth.setPassword(webPw.c_str());
+        s_default_password_active = (webPw == WEB_AUTH_DEFAULT_PASS);
+        webLog("Security", "Web password set during WiFi setup");
+      } else {
+        webLogLevel(LogLevel::Error, "Security",
+                    "Could not persist the web password - the factory default still applies");
+      }
+    }
+
+    // Live switch, no reboot: the setup AP (and this very page's connection)
+    // stays up until the join succeeds, so the outcome can be honest instead
+    // of "rebooting, hope for the best".
+    if (!wifi_mgr::startLiveSwitch()) {
+      res->setCode(409);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Already connecting</h2>"
+          "<p>A connection attempt is in progress - give it half a minute.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
     res->setCode(200);
     res->setContentType("text/html");
     res->setContent(
         "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
-        "background:#111;color:#eee;'><h2 style='color:#28a745;'>Saved!</h2>"
-        "<p>Rebooting...</p></body></html>");
-    rebootRequested = true;
-    rebootRequestMs = millis();
+        "background:#111;color:#eee;'><h2 style='color:#28a745;'>Connecting&hellip;</h2>"
+        "<p>AutoLee is joining the network now. If it succeeds, this setup network "
+        "disappears and AutoLee's new address is shown on its screen (WiFi page).</p>"
+        "<p>If the setup network is still here in a minute, the join failed &mdash; "
+        "reconnect to it and check the password.</p></body></html>");
     return res->send();
   });
 
   server.on("/clear", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    wifi_mgr::clearCredentials();
+    // reset_task also clears the credentials - no reboot involved anymore.
+    // Refusal must be reported (review finding M4): telling the operator
+    // "cleared" while a join to the wrong network proceeds is exactly the
+    // moment they most need the truth.
+    if (!wifi_mgr::requestResetToSetupAp()) {
+      res->setCode(409);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Busy</h2>"
+          "<p>A WiFi change is already in progress - try again in half a minute.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
     res->setCode(200);
     res->setContentType("text/html");
     res->setContent(
         "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
-        "background:#111;color:#eee;'><h2>WiFi Cleared</h2><p>Rebooting...</p></body></html>");
-    rebootRequested = true;
-    rebootRequestMs = millis();
+        "background:#111;color:#eee;'><h2>WiFi Cleared</h2>"
+        "<p>The setup network is coming up now.</p></body></html>");
     return res->send();
   });
 
@@ -951,24 +1188,72 @@ void setupWebServer() {
   });
 
   server.on("/api/v1/wifi/save", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    // Same early refusal as /save (review finding M2): nothing may persist on
+    // a request that will be answered 409.
+    if (wifi_mgr::transitionInFlight()) {
+      return res->send(409, "text/plain", "a connection attempt is already in progress");
+    }
     if (req->hasParam("ssid")) {
       std::string ssid = req->getParam("ssid", "");
       std::string pass = req->getParam("pass", "");
+      // Same rule the setup page enforces, applied here too: this endpoint is
+      // reachable unauthenticated on a never-networked rig (see the middleware),
+      // so leaving it exempt would make it the obvious way to get onto a network
+      // with the factory-default password still in place.
+      const std::string webPw = req->getParam("web_password", "");
+      const bool needWebPassword = !wifi_mgr::hasEverJoined();
+      // Same rule as /save: required pre-join, optional after, but anything
+      // actually supplied must clear the floor.
+      if ((needWebPassword || !webPw.empty()) && webPw.length() < WEB_AUTH_PASS_MIN) {
+        return res->send(400, "text/plain",
+                         "web_password is required on a device that has never joined a network, "
+                         "and must be at least 8 characters whenever it is supplied");
+      }
+      if (webPw.length() > WEB_AUTH_PASS_MAX) {
+        return res->send(400, "text/plain", "web_password must be at most 64 characters");
+      }
       if (!wifi_mgr::saveCredentials(ssid, pass)) {
         return res->send(400, "text/plain",
                          "SSID must be 1-32 characters and the password at most 64");
       }
-      rebootRequested = true;
-      rebootRequestMs = millis();
-      return res->send(200, "text/plain", "saved");
+      if (!webPw.empty()) {
+        if (saveWebPassword(webPw)) {
+          s_auth.setPassword(webPw.c_str());
+          s_default_password_active = (webPw == WEB_AUTH_DEFAULT_PASS);
+          webLog("Security", "Web password set during WiFi setup");
+        } else {
+          webLogLevel(LogLevel::Error, "Security",
+                      "Could not persist the web password - the factory default still applies");
+        }
+      }
+      if (!wifi_mgr::startLiveSwitch()) {
+        return res->send(409, "text/plain", "a connection attempt is already in progress");
+      }
+      // "connecting", not "saved": the join now happens live, with no reboot -
+      // poll /api/v1/state's wifiStatus/ip for the outcome.
+      return res->send(200, "text/plain", "connecting");
     }
     return res->send(400, "text/plain", "ssid required");
   });
 
+  // Blocking (~1-3s: the radio goes off-channel to listen). A GET, so open
+  // like every other read - the captive portal already shows the same list to
+  // anyone on the setup AP. 503 rather than a misleading empty result while a
+  // live transition owns the radio.
+  server.on("/api/v1/wifi/scan", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
+    if (wifi_mgr::transitionInFlight()) {
+      return res->send(503, "application/json",
+                       "{\"error\":\"busy\",\"message\":\"WiFi transition in progress\"}");
+    }
+    std::string json = wifi_mgr::scanNetworksJson();
+    return res->send(200, "application/json", json.c_str());
+  });
+
   server.on("/api/v1/wifi/reset", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    wifi_mgr::clearCredentials();
-    rebootRequested = true;
-    rebootRequestMs = millis();
+    // reset_task clears the credentials and brings the setup AP up live.
+    if (!wifi_mgr::requestResetToSetupAp()) {
+      return res->send(409, "text/plain", "a wifi transition is already in progress");
+    }
     return res->send(200, "text/plain", "cleared");
   });
 
