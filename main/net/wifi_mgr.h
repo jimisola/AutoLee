@@ -49,6 +49,11 @@ bool startLiveSwitch();
 // guard as startLiveSwitch().
 bool requestResetToSetupAp();
 
+// True while a live switch/reset is running. For handlers that must refuse
+// early - BEFORE persisting anything - so a 409 response never leaves
+// credentials or a changed password behind (review finding M2).
+bool transitionInFlight();
+
 // HTML <option> list from the last scan (AP mode only - see wifi_mgr.cpp).
 std::string scannedOptionsHtml();
 

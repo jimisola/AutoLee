@@ -59,11 +59,32 @@ static bool s_connected = false;
 // connect and on an established link - a disconnect is always retried, and
 // connect_sta()'s timeout is the only failure path.
 static bool s_ap_mode = false;
-// True while a live switch/reset task (switch_task / reset_task) is running.
-// Doubles as the retry override in wifi_event_handler: during a live switch
-// out of AP mode, STA disconnects must be retried even though s_ap_mode is
-// still true (the setup AP deliberately stays up until the join succeeds).
+// True while a live switch/reset task (switch_task / reset_task) is running -
+// the in-flight guard serializing them. Claimed ONLY via claimTransition():
+// a bare test-then-set would let the HTTP task, the LVGL task and sse_task
+// race each other into two concurrent transitions.
 static volatile bool s_switching = false;
+static portMUX_TYPE s_switch_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static bool claimTransition() {
+  bool claimed = false;
+  portENTER_CRITICAL(&s_switch_mux);
+  if (!s_switching) {
+    s_switching = true;
+    claimed = true;
+  }
+  portEXIT_CRITICAL(&s_switch_mux);
+  return claimed;
+}
+// Retry override for wifi_event_handler, set ONLY while switch_task is
+// actively trying to join: STA disconnects must then be retried even though
+// s_ap_mode may still be true (the setup AP stays up until the join
+// succeeds). Deliberately separate from s_switching: reset_task also runs
+// with s_switching set, but a reset must NOT retry the STA - the first
+// self-test run proved the difference on hardware, when the disconnect
+// issued by the reset got auto-retried and the retry raced startSetupAp()'s
+// empty-config write ("sta is connecting, cannot set config").
+static volatile bool s_sta_retry = false;
 // Retry budget for the INITIAL connect. A transient STA_DISCONNECTED during
 // association (common, especially on a marginal/mesh AP) must not immediately
 // drop us to the captive-portal AP - otherwise we can end up connected to the
@@ -89,9 +110,18 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
     // the background, and if that association eventually succeeds we end up
     // connected to the home network AND running the setup AP at once. That
     // was the APSTA bug: the STA side would silently reconnect with no
-    // captive-portal flow at all. s_switching overrides the guard: a live
-    // switch out of AP mode needs STA retries while the AP is still up.
-    if (!s_ap_mode || s_switching) esp_wifi_connect();
+    // captive-portal flow at all.
+    //
+    // The condition, piece by piece: outside any transition (s_switching
+    // false), retry whenever we are not in AP mode - the established-link
+    // behavior. DURING a transition, retry only when switch_task has
+    // explicitly enabled it (s_sta_retry) for its join attempt: the setup
+    // phase of a switch (disconnect old link, apply new config) and the whole
+    // of a reset must run with the handler suppressed, or its auto-reconnect
+    // races the config change with the OLD credentials - the "sta is
+    // connecting, cannot set config" failure the first hardware self-test
+    // caught.
+    if ((!s_ap_mode && !s_switching) || s_sta_retry) esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
     // Clear the flag so isConnected() stops lying the moment the link drops.
     s_connected = false;
@@ -105,8 +135,11 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
     // be the ONLY failure path: GOT_IP within the window => success
     // (kConnectedBit), otherwise the wait times out and we fall back to the
     // AP. The supplicant rate-limits these, so this doesn't tight-loop.
-    // s_switching: same override as STA_START above.
-    if (!s_ap_mode || s_switching) esp_wifi_connect();
+    // Same condition as STA_START above, for the same reasons - in particular
+    // the !s_switching arm: switch_task's own initial disconnect (issued
+    // BEFORE the new config is applied) must not be auto-retried with the old
+    // credentials.
+    if ((!s_ap_mode && !s_switching) || s_sta_retry) esp_wifi_connect();
   } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     (void)data;
     // (Re)connected - restore the flag so a recovered link reads as connected.
@@ -419,6 +452,13 @@ static void startSetupAp(bool wifi_already_started) {
 #pragma GCC diagnostic pop
     s_dns_handle = start_dns_server(&dns_cfg);
   }
+
+  // The AP start is the one moment the panel has been directly observed dying
+  // (three camera-verified reproductions - see sse_task in app_main.cpp), so
+  // queue its recovery immediately rather than waiting for the 30s sweep:
+  // without this, an out-of-box rig showed its join QR up to ~12 measured
+  // seconds late.
+  uiRepaintRequested = true;
 }
 
 // ==========================================================================
@@ -446,24 +486,57 @@ static void switch_task(void *) {
   wifi_config_t cfg = {};
   strncpy((char *)cfg.sta.ssid, ssid.c_str(), sizeof(cfg.sta.ssid) - 1);
   strncpy((char *)cfg.sta.password, pass.c_str(), sizeof(cfg.sta.password) - 1);
-  esp_wifi_set_config(WIFI_IF_STA, &cfg);
-  xEventGroupClearBits(s_wifi_event_group, kConnectedBit);
-
-  if (s_connected) {
-    // Changing networks from an established STA link: the new config is
-    // already set, so dropping the old link makes the STA_DISCONNECTED
-    // handler reconnect - with the NEW credentials.
-    esp_wifi_disconnect();
-  } else {
-    // From the setup AP (or a dead link): the STA interface is idle, no
-    // disconnect event is coming, connect explicitly.
-    esp_wifi_connect();
+  // Let the HTTP response that triggered this switch drain before the link is
+  // touched. Found in E2E testing: from an established STA connection, the
+  // disconnect below raced the tail of /api/v1/wifi/save's own response - the
+  // client got the 200 status with a truncated body. One second is harmless
+  // on the AP path too (no link to drop there).
+  vTaskDelay(pdMS_TO_TICKS(1000));
+  // Disconnect FIRST, unconditionally. Review finding H2: if the link is
+  // flapping, the event handler may have an esp_wifi_connect() in flight with
+  // the OLD config, and set_config then fails with "sta is connecting" - the
+  // in-flight retry would associate with the old network while this task
+  // reports having joined the new one. A disconnect aborts any in-flight
+  // attempt; only then is setting the new config reliable. s_sta_retry is not
+  // set yet, so this disconnect is not auto-retried.
+  esp_wifi_disconnect();
+  // set_config can still transiently fail right after a disconnect while the
+  // supplicant unwinds - bounded retry rather than silent divergence.
+  esp_err_t cfg_err = ESP_FAIL;
+  for (int i = 0; i < 10 && cfg_err != ESP_OK; i++) {
+    cfg_err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
+    if (cfg_err != ESP_OK) vTaskDelay(pdMS_TO_TICKS(100));
   }
+  if (cfg_err != ESP_OK) {
+    webLog("WiFi", "Could not apply the new WiFi config (%s) - nothing changed",
+           esp_err_to_name(cfg_err));
+    s_switching = false;
+    ui_update_wifi_label();
+    vTaskDelete(nullptr);
+    return;
+  }
+  xEventGroupClearBits(s_wifi_event_group, kConnectedBit);
+  s_sta_retry = true;  // let the event handler retry disconnects for the whole attempt
+  esp_wifi_connect();
 
   const EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, kConnectedBit, pdFALSE, pdFALSE,
                                                pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
 
-  if (bits & kConnectedBit) {
+  // Success needs BOTH the bit and the right network (review finding L1): a
+  // stale GOT_IP queued from the old link (e.g. a DHCP renewal) can set the
+  // bit without the new association having happened. Asking the driver which
+  // AP it is actually on is authoritative.
+  bool joined = (bits & kConnectedBit) != 0;
+  if (joined) {
+    wifi_ap_record_t ap = {};
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK ||
+        strncmp((const char *)ap.ssid, ssid.c_str(), sizeof(ap.ssid)) != 0) {
+      webLog("WiFi", "Connected bit set but not on '%s' - treating as failure", ssid.c_str());
+      joined = false;
+    }
+  }
+
+  if (joined) {
     // GOT_IP already set s_connected and latched hasEverJoined().
     s_connected_ssid = ssid;
     const bool wasAp = s_ap_mode;
@@ -476,12 +549,14 @@ static void switch_task(void *) {
     // LAST, so an operator watching the portal page keeps their connection
     // until the outcome is real.
     if (wasAp) esp_wifi_set_mode(WIFI_MODE_STA);
+    // Established-link reconnects are covered by !s_ap_mode from here on.
+    s_sta_retry = false;
     webLog("WiFi", "Joined '%s' (IP %s)%s", ssid.c_str(), ipAddress().c_str(),
            wasAp ? " - setup AP stopped" : "");
   } else {
-    // Order matters: clear s_switching BEFORE disconnecting, or the
+    // Order matters: stop the retry override BEFORE disconnecting, or the
     // STA_DISCONNECTED our own disconnect fires would immediately retry.
-    s_switching = false;
+    s_sta_retry = false;
     wifi_config_t empty = {};
     esp_wifi_set_config(WIFI_IF_STA, &empty);
     esp_wifi_disconnect();
@@ -503,9 +578,12 @@ static void switch_task(void *) {
   vTaskDelete(nullptr);
 }
 
+bool transitionInFlight() {
+  return s_switching;
+}
+
 bool startLiveSwitch() {
-  if (s_switching) return false;
-  s_switching = true;
+  if (!claimTransition()) return false;
   if (xTaskCreate(switch_task, "wifi_switch", 6144, nullptr, 3, nullptr) != pdPASS) {
     s_switching = false;
     return false;
@@ -519,10 +597,15 @@ static void reset_task(void *) {
   // documented in startSetupAp(): the handler must never see "not AP mode"
   // between the disconnect and the AP coming up.
   s_ap_mode = true;
-  if (s_connected) {
-    s_connected = false;
-    esp_wifi_disconnect();
-  }
+  s_connected = false;
+  // Unconditional, not `if (s_connected)` - review finding H1: the operator
+  // resets WiFi precisely when the link is broken, i.e. when s_connected is
+  // false but the event handler may have a reconnect attempt in flight with
+  // the old config. If that attempt is left running it can complete AFTER the
+  // setup AP is up - the documented APSTA bug, resurrected. A disconnect also
+  // aborts an in-flight connect. (Retries are suppressed throughout:
+  // s_switching is set and s_sta_retry is not - see wifi_event_handler.)
+  esp_wifi_disconnect();
   s_connected_ssid.clear();
   startSetupAp(true);
   webLog("WiFi", "Credentials cleared - setup AP active");
@@ -533,8 +616,7 @@ static void reset_task(void *) {
 }
 
 bool requestResetToSetupAp() {
-  if (s_switching) return false;
-  s_switching = true;
+  if (!claimTransition()) return false;
   if (xTaskCreate(reset_task, "wifi_reset", 6144, nullptr, 3, nullptr) != pdPASS) {
     s_switching = false;
     return false;

@@ -120,6 +120,31 @@ flowchart TB
     style E stroke-width:3px
 ```
 
+`sse_task` also owns the panel-recovery mitigation: it consumes the
+`uiRepaintRequested` flag (set by WiFi lifecycle transitions) and runs a 30s
+periodic **panel re-init** (`display_touch_panel_reinit()`). Not a repaint:
+camera-on-panel measurement proved the intermittent blank-panel bug is the
+JD9853 dying into a dead-until-reinit state around WiFi radio events — full
+LVGL repaints ran across a dead panel for 106 measured seconds with no effect,
+while a single re-run of the vendor init sequence recovered it on the exact
+second it was issued. See the long comment in `app_main.cpp`'s `sse_task` for
+the full evidence chain and what remains unproven (the precise analog kill
+mechanism).
+
+### Short-lived WiFi transition tasks
+
+WiFi changes are applied **live** — joining a network, changing networks and
+resetting to the setup AP never reboot the device. (Rebooting for WiFi was
+inherited from the Arduino firmware and produced a whole category of field
+bugs: the GPIO8/TMC_CS strapping hang, a `vTaskDelete`-inside-lwIP deadlock,
+the lost first LVGL flush.) `wifi_mgr::startLiveSwitch()` and
+`wifi_mgr::requestResetToSetupAp()` each spawn a short-lived task
+(`wifi_switch` / `wifi_reset`, priority 3, self-deleting) that reconfigures the
+running WiFi driver and then updates the LCD WiFi screen. A single in-flight
+guard (`s_switching`) serializes them — callers get `false` (HTTP maps it to
+409) instead of a second concurrent transition. They touch no motion state and
+no SPI, so they never interact with `pump_task`'s ownership rules.
+
 ---
 
 ## 3. Shared SPI bus

@@ -177,6 +177,23 @@ static i2c_master_bus_handle_t init_touch_i2c_bus(void) {
   return bus_handle;
 }
 
+// Stashed by display_touch_init() for display_touch_panel_reinit().
+static esp_lcd_panel_io_handle_t s_io_handle = nullptr;
+static lv_display_t *s_disp = nullptr;
+
+bool display_touch_panel_reinit(void) {
+  if (!s_io_handle) return false;
+  // Under the LVGL port lock: a flush interleaving its CASET/RASET/RAMWR
+  // stream with these init commands would corrupt both.
+  lvgl_port_lock(0);
+  jd9853_send_init_sequence(s_io_handle);  // ends with DISPON itself
+  // The init sequence resets addressing state and may leave DDRAM stale -
+  // repaint everything so what is displayed is current.
+  if (s_disp) lv_obj_invalidate(lv_scr_act());
+  lvgl_port_unlock();
+  return true;
+}
+
 lv_display_t *display_touch_init(void) {
   gpio_config_t bl_cfg = {};
   bl_cfg.pin_bit_mask = 1ULL << GFX_BL;
@@ -213,6 +230,8 @@ lv_display_t *display_touch_init(void) {
     ESP_LOGE(TAG, "lvgl_port_add_disp failed");
     return nullptr;
   }
+  s_io_handle = io_handle;  // for display_touch_panel_reinit()
+  s_disp = disp;
 
   i2c_master_bus_handle_t i2c_bus = init_touch_i2c_bus();
   axs5106l_touch_init(i2c_bus, (gpio_num_t)Touch_RST, (gpio_num_t)Touch_INT, ROTATION, SCR_W,

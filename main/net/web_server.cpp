@@ -636,7 +636,15 @@ void setupWebServer() {
         //
         // NOTE: like the password-endpoint literal below, these paths must stay
         // in lockstep with the route registrations further down.
-        if (wifi_mgr::isApMode() && !wifi_mgr::isConnected() &&
+        //
+        // The transitionInFlight() arm (review finding L3): during a live
+        // switch out of AP mode there is a window where GOT_IP has set
+        // isConnected() true while the setup AP is still up (torn down last,
+        // so the operator's portal session survives until the outcome is
+        // real). A phone still on the AP is still physically-present traffic;
+        // without this arm its POST would suddenly draw a digest challenge
+        // mid-flow.
+        if (wifi_mgr::isApMode() && (!wifi_mgr::isConnected() || wifi_mgr::transitionInFlight()) &&
             (uri == "/save" || uri == "/clear" || uri == "/api/v1/wifi/save" ||
              uri == "/api/v1/wifi/reset")) {
           return next();
@@ -726,6 +734,19 @@ void setupWebServer() {
   });
 
   server.on("/save", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    // Refuse BEFORE validating or persisting anything (review finding M2): a
+    // 409 must not leave new credentials in NVS or a changed digest password
+    // behind while an earlier attempt is still running against the old ones.
+    if (wifi_mgr::transitionInFlight()) {
+      res->setCode(409);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Already connecting</h2>"
+          "<p>A connection attempt is in progress - give it half a minute, then try "
+          "again.</p><p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
     std::string ss = req->getParam("ssid_select", "");
     std::string sm = req->getParam("ssid_manual", "");
     std::string pw = req->getParam("pass", "");
@@ -820,7 +841,19 @@ void setupWebServer() {
 
   server.on("/clear", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
     // reset_task also clears the credentials - no reboot involved anymore.
-    wifi_mgr::requestResetToSetupAp();
+    // Refusal must be reported (review finding M4): telling the operator
+    // "cleared" while a join to the wrong network proceeds is exactly the
+    // moment they most need the truth.
+    if (!wifi_mgr::requestResetToSetupAp()) {
+      res->setCode(409);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Busy</h2>"
+          "<p>A WiFi change is already in progress - try again in half a minute.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
     res->setCode(200);
     res->setContentType("text/html");
     res->setContent(
@@ -1145,6 +1178,11 @@ void setupWebServer() {
   });
 
   server.on("/api/v1/wifi/save", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    // Same early refusal as /save (review finding M2): nothing may persist on
+    // a request that will be answered 409.
+    if (wifi_mgr::transitionInFlight()) {
+      return res->send(409, "text/plain", "a connection attempt is already in progress");
+    }
     if (req->hasParam("ssid")) {
       std::string ssid = req->getParam("ssid", "");
       std::string pass = req->getParam("pass", "");

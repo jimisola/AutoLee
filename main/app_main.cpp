@@ -151,32 +151,35 @@ static void pump_task(void *) {
 // condition, not a bug that should panic the whole device.
 static void sse_task(void *) {
   uint32_t lastUiLogMs = 0;
-  // Panel-blackout mitigation, two layers. The underlying bug: the panel
-  // intermittently ends up showing black despite LVGL being alive, the right
-  // screen active and populated, and the backlight on - and a repaint reliably
-  // brings it back, which localizes the damage to the panel's frame RAM (a
-  // DISPOFF/SLPIN/panel reset would NOT be fixed by a RAMWR-only repaint).
-  // LVGL never self-heals because nothing is left invalidated once
-  // flush_ready has been signalled.
+  // Panel-blackout recovery. Established by camera-on-panel measurement
+  // (frame-by-frame white-pixel analysis of the live panel, see the PR):
   //
-  // Evidence so far places every observed blackout within seconds of a WiFi
-  // lifecycle moment (initial connect, AP start after an STA timeout,
-  // post-save reboots back when saving rebooted) - and NEVER deep into a
-  // settled session. The TMC5160 shared-SPI-bus theory is ruled out for the
-  // idle case: SG_RESULT()/DRV_STATUS() have exactly one caller, in the
-  // motion path, so an idle rig has zero TMC bus traffic while blackouts
-  // still happened. Prime remaining suspect is the WiFi PA's supply transient
-  // corrupting panel DDRAM. Not yet proven - camera-on-panel verification
-  // pending.
+  //  - The panel intermittently dies into showing black while LVGL is alive,
+  //    the right screen is active and populated, and the backlight is on.
+  //    The one observed death landed exactly at the setup-AP start (WiFi PA
+  //    power transient territory); every earlier report also clustered
+  //    around WiFi lifecycle moments.
+  //  - Full LVGL repaints DO NOT recover it: a 5s invalidate-everything sweep
+  //    ran across a dead panel for 106 measured seconds with no effect. So
+  //    the panel is not showing stale/blank DDRAM - it is in a
+  //    dead-until-reinit state (SLPIN/DISPOFF/hardware-reset class), where
+  //    RAMWR still lands but nothing is displayed.
+  //  - Re-running the JD9853 vendor init sequence recovers/prevents it: a 20s
+  //    re-init cadence held the panel perfect for 300 measured seconds
+  //    through the same AP-mode operation.
+  //  - The TMC5160 shared-SPI theory is ruled out for the idle case:
+  //    SG_RESULT()/DRV_STATUS() have exactly one caller, in the motion path,
+  //    so an idle rig has zero TMC bus traffic while blackouts happened.
   //
-  // Layer 1, targeted: uiRepaintRequested is set at every WiFi lifecycle
-  // transition (GOT_IP, live switch outcomes, WiFi reset) and consumed here
-  // within ~50ms.
-  // Layer 2, safety sweep every 5s: covers whatever the theory misses. Cheap
-  // (~110 KB over SPI, tens of ms) and deliberately NOT suppressed while the
-  // motor runs - a UI that goes black mid-run on a machine that can crush
-  // hands is worse than the bus traffic. Once the camera loop confirms the
-  // event-driven layer catches everything, this sweep is the thing to remove.
+  // What is still unproven is the exact kill mechanism (PA supply transient
+  // glitching the panel's RST line vs. a corrupted command byte on a 40MHz
+  // bus). Until that is found, recovery is the mitigation:
+  //  - uiRepaintRequested (set on every WiFi lifecycle transition, the known
+  //    trigger window) re-inits the panel within ~50ms of the event;
+  //  - a 30s periodic re-init covers anything else. ~130ms each (the vendor
+  //    SLPOUT delay), imperceptible at this cadence, and deliberately NOT
+  //    suppressed while the motor runs: a UI dead mid-run on a machine that
+  //    can crush hands is worse than 130ms of paused SSE.
   uint32_t lastRepaintMs = 0;
   for (;;) {
     otaWatchdogTick();  // release a stuck OTA flag from a vanished-client upload
@@ -199,10 +202,10 @@ static void sse_task(void *) {
     // Logged from sse_task because it is not watchdog-subscribed, so taking
     // the LVGL lock here can never panic the device even if the UI is wedged.
     const uint32_t now = millis();
-    if (uiRepaintRequested || now - lastRepaintMs > 5000) {
+    if (uiRepaintRequested || now - lastRepaintMs > 30000) {
       uiRepaintRequested = false;
       lastRepaintMs = now;
-      ui_force_full_repaint();
+      display_touch_panel_reinit();
     }
     if (now - lastUiLogMs > 10000) {
       lastUiLogMs = now;

@@ -343,9 +343,13 @@ void stop_dns_server(dns_server_handle_t handle)
         for (int i = 0; i < 20 && handle->task != NULL; i++) {
             vTaskDelay(pdMS_TO_TICKS(50));
         }
-        if (handle->task != NULL) {
+        // Snapshot once: handle->task is volatile and the task can clear it
+        // between a check and a use - vTaskDelete(NULL) would delete the
+        // CALLER. One read, then act only on the snapshot.
+        TaskHandle_t remaining = handle->task;
+        if (remaining != NULL) {
             ESP_LOGE(TAG, "dns task did not exit gracefully - deleting it");
-            vTaskDelete(handle->task);
+            vTaskDelete(remaining);
         }
         free(handle);
     }
