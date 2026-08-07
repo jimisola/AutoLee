@@ -57,6 +57,12 @@ bool transitionInFlight();
 // HTML <option> list from the last scan (AP mode only - see wifi_mgr.cpp).
 std::string scannedOptionsHtml();
 
+// Re-run the scan behind scannedOptionsHtml() (blocking, 1-3s). The portal's
+// list is otherwise from AP start only - stale for the whole session, which
+// bites exactly when the operator's network was down at that moment. No-op
+// while a transition is in flight.
+void rescanForPortal();
+
 // Blocking scan (~1-3s; the radio goes off-channel briefly) returning a JSON
 // array of visible networks: [{"ssid":"...","rssi":-60,"secure":true},...].
 // Works in STA and APSTA mode. Returns "[]" on scan failure or while a live

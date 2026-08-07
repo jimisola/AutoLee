@@ -283,29 +283,36 @@ static bool doScan(std::vector<wifi_ap_record_t> &records) {
   return true;
 }
 
-std::string scanNetworksJson() {
-  if (s_switching) return "[]";
+// Shared post-processing for BOTH pickers (captive portal dropdown, dashboard
+// /api/v1/wifi/scan), so they present the same list: one entry per SSID - the
+// driver returns one record per BSSID, strongest first, so a mesh network
+// shows up once per node otherwise - and hidden networks (empty SSID) dropped,
+// since there is nothing selectable to show and the manual field covers them.
+static bool collectNetworks(std::vector<wifi_ap_record_t> &out) {
   std::vector<wifi_ap_record_t> records;
-  if (!doScan(records)) return "[]";
-  // The driver returns one record per BSSID, strongest first - a mesh network
-  // shows up once per node. One entry per SSID (the strongest) is what a
-  // human picking a network wants. Hidden networks (empty SSID) are skipped:
-  // nothing selectable to show, and the manual SSID field covers them.
-  std::vector<std::string> seen;
-  std::string json = "[";
-  bool first = true;
-  for (size_t i = 0; i < records.size(); i++) {
-    const std::string raw(reinterpret_cast<char *>(records[i].ssid));
+  if (!doScan(records)) return false;
+  for (const auto &r : records) {
+    const std::string raw(reinterpret_cast<const char *>(r.ssid));
     if (raw.empty()) continue;
     bool dup = false;
-    for (const auto &s : seen) {
-      if (s == raw) {
+    for (const auto &kept : out) {
+      if (raw == reinterpret_cast<const char *>(kept.ssid)) {
         dup = true;
         break;
       }
     }
-    if (dup) continue;
-    seen.push_back(raw);
+    if (!dup) out.push_back(r);
+  }
+  return true;
+}
+
+std::string scanNetworksJson() {
+  if (s_switching) return "[]";
+  std::vector<wifi_ap_record_t> records;
+  if (!collectNetworks(records)) return "[]";
+  std::string json = "[";
+  bool first = true;
+  for (size_t i = 0; i < records.size(); i++) {
     std::string ssid;
     for (unsigned char c : std::string(reinterpret_cast<char *>(records[i].ssid))) {
       // JSON string escaping: the two mandatory metacharacters plus control
@@ -337,7 +344,7 @@ std::string scanNetworksJson() {
 static void scan_networks() {
   s_scanned_html = "<option value=''>-- Select WiFi --</option>";
   std::vector<wifi_ap_record_t> records;
-  if (!doScan(records)) {
+  if (!collectNetworks(records)) {
     s_scanned_html += "<option value=''>Scan failed</option>";
     return;
   }
@@ -747,6 +754,10 @@ std::string ipAddress() {
 
 std::string scannedOptionsHtml() {
   return s_scanned_html;
+}
+
+void rescanForPortal() {
+  if (!s_switching) scan_networks();
 }
 
 std::string ssid() {

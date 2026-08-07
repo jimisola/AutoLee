@@ -273,6 +273,9 @@ static std::string wifiConfigPage() {
   html += "<label>Select Network</label><select name='ssid_select'>" +
           wifi_mgr::scannedOptionsHtml() + "</select>";
   html +=
+      "<a href='/?rescan=1' style='display:block;margin:4px 0 0;font-size:13px;"
+      "color:#7cf;text-decoration:none'>&#8635; Rescan networks</a>";
+  html +=
       "<label>Or type SSID manually</label><input name='ssid_manual' placeholder='SSID "
       "(optional)'>";
   html +=
@@ -689,6 +692,10 @@ void setupWebServer() {
     // hitting the device - reproduced on hardware as a garbled/stale page.
     res->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     if (wifi_mgr::isApMode() && !wifi_mgr::isConnected()) {
+      // Explicit rescan only - never on a plain page load: the portal is
+      // hammered by captive-probe redirects, and a 1-3s blocking scan per
+      // load would starve the very page the operator is waiting for.
+      if (req->hasParam("rescan")) wifi_mgr::rescanForPortal();
       // PsychicResponse::setContent(const char*) stores the raw pointer, it
       // doesn't copy - a temporary std::string's buffer would already be
       // freed by the time send() reads it below (reproduced on hardware:
