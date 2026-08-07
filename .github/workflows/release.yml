@@ -341,7 +341,9 @@ jobs:
           fi
           echo "Firmware reports $BUILT ✓"
 
-          idf.py merge-bin -o "build/AutoLee_v${VERSION}_merged.bin" --fill-flash-size 4MB
+          # -o is relative to build/, not the project root: idf.py runs esptool
+          # with the build dir as its cwd, so a "build/" prefix here would fail.
+          idf.py merge-bin -o "AutoLee_v${VERSION}_merged.bin" --pad-to-size 4MB
           cp build/autolee.bin "build/AutoLee_v${VERSION}_update.bin"
 
           # The merged image is assembled by a separate esptool pass, so check
@@ -448,7 +450,7 @@ jobs:
           echo "${MERGED_SHA256}  AutoLee_v${VERSION}_merged.bin" | sha256sum -c -
           echo "${UPDATE_SHA256}  AutoLee_v${VERSION}_update.bin" | sha256sum -c -
 
-          # --fill-flash-size 4MB, so anything else means the merge or the
+          # --pad-to-size 4MB, so anything else means the merge or the
           # upload was truncated.
           SIZE="$(stat -c%s "AutoLee_v${VERSION}_merged.bin")"
           if [ "$SIZE" -ne 4194304 ]; then
