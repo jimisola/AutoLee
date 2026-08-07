@@ -646,6 +646,36 @@ void setupWebServer() {
       res->setCode(200);
       res->setContentType("text/html");
       res->setContent(page.c_str());
+
+      // Instrumentation for the intermittent "setup page renders unstyled with
+      // stray CSS text" bug. Sends the request itself rather than falling
+      // through, so the outcome can be logged next to what was supposed to go
+      // out. Each field is here to kill a specific hypothesis:
+      //
+      //  len vs strlen - setContent(const char*) sets Content-Length from
+      //    strlen(). An embedded NUL anywhere in the page would make the
+      //    declared length short, truncating the body mid-<style> with the
+      //    send still reporting success. If these two ever differ, that is the
+      //    bug and nothing else here matters.
+      //  opts  - the one variable-length part (the scan dropdown).
+      //  heap/largest - the 5.3 fixed per-connection header buffer is gone on
+      //    6.0, but a failed allocation under the probe burst would still cut
+      //    a response; fragmentation shows up as a small largest-block with
+      //    plenty of total free.
+      //  sock  - if a bad render carries a different socket number than the
+      //    good ones around it, LRU purge is recycling it mid-flight.
+      //  send  - ESP_OK here with a broken page on screen means the device
+      //    believes it sent everything, and the loss is below httpd.
+      const size_t declaredLen = strlen(page.c_str());
+      const int sock = req->client() ? req->client()->socket() : -1;
+      const esp_err_t sendErr = res->send();
+      ESP_LOGW(TAG, "captive page: len=%u strlen=%u opts=%u heap=%u largest=%u sock=%d send=%s",
+               (unsigned)page.length(), (unsigned)declaredLen,
+               (unsigned)wifi_mgr::scannedOptionsHtml().length(),
+               (unsigned)esp_get_free_heap_size(),
+               (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT), sock,
+               esp_err_to_name(sendErr));
+      return sendErr;
     } else {
       res->setCode(200);
       res->setContentType("text/html");

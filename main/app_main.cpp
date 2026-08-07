@@ -8,6 +8,7 @@
 #include "esp_app_desc.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/gpio.h"  // strapping-pin release before esp_restart() - see pump_task
 
 #include "display_touch.h"
 #include "motion.h"
@@ -103,6 +104,27 @@ static void pump_task(void *) {
       // never came back after WiFi setup" - check the reset reason logged at
       // boot below against a reproduction before treating it as settled.
       wifi_mgr::stopForReboot();
+
+      // Release the strapping pins before resetting.
+      //
+      // On ESP32-C6, GPIO8 and GPIO9 are sampled by the ROM at reset to choose
+      // the boot mode, and this board wires TMC_CS to GPIO8 (config.h). CS is
+      // active-low, so any reset taken while the TMC5160 is selected presents
+      // the ROM with a boot-mode combination that is not "SPI boot" - and the
+      // chip then does not start at all: no console output, no core dump, the
+      // panel lit but dead, and only a power cycle recovers it. Which is
+      // precisely the "device never came back after WiFi setup" report, and
+      // why it was intermittent: it depends on where in the SPI cycle the
+      // reset lands.
+      //
+      // esp_restart() does not unwind the SPI driver, so nothing else puts
+      // this line back high on the way out. Driving it explicitly costs one
+      // register write and is correct regardless - a deselected TMC is the
+      // right state to reboot in anyway.
+      // Only GPIO8 matters here: the display's chip-select (GPIO14) is not a
+      // strapping pin, so its state across a reset cannot affect boot mode.
+      gpio_set_level((gpio_num_t)TMC_CS, 1);
+
       esp_restart();
     }
 
