@@ -38,7 +38,7 @@ details summary:hover{opacity:.8}
 details[open] summary{margin-bottom:8px}
 .jam-alert{display:none;background:#2a1111;border:1px solid #442222;border-radius:10px;padding:12px;margin-top:10px;text-align:center}
 .pw-alert{display:none;background:#3A2B12;border:1px solid #5c431d;border-radius:10px;padding:12px;margin-bottom:10px;text-align:center}
-input[type=text],input[type=password]{width:100%;padding:10px;margin-bottom:6px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:.9em}
+input[type=text],input[type=password],select{width:100%;padding:10px;margin-bottom:6px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:.9em}
 .upload{border:2px dashed #444;border-radius:8px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;font-size:.85em}
 .upload:hover{border-color:var(--accent)}.upload.on{border-color:var(--green);color:var(--green)}
 .pbar{width:100%;height:5px;background:#333;border-radius:3px;margin-top:6px;overflow:hidden;display:none}
