@@ -600,6 +600,38 @@ void setupWebServer() {
         // router outage would drop an already-networked rig back to its own AP
         // and silently reopen it.
         if (!wifi_mgr::hasEverJoined()) return next();
+
+        // The WiFi routes stay reachable while the rig is sitting on its own
+        // setup AP, even after it has joined a network before.
+        //
+        // Without this, a rig that joined once and then could not get back on
+        // (wrong PSK, router replaced, network gone) falls back to its AP with
+        // the latch still set - so the captive portal demands the digest
+        // password before it will accept new credentials. The operator is
+        // standing at the machine, on its WPA2 AP, and cannot re-run setup.
+        // Observed exactly that way: a mistyped PSK left the device asking for
+        // a login on its own setup page.
+        //
+        // It also gives up nothing. In this state the device is on no LAN at
+        // all - the only way to reach these routes is to have joined the setup
+        // AP, whose per-device key exists solely on the LCD and its join QR, so
+        // the caller is physically at the press. That is the same gate the
+        // never-networked case above already accepts, and the same one the
+        // unauthenticated touch UI has always accepted. Everything else - run,
+        // calibrate, OTA, password change - stays gated, so this cannot be used
+        // to operate the machine, only to get it back onto a network.
+        //
+        // Deliberately NOT keyed on "no stored credentials": the case that
+        // strands an operator is stored-but-wrong credentials, which is exactly
+        // when they are stored.
+        //
+        // NOTE: like the password-endpoint literal below, these paths must stay
+        // in lockstep with the route registrations further down.
+        if (wifi_mgr::isApMode() && !wifi_mgr::isConnected() &&
+            (uri == "/save" || uri == "/clear" || uri == "/api/v1/wifi/save" ||
+             uri == "/api/v1/wifi/reset")) {
+          return next();
+        }
         // #1c (docs/PLAN.md) "force-change-on-first-use": while the password
         // is still the factory default, every state-changing route is refused
         // with a friendly 403 telling the caller to set a real password first
