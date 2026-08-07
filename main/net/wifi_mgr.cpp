@@ -357,6 +357,17 @@ void start() {
   // comes from our own esp_wifi_set_config() calls, sourced from our NVS.
   ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
 
+  // No modem power save. The ESP-IDF default in STA mode (WIFI_PS_MIN_MODEM)
+  // sleeps the radio between DTIM beacons, and on this rig that surfaced as
+  // the dashboard being visibly broken: 0.1-1.5s latency jitter and periodic
+  // multi-second windows where every HTTP request timed out - measured with a
+  // 1Hz probe as ~45s of jittery service followed by 8+ dead seconds, i.e.
+  // the Diag page "showing nothing" whenever its fetches landed in a sleep
+  // window. AP mode never sleeps, which is why none of this showed during
+  // captive-portal operation. This is a mains-powered machine controller: a
+  // responsive control surface is worth ~60mA of idle draw.
+  esp_wifi_set_ps(WIFI_PS_NONE);
+
   s_wifi_event_group = xEventGroupCreate();
   esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr,
                                       nullptr);

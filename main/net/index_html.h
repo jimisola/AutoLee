@@ -459,6 +459,7 @@ function showPage(id){
   document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page===id));
   window.scrollTo(0,0);
   if(id==='pageDiag')loadDiag();
+  if(id==='pageLog')loadServerLogLevel();
   if(id==='pageLog'){loadLogs();loadServerLogLevel()}
 }
 document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page==='pageMain'));
