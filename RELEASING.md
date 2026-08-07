@@ -83,8 +83,8 @@ ship are provably the ones that were approved, not a regenerated copy.
 
 | File | What it is |
 |---|---|
-| `AutoLee_vX.Y.Z_merged.bin` | Full 4 MB flash image — bootloader, partition table, app. Fresh install, flash at `0x0`. |
-| `AutoLee_vX.Y.Z_update.bin` | App image only. OTA or re-flash of an already-provisioned board. |
+| `autolee-X.Y.Z-merged.bin` | Full 4 MB flash image — bootloader, partition table, app. Fresh install, flash at `0x0`. |
+| `autolee-X.Y.Z-update.bin` | App image only. OTA or re-flash of an already-provisioned board. |
 | `SHA256SUMS.txt` | Checksums for both. |
 
 The literal `v` in those filenames is prose. The tag, and the version the

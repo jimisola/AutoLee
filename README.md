@@ -144,7 +144,7 @@ If you don't want to build the firmware yourself, you can flash a pre-built bina
 
 ### Steps
 
-1. Download the latest `AutoLee_<version>_merged.bin` from [GitHub Releases](https://github.com/jimisola/AutoLee/releases)
+1. Download the latest `autolee-<version>-merged.bin` from [GitHub Releases](https://github.com/jimisola/AutoLee/releases)
 2. Open the [**Espressif Web Flasher**](https://espressif.github.io/esptool-js/) in Chrome or Edge
 3. Click **Connect** and select the port for your ESP32-C6
 4. In the **Program** section, enter **`0x0`** in the Flash Address field
