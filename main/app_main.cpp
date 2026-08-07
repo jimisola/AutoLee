@@ -151,6 +151,20 @@ static void pump_task(void *) {
 // condition, not a bug that should panic the whole device.
 static void sse_task(void *) {
   uint32_t lastUiLogMs = 0;
+  // Early repaint retries. A single forced repaint at the end of app_main() was
+  // NOT enough - the panel still came up black - while a repaint every 10s did
+  // work. So the initial flush is lost intermittently rather than always, and
+  // what fixed it was retrying, not the timing of any one attempt. These
+  // retries reproduce that without leaving a permanent full-screen redraw on a
+  // timer: repaint every 500ms for the first few seconds, then stop.
+  //
+  // Bounded deliberately. If the display can also be lost later - during a run,
+  // when the TMC5160 is driving StallGuard reads over the SPI bus it shares
+  // with the panel - these retries will not cover it, and that failure would
+  // matter far more than a black screen at boot. Better for that to stay
+  // visible than to be masked by a repaint that runs forever.
+  uint32_t repaintsLeft = 10;
+  uint32_t lastRepaintMs = 0;
   for (;;) {
     otaWatchdogTick();  // release a stuck OTA flag from a vanished-client upload
     broadcastState();   // internally rate-limited to SSE_INTERVAL_MS
@@ -172,6 +186,11 @@ static void sse_task(void *) {
     // Logged from sse_task because it is not watchdog-subscribed, so taking
     // the LVGL lock here can never panic the device even if the UI is wedged.
     const uint32_t now = millis();
+    if (repaintsLeft > 0 && now - lastRepaintMs > 500) {
+      lastRepaintMs = now;
+      repaintsLeft--;
+      ui_force_full_repaint();
+    }
     if (now - lastUiLogMs > 10000) {
       lastUiLogMs = now;
       ui_log_heartbeat();

@@ -26,6 +26,11 @@ void ui_update_batch_val();
 void ui_update_batch_remain();
 void ui_update_wifi_label();
 
+// Invalidate the whole active screen so LVGL repaints it. Call once, after boot
+// has finished: the initial draw from buildUI() can be lost, leaving the panel
+// black with every software indicator healthy. See the implementation.
+void ui_force_full_repaint();
+
 // Diagnostic for the "panel dark, firmware healthy" report: logs which screen
 // LVGL currently has active, whether it is the one buildUI() loaded, the LVGL
 // tick (frozen => the LVGL task has stopped), and the backlight pin's actual

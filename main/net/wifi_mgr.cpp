@@ -317,7 +317,7 @@ void start() {
   std::string ssid, pass;
   if (load_credentials(ssid, pass)) {
     ESP_LOGI(TAG, "connecting to '%s'...", ssid.c_str());
-    if (connect_sta(ssid, pass, 10000)) {
+    if (connect_sta(ssid, pass, WIFI_CONNECT_TIMEOUT_MS)) {
       s_connected = true;
       s_ap_mode = false;
       s_connected_ssid = ssid;

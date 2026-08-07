@@ -77,6 +77,31 @@ void go(lv_obj_t *scr) {
   lvgl_port_unlock();
 }
 
+void ui_force_full_repaint() {
+  // Repaint everything once, after boot has finished.
+  //
+  // LVGL only redraws what has been invalidated. buildUI() draws the screen
+  // once, and from then on the only thing dirtying anything is the 100ms
+  // counter timer, which touches one small label. So if that single initial
+  // full draw does not reach the panel, the display stays black indefinitely
+  // while every software indicator - active screen, child count, LVGL tick,
+  // backlight level - reads perfectly healthy. That was the observed state, and
+  // a periodic full invalidate confirmed it: the UI appeared as soon as
+  // something forced a repaint, so the content and the panel were fine all
+  // along and only the first flush was lost.
+  //
+  // Why that first flush goes missing is NOT established. buildUI() runs before
+  // the blocking WiFi connect and the web-server start, both of which are heavy
+  // and share the SPI bus with the TMC5160 via the display - so this is called
+  // once after all of it has settled, which is the point where the bus and the
+  // scheduler are quiet again. Treat this as a targeted workaround with a known
+  // symptom and an unknown cause, not as a fix for the underlying race.
+  if (!ui_lock("repaint")) return;
+  lv_obj_t *act = lv_scr_act();
+  if (act) lv_obj_invalidate(act);
+  lvgl_port_unlock();
+}
+
 void ui_log_heartbeat() {
   // Read the backlight pin first, outside the lock: if the LVGL lock is the
   // thing that is stuck, this is the one number still worth having, and
@@ -93,6 +118,7 @@ void ui_log_heartbeat() {
   // flat black, since style_screen() paints the background black - from "the
   // screen has its widgets and they are simply not reaching the panel".
   const uint32_t kids = act ? (uint32_t)lv_obj_get_child_cnt(act) : 0;
+
   lvgl_port_unlock();
 
   ESP_LOGW("ui", "heartbeat: scr=%p main=%p match=%d kids=%lu tick=%lu bl=%d", (void *)act,
