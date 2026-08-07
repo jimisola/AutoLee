@@ -312,7 +312,7 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <select id="nsList" style="flex:1" onchange="if(this.value)document.getElementById('ns').value=this.value"></select>
 <button class="btn btn-dark btn-sm" onclick="loadWifiScan()" title="Rescan">&#8635;</button></div>
 <input type="text" id="ns" placeholder="SSID (pick above or type)">
-<input type="password" id="np" placeholder="Password">
+<input type="password" id="np" autocomplete="off" placeholder="Password">
 <div class="row" style="gap:6px">
 <button class="btn btn-blue btn-sm" onclick="saveWifi()" style="flex:1">Save &amp; Connect</button>
 <button class="btn btn-red btn-sm" onclick="resetWifi()" style="flex:1">Reset WiFi</button></div>
@@ -320,8 +320,8 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <div class="sec">
 <h2>Web Password</h2>
-<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload once AutoLee has joined a WiFi network for the first time (user: <b>autolee</b>, password: <b>autolee</b>). Until then &mdash; including after Skip on the setup screen &mdash; no password is asked for at all: the AP key on the screen already means you are standing at the press. That factory default is public knowledge &mdash; so once you go on a network, until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all.</div>
-<input type="password" id="wpNew" placeholder="New password">
+<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload once AutoLee has joined a WiFi network for the first time (user: <b>autolee</b>; the factory-default password is <b>autolee</b> until you change it). Until then &mdash; including after Skip on the setup screen &mdash; no password is asked for at all: the AP key on the screen already means you are standing at the press. That factory default is public knowledge &mdash; so once you go on a network, until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all. <b>Locked out?</b> Reset the password from the press itself: <b>Config &rarr; Reset Pwd</b> (two taps), which restores the factory default so you can set a new one here.</div>
+<input type="password" id="wpNew" autocomplete="new-password" placeholder="New password (at least 8 characters)">
 <button class="btn btn-blue btn-sm" onclick="saveWebPassword()" style="width:100%">Change Password</button>
 <div id="wpMsg" class="hint" style="margin-top:6px"></div>
 </div>

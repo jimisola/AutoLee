@@ -13,6 +13,7 @@
 #include "stepper.h"
 #include "tmc5160_ctrl.h"
 #include "wifi_mgr.h"
+#include "ui_touch.h"  // ui_web_password_reset_finished() - touch-UI reset result
 #include "index_html.h"
 
 #include <PsychicHttp.h>
@@ -76,6 +77,55 @@ static bool saveWebPassword(const std::string &pass) {
   if (err == ESP_OK) err = nvs_commit(h);
   nvs_close(h);
   return err == ESP_OK;
+}
+
+// ==========================================================================
+//  Touch-UI web-password reset (forgotten-password recovery)
+// ==========================================================================
+// Until this existed there was no in-band way out of a lost web password. The
+// obvious candidate - "Reset WiFi" - deliberately does NOT clear it
+// (wifi_mgr.cpp's clearCredentials()), and it is anyway a gated POST once the
+// rig is on a LAN, so an operator who cannot authenticate cannot reach it
+// either. That left `idf.py erase-flash` over USB, which also discards the
+// calibration.
+//
+// The LCD is the right gate for this, and a stronger one than the setup AP:
+// reading the AP key off the screen only proves WiFi range, whereas pressing a
+// button on it proves the operator is standing at the press - the same physical
+// presence that already justifies the unauthenticated touch UI.
+//
+// Restoring the factory default (rather than clearing auth outright, or minting
+// a random password the operator would have to transcribe off a 172x320 panel)
+// reuses the #1c force-change machinery: with s_default_password_active true on
+// a rig that hasEverJoined(), the middleware refuses every state-changing route
+// with 403 except the password endpoint itself, and the dashboard shows its
+// DEFAULT PASSWORD IN USE banner. So the window this opens is not "anyone on the
+// LAN can run the press" but "anyone on the LAN can set the new password" - and
+// it closes as soon as the operator, who is already at the machine, does so.
+// Deliberately does not touch the WiFi credentials or the hasEverJoined latch.
+static volatile bool s_web_password_reset_requested = false;
+
+void requestWebPasswordReset() {
+  s_web_password_reset_requested = true;
+}
+
+// sse_task only. Keeping the write here rather than in the LVGL callback means
+// s_auth's stored credential and s_default_password_active are mutated from one
+// task, never concurrently with an in-flight request being authenticated.
+void webPasswordResetTick() {
+  if (!s_web_password_reset_requested) return;
+  s_web_password_reset_requested = false;
+  const bool ok = saveWebPassword(WEB_AUTH_DEFAULT_PASS);
+  if (ok) {
+    s_auth.setPassword(WEB_AUTH_DEFAULT_PASS);
+    s_default_password_active = true;
+    webLogLevel(LogLevel::Warn, "Security",
+                "Web password reset to the factory default from the touch UI - set a new one");
+  } else {
+    webLogLevel(LogLevel::Error, "Security",
+                "Could not reset the web password - the previous one still applies");
+  }
+  ui_web_password_reset_finished(ok);
 }
 
 // Own NVS key, same as the web password - not part of the versioned settings
@@ -250,6 +300,23 @@ static const char WIFI_CSS[] =
     ".sec{margin-top:20px;padding-top:14px;border-top:1px solid #333;}"
     ".why{font-size:13px;color:#aaa;line-height:1.45;margin:6px 0 0;}";
 
+// Must a web password be supplied before this rig is allowed onto a network?
+//
+// The join latch alone is not the question. hasEverJoined() flips on the first
+// GOT_IP with nothing tying it to a password ever having been chosen - a rig
+// that comes up with credentials already in NVS (they survive `idf.py flash`)
+// latches before the operator has seen a single page. Keyed on the latch alone,
+// the setup page then claims "a password is already set" forever while the
+// factory default is still in force, and offers "leave blank to keep it".
+//
+// s_default_password_active is the honest signal, so require a real password
+// whenever it is still the default - including after a touch-UI reset. The
+// page's copy and both save handlers share this one predicate; they used to
+// spell the condition out separately, which is how they drifted apart.
+static bool webPasswordRequired() {
+  return !wifi_mgr::hasEverJoined() || s_default_password_active;
+}
+
 static std::string wifiConfigPage() {
   // Joining a network is the one moment the trust model changes: until now the
   // WPA2 AP key has been the only gate and physical presence was the whole
@@ -258,7 +325,7 @@ static std::string wifiConfigPage() {
   // left to a separate trip the operator has no reason to know they must make.
   // Only on a rig that has never joined - afterwards the password already
   // exists and this section would just be a second, confusing way to change it.
-  const bool needWebPassword = !wifi_mgr::hasEverJoined();
+  const bool needWebPassword = webPasswordRequired();
 
   std::string html;
   html +=
@@ -279,8 +346,15 @@ static std::string wifiConfigPage() {
       "<label>Or type SSID manually</label><input name='ssid_manual' placeholder='SSID "
       "(optional)'>";
   html +=
+      // autocomplete is load-bearing, not decoration. Two type='password' inputs
+      // in one <form> with no hints make Chrome read this as a change-password
+      // form and fill BOTH from whatever it has saved for this origin - so the
+      // WiFi PSK lands in web_password, /save sees a non-empty field and commits
+      // it, and the operator ends up locked out by a password they never typed.
+      // Observed on hardware exactly that way. WPA2 PSKs are >= 8 chars, so the
+      // WEB_AUTH_PASS_MIN floor does not catch it either.
       "<label>Password</label><div class='pw'><input name='pass' id='wifipw' type='password' "
-      "placeholder='WiFi password'>"
+      "autocomplete='off' placeholder='WiFi password'>"
       "<button type='button' class='eye' id='wifipwEye' onclick=\"tog('wifipw',this)\" "
       "aria-label='Show password'>&#128065;</button></div>";
 
@@ -292,8 +366,10 @@ static std::string wifiConfigPage() {
   // afterwards, where blank means "keep the current one".
   html += "<div class='sec'><label>Device password</label><div class='pw'>";
   html += needWebPassword ? "<input name='web_password' id='webpw' type='password' "
+                            "autocomplete='new-password' "
                             "placeholder='At least 8 characters' minlength='8' required>"
                           : "<input name='web_password' id='webpw' type='password' "
+                            "autocomplete='new-password' "
                             "placeholder='Leave blank to keep the current one' minlength='8'>";
   html +=
       "<button type='button' class='eye' onclick=\"tog('webpw',this)\" "
@@ -301,9 +377,11 @@ static std::string wifiConfigPage() {
   html += needWebPassword
               ? "<p class='why'>Once AutoLee is on your network, anything on that network can "
                 "reach it. This password is what will be asked for before it will run, "
-                "calibrate or accept a firmware update. Username is <b>autolee</b>.</p></div>"
+                "calibrate or accept a firmware update. Username is <b>autolee</b>, and the "
+                "password is still the factory default until you set one here.</p></div>"
               : "<p class='why'>A password is already set. Type a new one here to replace it, "
-                "or leave this blank to keep it. Username is <b>autolee</b>.</p></div>";
+                "or leave this blank to keep it. Username is <b>autolee</b>. Forgotten it? "
+                "Reset it from the press itself: <b>Config &rarr; Reset Pwd</b>.</p></div>";
 
   html += "<button class='btnSave' type='submit'>Save &amp; Connect</button></form>";
   html +=
@@ -775,7 +853,7 @@ void setupWebServer() {
     // still have committed the SSID, and the operator would be one reboot away
     // from a networked rig with no password set.
     const std::string webPw = req->getParam("web_password", "");
-    const bool needWebPassword = !wifi_mgr::hasEverJoined();
+    const bool needWebPassword = webPasswordRequired();
     // Required pre-join; afterwards blank means "keep the current one". Either
     // way, anything actually typed has to clear the floor - without the
     // !empty() arm a post-join caller could set a one-character password.
@@ -1201,7 +1279,7 @@ void setupWebServer() {
       // so leaving it exempt would make it the obvious way to get onto a network
       // with the factory-default password still in place.
       const std::string webPw = req->getParam("web_password", "");
-      const bool needWebPassword = !wifi_mgr::hasEverJoined();
+      const bool needWebPassword = webPasswordRequired();
       // Same rule as /save: required pre-join, optional after, but anything
       // actually supplied must clear the floor.
       if ((needWebPassword || !webPw.empty()) && webPw.length() < WEB_AUTH_PASS_MIN) {
@@ -1329,6 +1407,11 @@ void setupWebServer() {
             [](PsychicRequest *req, PsychicResponse *res) {
               std::string pass = req->getParam("pass", "");
               if (pass.empty()) return res->send(400, "text/plain", "password required");
+              // The same floor /save and /api/v1/wifi/save enforce. It was missing
+              // here, so the one endpoint whose whole job is getting a rig OFF the
+              // factory default happily accepted a one-character replacement.
+              if (pass.length() < WEB_AUTH_PASS_MIN)
+                return res->send(400, "text/plain", "password must be at least 8 characters");
               if (pass.length() > WEB_AUTH_PASS_MAX)
                 return res->send(400, "text/plain", "password too long");
               if (!saveWebPassword(pass))

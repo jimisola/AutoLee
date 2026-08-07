@@ -15,6 +15,11 @@ void showJamScreen();
 // Reports the outcome of the jam-recovery home and, on success, returns the
 // display to the main screen (only if the jam screen is still active).
 void ui_jam_recovery_finished(bool homed);
+
+// Called from sse_task when a touch-requested web-password reset has actually
+// been written (or failed to write) - the button must not claim success before
+// the NVS write happened. See webPasswordResetTick() in web_server.cpp.
+void ui_web_password_reset_finished(bool ok);
 void setRunButtonState(bool running);
 void ui_update_main_warning();
 void ui_update_tuning_numbers();
