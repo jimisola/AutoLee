@@ -308,7 +308,10 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <div class="sec">
 <h2>WiFi Settings</h2>
 <div class="hint" style="margin-bottom:8px">Change WiFi credentials (applied live, no reboot)</div>
-<input type="text" id="ns" placeholder="SSID">
+<div class="row" style="gap:6px;margin-bottom:6px">
+<select id="nsList" style="flex:1" onchange="if(this.value)document.getElementById('ns').value=this.value"></select>
+<button class="btn btn-dark btn-sm" onclick="loadWifiScan()" title="Rescan">&#8635;</button></div>
+<input type="text" id="ns" placeholder="SSID (pick above or type)">
 <input type="password" id="np" placeholder="Password">
 <div class="row" style="gap:6px">
 <button class="btn btn-blue btn-sm" onclick="saveWifi()" style="flex:1">Save &amp; Connect</button>
@@ -444,6 +447,25 @@ function clearLog(){
   fetch('/api/v1/system/logs',{method:'DELETE'});
 }
 
+function loadWifiScan(){
+  const s=document.getElementById('nsList');
+  s.innerHTML='';
+  const scanning=document.createElement('option');scanning.value='';scanning.textContent='Scanning…';
+  s.appendChild(scanning);
+  fetch('/api/v1/wifi/scan').then(r=>r.json()).then(list=>{
+    s.innerHTML='';
+    const def=document.createElement('option');def.value='';
+    def.textContent=list.length?'-- available networks --':'No networks found';
+    s.appendChild(def);
+    // DOM building, not string concatenation: an SSID is attacker-chosen text
+    // off the air and must never be interpreted as markup.
+    list.forEach(n=>{
+      const o=document.createElement('option');
+      o.value=n.ssid;
+      o.textContent=n.ssid+' ('+n.rssi+' dBm'+(n.secure?'':', OPEN')+')';
+      s.appendChild(o);});
+  }).catch(()=>{s.innerHTML='';const e=document.createElement('option');e.value='';e.textContent='Scan failed - retry ↻';s.appendChild(e)});
+}
 function loadServerLogLevel(){
   fetch('/api/v1/system/log_level').then(r=>r.json()).then(d=>{
     document.querySelectorAll('#logLevelCtl .btn').forEach(b=>b.className='btn btn-sm '+(b.dataset.lvl===d.level?'btn-blue':'btn-dark'));
@@ -460,6 +482,7 @@ function showPage(id){
   window.scrollTo(0,0);
   if(id==='pageDiag')loadDiag();
   if(id==='pageLog')loadServerLogLevel();
+  if(id==='pageWifi')loadWifiScan();
   if(id==='pageLog'){loadLogs();loadServerLogLevel()}
 }
 document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page==='pageMain'));

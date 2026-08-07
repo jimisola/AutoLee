@@ -261,6 +261,32 @@ paths:
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
         "409": { description: "A WiFi transition is already in progress" }
 
+  /api/v1/wifi/scan:
+    get:
+      summary: Scan for visible WiFi networks
+      tags: [WiFi]
+      operationId: scanWifi
+      description: >
+        Blocking scan, typically 1-3 seconds - the radio goes off-channel to
+        listen, so expect a brief throughput dip on an established connection.
+        Open like every other read: the captive portal shows the same list to
+        anyone on the setup AP.
+      responses:
+        "200":
+          description: Visible networks, strongest first as reported by the driver
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [ssid, rssi, secure]
+                  properties:
+                    ssid: { type: string }
+                    rssi: { type: integer, description: "dBm" }
+                    secure: { type: boolean, description: "false only for open networks" }
+        "503": { description: "A WiFi transition is in progress - the radio is busy" }
+
   /api/v1/wifi/reset:
     post:
       summary: Clear saved WiFi and switch to the setup AP live (no reboot)

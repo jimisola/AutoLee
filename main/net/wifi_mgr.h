@@ -57,4 +57,10 @@ bool transitionInFlight();
 // HTML <option> list from the last scan (AP mode only - see wifi_mgr.cpp).
 std::string scannedOptionsHtml();
 
+// Blocking scan (~1-3s; the radio goes off-channel briefly) returning a JSON
+// array of visible networks: [{"ssid":"...","rssi":-60,"secure":true},...].
+// Works in STA and APSTA mode. Returns "[]" on scan failure or while a live
+// transition is in flight (scanning would fight the connect).
+std::string scanNetworksJson();
+
 }  // namespace wifi_mgr

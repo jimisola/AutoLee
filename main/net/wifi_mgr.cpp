@@ -267,21 +267,85 @@ std::string apPassword() {
   return s_ap_key;
 }
 
+// Blocking scan shared by the captive portal's HTML dropdown and the
+// dashboard's JSON endpoint. Returns false only on scan-start failure; an
+// empty result is a successful scan of a quiet band.
+static bool doScan(std::vector<wifi_ap_record_t> &records) {
+  wifi_scan_config_t scan_cfg = {};
+  if (esp_wifi_scan_start(&scan_cfg, true) != ESP_OK) return false;
+  uint16_t count = 0;
+  esp_wifi_scan_get_ap_num(&count);
+  records.resize(count);
+  if (count > 0) {
+    esp_wifi_scan_get_ap_records(&count, records.data());
+    records.resize(count);
+  }
+  return true;
+}
+
+std::string scanNetworksJson() {
+  if (s_switching) return "[]";
+  std::vector<wifi_ap_record_t> records;
+  if (!doScan(records)) return "[]";
+  // The driver returns one record per BSSID, strongest first - a mesh network
+  // shows up once per node. One entry per SSID (the strongest) is what a
+  // human picking a network wants. Hidden networks (empty SSID) are skipped:
+  // nothing selectable to show, and the manual SSID field covers them.
+  std::vector<std::string> seen;
+  std::string json = "[";
+  bool first = true;
+  for (size_t i = 0; i < records.size(); i++) {
+    const std::string raw(reinterpret_cast<char *>(records[i].ssid));
+    if (raw.empty()) continue;
+    bool dup = false;
+    for (const auto &s : seen) {
+      if (s == raw) {
+        dup = true;
+        break;
+      }
+    }
+    if (dup) continue;
+    seen.push_back(raw);
+    std::string ssid;
+    for (unsigned char c : std::string(reinterpret_cast<char *>(records[i].ssid))) {
+      // JSON string escaping: the two mandatory metacharacters plus control
+      // bytes; an SSID is arbitrary bytes and " or \ in one must not be able
+      // to break the array open.
+      if (c == '"' || c == '\\') {
+        ssid += '\\';
+        ssid += (char)c;
+      } else if (c < 0x20) {
+        char u[8];
+        snprintf(u, sizeof(u), "\\u%04x", c);
+        ssid += u;
+      } else {
+        ssid += (char)c;
+      }
+    }
+    // `first`, not `i`: skipped records (hidden SSIDs, mesh duplicates) mean
+    // the record index no longer tracks emitted entries - keying the comma on
+    // it would emit a leading comma whenever record 0 was skipped.
+    if (!first) json += ",";
+    first = false;
+    json += "{\"ssid\":\"" + ssid + "\",\"rssi\":" + std::to_string(records[i].rssi) +
+            ",\"secure\":" + (records[i].authmode == WIFI_AUTH_OPEN ? "false" : "true") + "}";
+  }
+  json += "]";
+  return json;
+}
+
 static void scan_networks() {
   s_scanned_html = "<option value=''>-- Select WiFi --</option>";
-  wifi_scan_config_t scan_cfg = {};
-  if (esp_wifi_scan_start(&scan_cfg, true) != ESP_OK) {
+  std::vector<wifi_ap_record_t> records;
+  if (!doScan(records)) {
     s_scanned_html += "<option value=''>Scan failed</option>";
     return;
   }
-  uint16_t count = 0;
-  esp_wifi_scan_get_ap_num(&count);
-  if (count == 0) {
+  if (records.empty()) {
     s_scanned_html += "<option value=''>No networks found</option>";
     return;
   }
-  std::vector<wifi_ap_record_t> records(count);
-  esp_wifi_scan_get_ap_records(&count, records.data());
+  const size_t count = records.size();
   for (uint16_t i = 0; i < count; i++) {
     std::string ssid(reinterpret_cast<char *>(records[i].ssid));
     // Minimal HTML-escaping. '&' matters and was missing here (an SSID

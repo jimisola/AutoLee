@@ -466,11 +466,14 @@ void otaWatchdogTick() {
 
 // ==========================================================================
 void setupWebServer() {
-  // Raised when the flat /api/v1/* routes were regrouped into nested paths and
-  // the old /api/v1/action dispatcher was split into four standalone routes
-  // (+3 handlers). Must stay above the real route count including the seven
-  // captive-portal probe handlers registered in AP mode.
-  server.config.max_uri_handlers = 32;
+  // Must stay above the real registration count - which is NOT the number of
+  // server.on() lines: the seven captive-portal probes register in a loop, in
+  // AP mode only, and a failed registration is just an "Add endpoint failed"
+  // log line, trivially missed. As of the wifi/scan route the AP-mode total is
+  // 34, which had silently outgrown the previous 32. Count with
+  // `grep -c "server.on(" web_server.cpp` + 6 (the probe loop is one line for
+  // seven routes, minus the loop line itself) and keep headroom.
+  server.config.max_uri_handlers = 44;
 
   // Socket budget for the setup AP, where the pressure is worst: a phone runs
   // several background connectivity-check requests against different domains
@@ -1224,6 +1227,19 @@ void setupWebServer() {
       return res->send(200, "text/plain", "connecting");
     }
     return res->send(400, "text/plain", "ssid required");
+  });
+
+  // Blocking (~1-3s: the radio goes off-channel to listen). A GET, so open
+  // like every other read - the captive portal already shows the same list to
+  // anyone on the setup AP. 503 rather than a misleading empty result while a
+  // live transition owns the radio.
+  server.on("/api/v1/wifi/scan", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
+    if (wifi_mgr::transitionInFlight()) {
+      return res->send(503, "application/json",
+                       "{\"error\":\"busy\",\"message\":\"WiFi transition in progress\"}");
+    }
+    std::string json = wifi_mgr::scanNetworksJson();
+    return res->send(200, "application/json", json.c_str());
   });
 
   server.on("/api/v1/wifi/reset", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
