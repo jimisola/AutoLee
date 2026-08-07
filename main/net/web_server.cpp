@@ -374,6 +374,20 @@ static std::string wifiConfigPage() {
   html +=
       "<button type='button' class='eye' onclick=\"tog('webpw',this)\" "
       "aria-label='Show password'>&#128065;</button></div>";
+  // Confirm box. A masked field that silently accepted a typo used to mean the
+  // operator lost the rig the moment it joined - the password they thought they
+  // set was not the one stored, and there was no way to find out except being
+  // refused later. Its own eye, since the whole point is comparing two entries.
+  html += "<div class='pw' style='margin-top:6px'>";
+  html += needWebPassword ? "<input name='web_password2' id='webpw2' type='password' "
+                            "autocomplete='new-password' placeholder='Repeat password' "
+                            "minlength='8' required>"
+                          : "<input name='web_password2' id='webpw2' type='password' "
+                            "autocomplete='new-password' placeholder='Repeat new password' "
+                            "minlength='8'>";
+  html +=
+      "<button type='button' class='eye' onclick=\"tog('webpw2',this)\" "
+      "aria-label='Show password'>&#128065;</button></div>";
   html += needWebPassword
               ? "<p class='why'>Once AutoLee is on your network, anything on that network can "
                 "reach it. This password is what will be asked for before it will run, "
@@ -877,6 +891,21 @@ void setupWebServer() {
           "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
       return res->send();
     }
+    // Checked here and not only in the browser: the confirm box is what stops a
+    // typo becoming a locked-out rig, so it has to hold for anything that POSTs
+    // this form, not just for a client that ran our script. Only enforced when
+    // a password is actually being set - blank/blank post-join still means
+    // "keep the current one".
+    if (!webPw.empty() && req->getParam("web_password2", "") != webPw) {
+      res->setCode(400);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Device passwords do not match</h2>"
+          "<p>The two entries differ - nothing was saved.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
 
     if (!wifi_mgr::saveCredentials(finalSSID, pw)) {
       res->setCode(400);
@@ -1289,6 +1318,13 @@ void setupWebServer() {
       }
       if (webPw.length() > WEB_AUTH_PASS_MAX) {
         return res->send(400, "text/plain", "web_password must be at most 64 characters");
+      }
+      // Optional here, unlike the setup form: this is the programmatic path and
+      // a script has no typo to guard against. Honoured when supplied so a
+      // caller that does send it gets the same check.
+      if (!webPw.empty() && req->hasParam("web_password2") &&
+          req->getParam("web_password2", "") != webPw) {
+        return res->send(400, "text/plain", "web_password and web_password2 do not match");
       }
       if (!wifi_mgr::saveCredentials(ssid, pass)) {
         return res->send(400, "text/plain",
