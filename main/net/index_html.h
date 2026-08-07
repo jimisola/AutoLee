@@ -307,11 +307,11 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <div class="sec">
 <h2>WiFi Settings</h2>
-<div class="hint" style="margin-bottom:8px">Change WiFi credentials (reboot required)</div>
+<div class="hint" style="margin-bottom:8px">Change WiFi credentials (applied live, no reboot)</div>
 <input type="text" id="ns" placeholder="SSID">
 <input type="password" id="np" placeholder="Password">
 <div class="row" style="gap:6px">
-<button class="btn btn-blue btn-sm" onclick="saveWifi()" style="flex:1">Save &amp; Reboot</button>
+<button class="btn btn-blue btn-sm" onclick="saveWifi()" style="flex:1">Save &amp; Connect</button>
 <button class="btn btn-red btn-sm" onclick="resetWifi()" style="flex:1">Reset WiFi</button></div>
 </div>
 
@@ -639,11 +639,11 @@ function saveWifi(){
   fetch('/api/v1/wifi/save',{method:'POST',
     headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)})
-  .then(()=>{alert('Saved! Rebooting...');setTimeout(()=>location.reload(),5000)})}
+  .then(()=>{alert('Connecting to the new network - no reboot. If it succeeds this page goes unreachable at the old address; the new IP is on the device screen (WiFi page). If it fails, AutoLee falls back to its setup network.')})}
 function resetWifi(){
-  if(!confirm('Clear saved WiFi credentials and reboot into setup mode?'))return;
+  if(!confirm('Clear saved WiFi credentials and switch to setup mode? This page will go unreachable.'))return;
   fetch('/api/v1/wifi/reset',{method:'POST'})
-  .then(()=>{alert('WiFi cleared! Rebooting into setup mode...');setTimeout(()=>location.reload(),5000)})}
+  .then(()=>{alert('WiFi cleared - the AutoLee-Setup network is coming up now (key on the device screen).')})}
 function saveWebPassword(){
   const p=document.getElementById('wpNew').value,m=document.getElementById('wpMsg');
   if(!p){m.textContent='Enter a new password.';m.style.color='#FF4444';return}

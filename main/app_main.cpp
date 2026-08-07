@@ -151,19 +151,32 @@ static void pump_task(void *) {
 // condition, not a bug that should panic the whole device.
 static void sse_task(void *) {
   uint32_t lastUiLogMs = 0;
-  // Early repaint retries. A single forced repaint at the end of app_main() was
-  // NOT enough - the panel still came up black - while a repaint every 10s did
-  // work. So the initial flush is lost intermittently rather than always, and
-  // what fixed it was retrying, not the timing of any one attempt. These
-  // retries reproduce that without leaving a permanent full-screen redraw on a
-  // timer: repaint every 500ms for the first few seconds, then stop.
+  // Panel-blackout mitigation, two layers. The underlying bug: the panel
+  // intermittently ends up showing black despite LVGL being alive, the right
+  // screen active and populated, and the backlight on - and a repaint reliably
+  // brings it back, which localizes the damage to the panel's frame RAM (a
+  // DISPOFF/SLPIN/panel reset would NOT be fixed by a RAMWR-only repaint).
+  // LVGL never self-heals because nothing is left invalidated once
+  // flush_ready has been signalled.
   //
-  // Bounded deliberately. If the display can also be lost later - during a run,
-  // when the TMC5160 is driving StallGuard reads over the SPI bus it shares
-  // with the panel - these retries will not cover it, and that failure would
-  // matter far more than a black screen at boot. Better for that to stay
-  // visible than to be masked by a repaint that runs forever.
-  uint32_t repaintsLeft = 10;
+  // Evidence so far places every observed blackout within seconds of a WiFi
+  // lifecycle moment (initial connect, AP start after an STA timeout,
+  // post-save reboots back when saving rebooted) - and NEVER deep into a
+  // settled session. The TMC5160 shared-SPI-bus theory is ruled out for the
+  // idle case: SG_RESULT()/DRV_STATUS() have exactly one caller, in the
+  // motion path, so an idle rig has zero TMC bus traffic while blackouts
+  // still happened. Prime remaining suspect is the WiFi PA's supply transient
+  // corrupting panel DDRAM. Not yet proven - camera-on-panel verification
+  // pending.
+  //
+  // Layer 1, targeted: uiRepaintRequested is set at every WiFi lifecycle
+  // transition (GOT_IP, live switch outcomes, WiFi reset) and consumed here
+  // within ~50ms.
+  // Layer 2, safety sweep every 5s: covers whatever the theory misses. Cheap
+  // (~110 KB over SPI, tens of ms) and deliberately NOT suppressed while the
+  // motor runs - a UI that goes black mid-run on a machine that can crush
+  // hands is worse than the bus traffic. Once the camera loop confirms the
+  // event-driven layer catches everything, this sweep is the thing to remove.
   uint32_t lastRepaintMs = 0;
   for (;;) {
     otaWatchdogTick();  // release a stuck OTA flag from a vanished-client upload
@@ -186,9 +199,9 @@ static void sse_task(void *) {
     // Logged from sse_task because it is not watchdog-subscribed, so taking
     // the LVGL lock here can never panic the device even if the UI is wedged.
     const uint32_t now = millis();
-    if (repaintsLeft > 0 && now - lastRepaintMs > 500) {
+    if (uiRepaintRequested || now - lastRepaintMs > 5000) {
+      uiRepaintRequested = false;
       lastRepaintMs = now;
-      repaintsLeft--;
       ui_force_full_repaint();
     }
     if (now - lastUiLogMs > 10000) {

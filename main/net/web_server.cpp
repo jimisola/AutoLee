@@ -302,7 +302,7 @@ static std::string wifiConfigPage() {
               : "<p class='why'>A password is already set. Type a new one here to replace it, "
                 "or leave this blank to keep it. Username is <b>autolee</b>.</p></div>";
 
-  html += "<button class='btnSave' type='submit'>Save &amp; Reboot</button></form>";
+  html += "<button class='btnSave' type='submit'>Save &amp; Connect</button></form>";
   html +=
       "<form method='POST' action='/clear'><button class='btnClear' "
       "type='submit'>Clear Saved WiFi</button></form>";
@@ -793,26 +793,40 @@ void setupWebServer() {
       }
     }
 
+    // Live switch, no reboot: the setup AP (and this very page's connection)
+    // stays up until the join succeeds, so the outcome can be honest instead
+    // of "rebooting, hope for the best".
+    if (!wifi_mgr::startLiveSwitch()) {
+      res->setCode(409);
+      res->setContentType("text/html");
+      res->setContent(
+          "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
+          "background:#111;color:#eee;'><h2>Already connecting</h2>"
+          "<p>A connection attempt is in progress - give it half a minute.</p>"
+          "<p><a href='/' style='color:#7cf;'>Go back</a></p></body></html>");
+      return res->send();
+    }
     res->setCode(200);
     res->setContentType("text/html");
     res->setContent(
         "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
-        "background:#111;color:#eee;'><h2 style='color:#28a745;'>Saved!</h2>"
-        "<p>Rebooting...</p></body></html>");
-    rebootRequested = true;
-    rebootRequestMs = millis();
+        "background:#111;color:#eee;'><h2 style='color:#28a745;'>Connecting&hellip;</h2>"
+        "<p>AutoLee is joining the network now. If it succeeds, this setup network "
+        "disappears and AutoLee's new address is shown on its screen (WiFi page).</p>"
+        "<p>If the setup network is still here in a minute, the join failed &mdash; "
+        "reconnect to it and check the password.</p></body></html>");
     return res->send();
   });
 
   server.on("/clear", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    wifi_mgr::clearCredentials();
+    // reset_task also clears the credentials - no reboot involved anymore.
+    wifi_mgr::requestResetToSetupAp();
     res->setCode(200);
     res->setContentType("text/html");
     res->setContent(
         "<html><body style='font-family:sans-serif;text-align:center;padding:40px;"
-        "background:#111;color:#eee;'><h2>WiFi Cleared</h2><p>Rebooting...</p></body></html>");
-    rebootRequested = true;
-    rebootRequestMs = millis();
+        "background:#111;color:#eee;'><h2>WiFi Cleared</h2>"
+        "<p>The setup network is coming up now.</p></body></html>");
     return res->send();
   });
 
@@ -1164,17 +1178,21 @@ void setupWebServer() {
                       "Could not persist the web password - the factory default still applies");
         }
       }
-      rebootRequested = true;
-      rebootRequestMs = millis();
-      return res->send(200, "text/plain", "saved");
+      if (!wifi_mgr::startLiveSwitch()) {
+        return res->send(409, "text/plain", "a connection attempt is already in progress");
+      }
+      // "connecting", not "saved": the join now happens live, with no reboot -
+      // poll /api/v1/state's wifiStatus/ip for the outcome.
+      return res->send(200, "text/plain", "connecting");
     }
     return res->send(400, "text/plain", "ssid required");
   });
 
   server.on("/api/v1/wifi/reset", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    wifi_mgr::clearCredentials();
-    rebootRequested = true;
-    rebootRequestMs = millis();
+    // reset_task clears the credentials and brings the setup AP up live.
+    if (!wifi_mgr::requestResetToSetupAp()) {
+      return res->send(409, "text/plain", "a wifi transition is already in progress");
+    }
     return res->send(200, "text/plain", "cleared");
   });
 

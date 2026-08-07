@@ -48,7 +48,7 @@ tags:
   - name: Settings
     description: Stored calibration/tuning as a whole (factory reset).
   - name: WiFi
-    description: Station credentials - save and reboot, or clear and fall back to the setup AP.
+    description: Station credentials - join a network or fall back to the setup AP, live, without rebooting.
   - name: Diagnostics
     description: Read-only build identity, runtime health and the stored core dump.
   - name: System
@@ -212,10 +212,25 @@ paths:
 
   /api/v1/wifi/save:
     post:
-      summary: Save WiFi credentials and reboot
+      summary: Save WiFi credentials and join the network live (no reboot)
       tags: [WiFi]
       operationId: setWifi
       description: >
+        Saves the credentials and starts a live join on the running WiFi
+        driver - the device does not reboot. 200 means the attempt started
+        ("connecting"), not that it succeeded: poll GET /api/v1/state (or the
+        SSE stream) for the outcome. From the setup AP, the AP stays up until
+        the join succeeds and is only then torn down; on failure it simply
+        stays available for another attempt. From an established connection,
+        a failed join falls back to the setup AP so a bad SSID/password can
+        never strand a headless device.
+
+        On a device that has never joined a network, web_password is required
+        (min 8 chars) and becomes the device password - the same one
+        POST /api/v1/system/web_password manages. After the first join it is
+        optional; supplying it replaces the current password, omitting it
+        keeps it.
+
         Credentials are sent in a form-encoded body rather than the query
         string: a query string is recorded in browser history and in any
         intervening proxy/server access log. The device accepts query
@@ -232,19 +247,33 @@ paths:
               properties:
                 ssid: { type: string, minLength: 1, maxLength: 32 }
                 pass: { type: string, maxLength: 64 }
+                web_password:
+                  type: string
+                  minLength: 8
+                  maxLength: 64
+                  description: >
+                    Device password. Required (and consumed) on a device that
+                    has never joined a network; optional afterwards, where it
+                    replaces the current password.
       responses:
         "200": { $ref: "#/components/responses/Ok" }
-        "400": { description: "SSID missing, or SSID/password too long" }
+        "400": { description: "SSID missing/too long, password too long, or web_password missing/too short on a never-joined device" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+        "409": { description: "A WiFi transition is already in progress" }
 
   /api/v1/wifi/reset:
     post:
-      summary: Clear saved WiFi and reboot into AP mode
+      summary: Clear saved WiFi and switch to the setup AP live (no reboot)
       tags: [WiFi]
       operationId: resetWifi
+      description: >
+        Clears the stored credentials and brings the WPA2 setup AP + captive
+        portal up on the running driver - the device does not reboot. The
+        response is sent before the STA link drops.
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+        "409": { description: "A WiFi transition is already in progress" }
 
   /api/v1/diagnostics/info:
     get:

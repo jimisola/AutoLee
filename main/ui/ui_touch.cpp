@@ -1117,10 +1117,11 @@ static void build_wifi_screen() {
       b_wifi_reset,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        wifi_mgr::clearCredentials();
-        webLog("WiFi", "Credentials cleared, rebooting...");
-        rebootRequested = true;
-        rebootRequestMs = millis();
+        // Live reset, no reboot: reset_task clears the credentials and brings
+        // the setup AP up on the running WiFi driver. Runs on its own task, so
+        // this LVGL callback returns immediately; the WiFi screen's status
+        // updates via ui_update_wifi_label() when the task finishes.
+        wifi_mgr::requestResetToSetupAp();
       },
       LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(

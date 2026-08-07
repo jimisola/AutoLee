@@ -34,6 +34,21 @@ std::string apPassword();  // the setup AP's WPA2 key (per-device, persisted in 
 bool saveCredentials(const std::string &ssid, const std::string &pass);
 void clearCredentials();
 
+// Try to join the network whose credentials saveCredentials() just stored,
+// WITHOUT rebooting. Runs on its own short-lived task; returns immediately.
+// From the setup AP: the AP (and the operator's portal session) stays up until
+// the join succeeds, then the AP and its DNS responder are torn down. On
+// failure the setup AP simply stays up and the operator can retry. From an
+// established STA connection (changing networks): connects to the new network,
+// and falls back to the setup AP on failure so a bad SSID/PSK can never strand
+// a headless rig. Returns false if a switch/reset is already in flight.
+bool startLiveSwitch();
+
+// Drop any STA connection, clear the stored credentials and bring up the setup
+// AP + captive portal, WITHOUT rebooting. Same task pattern and same in-flight
+// guard as startLiveSwitch().
+bool requestResetToSetupAp();
+
 // HTML <option> list from the last scan (AP mode only - see wifi_mgr.cpp).
 std::string scannedOptionsHtml();
 

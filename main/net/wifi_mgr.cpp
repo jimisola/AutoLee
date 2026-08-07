@@ -13,7 +13,9 @@
 
 #include "dns_server.h"
 
-#include "config.h"  // DEFAULT_AP_SSID
+#include "config.h"   // DEFAULT_AP_SSID, WIFI_CONNECT_TIMEOUT_MS
+#include "globals.h"  // webLog(), uiRepaintRequested
+#include "ui_touch.h"
 
 namespace wifi_mgr {
 
@@ -57,6 +59,11 @@ static bool s_connected = false;
 // connect and on an established link - a disconnect is always retried, and
 // connect_sta()'s timeout is the only failure path.
 static bool s_ap_mode = false;
+// True while a live switch/reset task (switch_task / reset_task) is running.
+// Doubles as the retry override in wifi_event_handler: during a live switch
+// out of AP mode, STA disconnects must be retried even though s_ap_mode is
+// still true (the setup AP deliberately stays up until the join succeeds).
+static volatile bool s_switching = false;
 // Retry budget for the INITIAL connect. A transient STA_DISCONNECTED during
 // association (common, especially on a marginal/mesh AP) must not immediately
 // drop us to the captive-portal AP - otherwise we can end up connected to the
@@ -70,6 +77,8 @@ static std::string s_connected_ssid;
 
 // Defined below, but called from the event handler above it.
 static void markEverJoined();
+// Defined below start(), which calls it.
+static void startSetupAp(bool wifi_already_started);
 
 static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t event_id, void *data) {
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -80,8 +89,9 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
     // the background, and if that association eventually succeeds we end up
     // connected to the home network AND running the setup AP at once. That
     // was the APSTA bug: the STA side would silently reconnect with no
-    // captive-portal flow at all.
-    if (!s_ap_mode) esp_wifi_connect();
+    // captive-portal flow at all. s_switching overrides the guard: a live
+    // switch out of AP mode needs STA retries while the AP is still up.
+    if (!s_ap_mode || s_switching) esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
     // Clear the flag so isConnected() stops lying the moment the link drops.
     s_connected = false;
@@ -95,13 +105,19 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
     // be the ONLY failure path: GOT_IP within the window => success
     // (kConnectedBit), otherwise the wait times out and we fall back to the
     // AP. The supplicant rate-limits these, so this doesn't tight-loop.
-    if (!s_ap_mode) esp_wifi_connect();
+    // s_switching: same override as STA_START above.
+    if (!s_ap_mode || s_switching) esp_wifi_connect();
   } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     (void)data;
     // (Re)connected - restore the flag so a recovered link reads as connected.
     s_connected = true;
     markEverJoined();
     xEventGroupSetBits(s_wifi_event_group, kConnectedBit);
+    // Every blank-panel report has clustered around WiFi lifecycle moments
+    // (see sse_task in app_main.cpp) - a reconnect after an outage is one, so
+    // queue a repaint. Just a flag: this runs on the WiFi event task, which
+    // must never block on the LVGL lock.
+    uiRepaintRequested = true;
   }
 }
 
@@ -330,68 +346,200 @@ void start() {
   }
 
   if (!s_connected) {
-    // WPA2-secured AP: the per-device key is shown on the LCD + as a join QR,
-    // so it's discoverable to whoever is physically at the machine but not to
-    // anyone just in range. This is the AP-side pairing of the web control
-    // API's digest auth.
-    ensureApKey();
+    startSetupAp(false);
+  }
+}
 
-    // Set BEFORE esp_wifi_start() below (which is what fires
-    // WIFI_EVENT_STA_START): closes the race where the event could otherwise
-    // be handled while s_ap_mode still reads false, letting the STA_START
-    // handler call esp_wifi_connect() once more before we've committed to AP
-    // mode.
-    s_ap_mode = true;
+// Bring up the WPA2 setup AP + captive-portal DNS. `wifi_already_started` is
+// false only on the boot path (start() above), where esp_wifi_start() has not
+// run yet; the live paths (switch failure fallback, WiFi reset) call it with
+// true and only change mode/config on the running driver.
+static void startSetupAp(bool wifi_already_started) {
+  // WPA2-secured AP: the per-device key is shown on the LCD + as a join QR,
+  // so it's discoverable to whoever is physically at the machine but not to
+  // anyone just in range. This is the AP-side pairing of the web control
+  // API's digest auth.
+  ensureApKey();
 
-    wifi_config_t ap_config = {};
-    strncpy((char *)ap_config.ap.ssid, DEFAULT_AP_SSID, sizeof(ap_config.ap.ssid) - 1);
-    ap_config.ap.ssid_len = strlen(DEFAULT_AP_SSID);
-    ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    strncpy((char *)ap_config.ap.password, s_ap_key.c_str(), sizeof(ap_config.ap.password) - 1);
-    ap_config.ap.max_connection = 4;
-    ap_config.ap.channel = 1;
+  // Set BEFORE esp_wifi_start() below (which is what fires
+  // WIFI_EVENT_STA_START): closes the race where the event could otherwise
+  // be handled while s_ap_mode still reads false, letting the STA_START
+  // handler call esp_wifi_connect() once more before we've committed to AP
+  // mode.
+  s_ap_mode = true;
 
-    // APSTA, not plain AP: esp_wifi_scan_start() requires the STA interface
-    // to be active - a pure-AP mode fails every scan (found via hardware
-    // testing: the WiFi setup page always showed "Scan failed"). The STA
-    // side here is never connected, just enabled so scanning works.
-    esp_wifi_set_mode(WIFI_MODE_APSTA);
+  wifi_config_t ap_config = {};
+  strncpy((char *)ap_config.ap.ssid, DEFAULT_AP_SSID, sizeof(ap_config.ap.ssid) - 1);
+  ap_config.ap.ssid_len = strlen(DEFAULT_AP_SSID);
+  ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+  strncpy((char *)ap_config.ap.password, s_ap_key.c_str(), sizeof(ap_config.ap.password) - 1);
+  ap_config.ap.max_connection = 4;
+  ap_config.ap.channel = 1;
 
-    // esp_wifi_init() loads any STA config the driver previously persisted to
-    // its own flash storage into its in-RAM copy, regardless of the
-    // WIFI_STORAGE_RAM call above (that only stops FUTURE writes going to
-    // flash). So a stale SSID/password from a prior boot can still be sitting
-    // there even when we never called connect_sta() this boot (e.g. no app
-    // credentials yet) - and the moment APSTA brings the STA interface up for
-    // scanning, the driver tries to associate with it. Clearing it here is
-    // what actually stops that.
-    wifi_config_t empty_sta_config = {};
-    esp_wifi_set_config(WIFI_IF_STA, &empty_sta_config);
+  // APSTA, not plain AP: esp_wifi_scan_start() requires the STA interface
+  // to be active - a pure-AP mode fails every scan (found via hardware
+  // testing: the WiFi setup page always showed "Scan failed"). The STA
+  // side here is never connected, just enabled so scanning works.
+  esp_wifi_set_mode(WIFI_MODE_APSTA);
 
-    esp_wifi_set_config(WIFI_IF_AP, &ap_config);
-    esp_wifi_start();
+  // esp_wifi_init() loads any STA config the driver previously persisted to
+  // its own flash storage into its in-RAM copy, regardless of the
+  // WIFI_STORAGE_RAM call above (that only stops FUTURE writes going to
+  // flash). So a stale SSID/password from a prior boot can still be sitting
+  // there even when we never called connect_sta() this boot (e.g. no app
+  // credentials yet) - and the moment APSTA brings the STA interface up for
+  // scanning, the driver tries to associate with it. Clearing it here is
+  // what actually stops that. Same reasoning on the live paths: a failed
+  // switch must not leave the bad config behind to be retried in the
+  // background.
+  wifi_config_t empty_sta_config = {};
+  esp_wifi_set_config(WIFI_IF_STA, &empty_sta_config);
 
-    scan_networks();
+  esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+  if (!wifi_already_started) esp_wifi_start();
 
-    esp_netif_ip_info_t ip_info;
-    esp_netif_get_ip_info(s_ap_netif, &ip_info);
-    ESP_LOGI(TAG, "AP: %s @ " IPSTR " (WPA2, key=%s, captive portal)", DEFAULT_AP_SSID,
-             IP2STR(&ip_info.ip), s_ap_key.c_str());
+  scan_networks();
 
-    // Redirect every DNS query to us, so any device connecting to the AP
-    // is prompted into the captive portal.
-    // DNS_SERVER_CONFIG_SINGLE leaves dns_entry_pair::ip uninitialized (correct
-    // - it is only read when if_key is NULL, and it isn't here), which
-    // ESP-IDF 6.0's -Werror=missing-field-initializers rejects in C++. Scoped
-    // to this one expansion rather than fixed in lib/dns_server/, which is
-    // vendored verbatim from Espressif's captive_portal example and still
-    // carries this exact macro upstream in 6.0.2.
+  esp_netif_ip_info_t ip_info;
+  esp_netif_get_ip_info(s_ap_netif, &ip_info);
+  ESP_LOGI(TAG, "AP: %s @ " IPSTR " (WPA2, key=%s, captive portal)", DEFAULT_AP_SSID,
+           IP2STR(&ip_info.ip), s_ap_key.c_str());
+
+  // Redirect every DNS query to us, so any device connecting to the AP
+  // is prompted into the captive portal.
+  // DNS_SERVER_CONFIG_SINGLE leaves dns_entry_pair::ip uninitialized (correct
+  // - it is only read when if_key is NULL, and it isn't here), which
+  // ESP-IDF 6.0's -Werror=missing-field-initializers rejects in C++. Scoped
+  // to this one expansion rather than fixed in lib/dns_server/ beyond the
+  // graceful-stop patch documented there.
+  if (!s_dns_handle) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
     dns_server_config_t dns_cfg = DNS_SERVER_CONFIG_SINGLE("*", "WIFI_AP_DEF");
 #pragma GCC diagnostic pop
     s_dns_handle = start_dns_server(&dns_cfg);
   }
+}
+
+// ==========================================================================
+//  Live AP<->STA transitions (no reboot)
+//
+//  Rebooting to change WiFi state was inherited from the Arduino firmware and
+//  turned out to be this project's single richest source of field bugs: the
+//  GPIO8 strapping hang (TMC_CS low at reset -> chip does not boot), the
+//  vTaskDelete-inside-lwIP deadlock, and the lost initial LVGL flush were ALL
+//  reboot-path bugs. Switching the running driver avoids the whole category,
+//  and is also simply better for the operator: the setup AP (and their portal
+//  page) stays up until the join actually succeeds.
+// ==========================================================================
+
+static void switch_task(void *) {
+  std::string ssid, pass;
+  if (!load_credentials(ssid, pass)) {
+    webLog("WiFi", "No stored credentials to connect with");
+    s_switching = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+  webLog("WiFi", "Connecting to '%s'...", ssid.c_str());
+
+  wifi_config_t cfg = {};
+  strncpy((char *)cfg.sta.ssid, ssid.c_str(), sizeof(cfg.sta.ssid) - 1);
+  strncpy((char *)cfg.sta.password, pass.c_str(), sizeof(cfg.sta.password) - 1);
+  esp_wifi_set_config(WIFI_IF_STA, &cfg);
+  xEventGroupClearBits(s_wifi_event_group, kConnectedBit);
+
+  if (s_connected) {
+    // Changing networks from an established STA link: the new config is
+    // already set, so dropping the old link makes the STA_DISCONNECTED
+    // handler reconnect - with the NEW credentials.
+    esp_wifi_disconnect();
+  } else {
+    // From the setup AP (or a dead link): the STA interface is idle, no
+    // disconnect event is coming, connect explicitly.
+    esp_wifi_connect();
+  }
+
+  const EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, kConnectedBit, pdFALSE, pdFALSE,
+                                               pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
+
+  if (bits & kConnectedBit) {
+    // GOT_IP already set s_connected and latched hasEverJoined().
+    s_connected_ssid = ssid;
+    const bool wasAp = s_ap_mode;
+    s_ap_mode = false;
+    if (s_dns_handle) {
+      stop_dns_server(s_dns_handle);  // graceful since the lib patch - see dns_server.c
+      s_dns_handle = nullptr;
+    }
+    // Dropping to pure STA is what actually tears the setup AP down. Done
+    // LAST, so an operator watching the portal page keeps their connection
+    // until the outcome is real.
+    if (wasAp) esp_wifi_set_mode(WIFI_MODE_STA);
+    webLog("WiFi", "Joined '%s' (IP %s)%s", ssid.c_str(), ipAddress().c_str(),
+           wasAp ? " - setup AP stopped" : "");
+  } else {
+    // Order matters: clear s_switching BEFORE disconnecting, or the
+    // STA_DISCONNECTED our own disconnect fires would immediately retry.
+    s_switching = false;
+    wifi_config_t empty = {};
+    esp_wifi_set_config(WIFI_IF_STA, &empty);
+    esp_wifi_disconnect();
+    if (!s_ap_mode) {
+      // The switch was started from an established STA connection and the new
+      // network never materialized - the old one's config is already gone, so
+      // without this the rig would be on no network at all, headless. The
+      // setup AP is the recoverable state.
+      startSetupAp(true);
+      webLog("WiFi", "Could not join '%s' - setup AP started", ssid.c_str());
+    } else {
+      webLog("WiFi", "Could not join '%s' - setup AP still active, try again", ssid.c_str());
+    }
+  }
+
+  s_switching = false;
+  ui_update_wifi_label();
+  uiRepaintRequested = true;
+  vTaskDelete(nullptr);
+}
+
+bool startLiveSwitch() {
+  if (s_switching) return false;
+  s_switching = true;
+  if (xTaskCreate(switch_task, "wifi_switch", 6144, nullptr, 3, nullptr) != pdPASS) {
+    s_switching = false;
+    return false;
+  }
+  return true;
+}
+
+static void reset_task(void *) {
+  clearCredentials();
+  // Before the disconnect, for the same STA_START/STA_DISCONNECTED race
+  // documented in startSetupAp(): the handler must never see "not AP mode"
+  // between the disconnect and the AP coming up.
+  s_ap_mode = true;
+  if (s_connected) {
+    s_connected = false;
+    esp_wifi_disconnect();
+  }
+  s_connected_ssid.clear();
+  startSetupAp(true);
+  webLog("WiFi", "Credentials cleared - setup AP active");
+  s_switching = false;
+  ui_update_wifi_label();
+  uiRepaintRequested = true;
+  vTaskDelete(nullptr);
+}
+
+bool requestResetToSetupAp() {
+  if (s_switching) return false;
+  s_switching = true;
+  if (xTaskCreate(reset_task, "wifi_reset", 6144, nullptr, 3, nullptr) != pdPASS) {
+    s_switching = false;
+    return false;
+  }
+  return true;
 }
 
 void stopForReboot() {
