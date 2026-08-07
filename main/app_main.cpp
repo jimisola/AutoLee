@@ -150,9 +150,33 @@ static void pump_task(void *) {
 // watchdog-subscribed, since blocking here is an expected network
 // condition, not a bug that should panic the whole device.
 static void sse_task(void *) {
+  uint32_t lastUiLogMs = 0;
   for (;;) {
     otaWatchdogTick();  // release a stuck OTA flag from a vanished-client upload
     broadcastState();   // internally rate-limited to SSE_INTERVAL_MS
+
+    // UI heartbeat, for the "panel is dark but the firmware is clearly healthy"
+    // report. Every explanation checked so far has been ruled out by evidence -
+    // no crash, no watchdog, no core dump, backlight commanded on (the
+    // gpio_set_level(GFX_BL, 1) at the end of display_touch_init() is reached,
+    // proven by the "AXS5106L touch ready" line just before it), and light
+    // sleep is off (CONFIG_PM_ENABLE unset), so nothing is isolating the pin.
+    //
+    // These three numbers split the remaining possibilities:
+    //   scr!=0 and == main - a screen really is loaded, so the problem is
+    //     downstream: the panel is not being flushed, or it is dark for a
+    //     hardware/bus reason (the display shares SPI with the TMC5160).
+    //   scr==0 or != main - nothing is active after all, and go(main_scr)
+    //     did not take effect the way the code reads.
+    //   tick frozen  - the LVGL task itself has stopped running.
+    // Logged from sse_task because it is not watchdog-subscribed, so taking
+    // the LVGL lock here can never panic the device even if the UI is wedged.
+    const uint32_t now = millis();
+    if (now - lastUiLogMs > 10000) {
+      lastUiLogMs = now;
+      ui_log_heartbeat();
+    }
+
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }

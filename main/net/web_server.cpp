@@ -281,17 +281,26 @@ static std::string wifiConfigPage() {
       "<button type='button' class='eye' id='wifipwEye' onclick=\"tog('wifipw',this)\" "
       "aria-label='Show password'>&#128065;</button></div>";
 
-  if (needWebPassword) {
-    html +=
-        "<div class='sec'><label>Device password</label><div class='pw'>"
-        "<input name='web_password' id='webpw' type='password' placeholder='At least 8 "
-        "characters' minlength='8' required>"
-        "<button type='button' class='eye' onclick=\"tog('webpw',this)\" "
-        "aria-label='Show password'>&#128065;</button></div>"
-        "<p class='why'>Once AutoLee is on your network, anything on that network can reach "
-        "it. This password is what will be asked for before it will run, calibrate or accept "
-        "a firmware update. Username is <b>autolee</b>.</p></div>";
-  }
+  // Shown on every visit to this page, not only the first. Configuring WiFi is
+  // the moment to think about the password, whichever network it is - and a rig
+  // that is back on its setup AP may well be here because something went wrong,
+  // which is exactly when being unable to reset the password would strand the
+  // operator. Required the first time (nothing is set yet); optional
+  // afterwards, where blank means "keep the current one".
+  html += "<div class='sec'><label>Device password</label><div class='pw'>";
+  html += needWebPassword ? "<input name='web_password' id='webpw' type='password' "
+                            "placeholder='At least 8 characters' minlength='8' required>"
+                          : "<input name='web_password' id='webpw' type='password' "
+                            "placeholder='Leave blank to keep the current one' minlength='8'>";
+  html +=
+      "<button type='button' class='eye' onclick=\"tog('webpw',this)\" "
+      "aria-label='Show password'>&#128065;</button></div>";
+  html += needWebPassword
+              ? "<p class='why'>Once AutoLee is on your network, anything on that network can "
+                "reach it. This password is what will be asked for before it will run, "
+                "calibrate or accept a firmware update. Username is <b>autolee</b>.</p></div>"
+              : "<p class='why'>A password is already set. Type a new one here to replace it, "
+                "or leave this blank to keep it. Username is <b>autolee</b>.</p></div>";
 
   html += "<button class='btnSave' type='submit'>Save &amp; Reboot</button></form>";
   html +=
@@ -736,7 +745,10 @@ void setupWebServer() {
     // from a networked rig with no password set.
     const std::string webPw = req->getParam("web_password", "");
     const bool needWebPassword = !wifi_mgr::hasEverJoined();
-    if (needWebPassword && webPw.length() < WEB_AUTH_PASS_MIN) {
+    // Required pre-join; afterwards blank means "keep the current one". Either
+    // way, anything actually typed has to clear the floor - without the
+    // !empty() arm a post-join caller could set a one-character password.
+    if ((needWebPassword || !webPw.empty()) && webPw.length() < WEB_AUTH_PASS_MIN) {
       res->setCode(400);
       res->setContentType("text/html");
       res->setContent(
@@ -1128,10 +1140,12 @@ void setupWebServer() {
       // with the factory-default password still in place.
       const std::string webPw = req->getParam("web_password", "");
       const bool needWebPassword = !wifi_mgr::hasEverJoined();
-      if (needWebPassword && webPw.length() < WEB_AUTH_PASS_MIN) {
+      // Same rule as /save: required pre-join, optional after, but anything
+      // actually supplied must clear the floor.
+      if ((needWebPassword || !webPw.empty()) && webPw.length() < WEB_AUTH_PASS_MIN) {
         return res->send(400, "text/plain",
                          "web_password is required on a device that has never joined a network, "
-                         "and must be at least 8 characters");
+                         "and must be at least 8 characters whenever it is supplied");
       }
       if (webPw.length() > WEB_AUTH_PASS_MAX) {
         return res->send(400, "text/plain", "web_password must be at most 64 characters");

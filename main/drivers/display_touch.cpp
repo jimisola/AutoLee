@@ -180,7 +180,12 @@ static i2c_master_bus_handle_t init_touch_i2c_bus(void) {
 lv_display_t *display_touch_init(void) {
   gpio_config_t bl_cfg = {};
   bl_cfg.pin_bit_mask = 1ULL << GFX_BL;
-  bl_cfg.mode = GPIO_MODE_OUTPUT;
+  // INPUT_OUTPUT rather than plain OUTPUT: GPIO_MODE_OUTPUT leaves the input
+  // buffer disabled, so gpio_get_level() on this pin reads 0 whatever is
+  // actually being driven - which makes it useless for telling "the backlight
+  // is off" from "the backlight is on and something else is wrong". Same drive
+  // strength and behaviour otherwise; it only makes the pad readable.
+  bl_cfg.mode = GPIO_MODE_INPUT_OUTPUT;
   ESP_ERROR_CHECK(gpio_config(&bl_cfg));
   gpio_set_level((gpio_num_t)GFX_BL, 0);  // keep off until content is drawn
 

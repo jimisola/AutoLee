@@ -22,6 +22,9 @@
 
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
+#include "esp_log.h"
+#include "driver/gpio.h"  // ui_log_heartbeat() reads the backlight pad directly
+#include "config.h"       // GFX_BL
 
 #include "endpoint_math.h"
 
@@ -72,6 +75,28 @@ void go(lv_obj_t *scr) {
   if (!ui_lock("go")) return;
   lv_scr_load(scr);
   lvgl_port_unlock();
+}
+
+void ui_log_heartbeat() {
+  // Read the backlight pin first, outside the lock: if the LVGL lock is the
+  // thing that is stuck, this is the one number still worth having, and
+  // gpio_get_level() reads the pad directly rather than a cached value.
+  const int bl = gpio_get_level((gpio_num_t)GFX_BL);
+  const uint32_t tick = lv_tick_get();
+
+  if (!ui_lock("heartbeat")) {
+    ESP_LOGW("ui", "heartbeat: LVGL LOCK BUSY - tick=%lu bl=%d", (unsigned long)tick, bl);
+    return;
+  }
+  lv_obj_t *act = lv_scr_act();
+  // Child count separates "a screen is loaded but empty" - which renders as
+  // flat black, since style_screen() paints the background black - from "the
+  // screen has its widgets and they are simply not reaching the panel".
+  const uint32_t kids = act ? (uint32_t)lv_obj_get_child_cnt(act) : 0;
+  lvgl_port_unlock();
+
+  ESP_LOGW("ui", "heartbeat: scr=%p main=%p match=%d kids=%lu tick=%lu bl=%d", (void *)act,
+           (void *)main_scr, act == main_scr, (unsigned long)kids, (unsigned long)tick, bl);
 }
 
 static void style_screen(lv_obj_t *scr) {
