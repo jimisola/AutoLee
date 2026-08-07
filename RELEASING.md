@@ -30,11 +30,11 @@ manually skips every check below and leaves the tag pushed with nothing built.
    run page. There is no draft to publish by hand; this is the confirmation
    step.
 5. On approval it tags the ref locally, builds, and **asserts the version baked
-   into the firmware matches the tag** — for both `autolee.bin` and the merged
+   into the firmware matches the tag** — for both `autolee.bin` and the factory
    image. Only then does it push the tag and create the GitHub Release **as a
    prerelease with its artifacts already attached**.
 6. The published assets are downloaded back over the public path and re-checked:
-   checksums against what was built, merged image exactly 4 MB, and the
+   checksums against what was built, factory image exactly 4 MB, and the
    `esp_app_desc_t.version` inside each binary equal to the tag.
 7. Only then is the prerelease promoted to the latest release — one flag flip,
    assets already in place.
@@ -83,8 +83,8 @@ ship are provably the ones that were approved, not a regenerated copy.
 
 | File | What it is |
 |---|---|
-| `autolee-X.Y.Z-merged.bin` | Full 4 MB flash image — bootloader, partition table, app. Fresh install, flash at `0x0`. |
-| `autolee-X.Y.Z-update.bin` | App image only. OTA or re-flash of an already-provisioned board. |
+| `autolee-X.Y.Z-factory.bin` | Full 4 MB flash image — bootloader, partition table, app. Fresh install, flash at `0x0`. |
+| `autolee-X.Y.Z-ota.bin` | App image only. The web UI's Firmware page takes this one; it can also be written over serial at the `ota_0` offset. |
 | `SHA256SUMS.txt` | Checksums for both. |
 
 The literal `v` in those filenames is prose. The tag, and the version the
