@@ -312,8 +312,13 @@ void showJamScreen() {
 void ui_jam_recovery_finished(bool homed) {
   fake::rec("ui::jam_recovery_finished(%d)", (int)homed);
 }
-void setRunButtonState(bool running) {
-  fake::rec("ui::setRunButtonState(%d)", (int)running);
+// Records the label the real implementation would render, derived from the same
+// snapshot it reads, so a test can assert the button never claims "RUN" while
+// the press is still decelerating - or "STOP" while it is standing still.
+void ui_update_run_button() {
+  const RunState s = motion_state::snapshot().runState;
+  const char *txt = (s == RUNNING) ? "STOP" : (s == STOPPING) ? "STOPPING" : "RUN";
+  fake::rec("ui::run_button(%s)", txt);
 }
 void ui_update_main_warning() {
   fake::rec("ui::update_main_warning");
@@ -324,3 +329,45 @@ void ui_update_tuning_numbers() {
 void ui_update_endpoint_edit_values() {
   fake::rec("ui::update_endpoint_edit_values");
 }
+
+// ============================================================================
+//  Seams reached only by main/motion/motion_cmd.cpp
+// ============================================================================
+// The remaining ui_touch.h hooks, the log ring, and settings_store. motion.cpp
+// needs none of these; they exist so motion_cmd.cpp can be compiled into this
+// suite and its command gating tested (it holds the batch/toggle/reset gates,
+// which are pure decision logic over MotionState and were previously covered by
+// nothing at all).
+void ui_update_speed_val() {
+  fake::rec("ui::update_speed_val");
+}
+void ui_update_profile_screen() {
+  fake::rec("ui::update_profile_screen");
+}
+void ui_update_sg_val() {
+  fake::rec("ui::update_sg_val");
+}
+void ui_update_batch_val() {
+  fake::rec("ui::update_batch_val");
+}
+void ui_update_batch_remain() {
+  fake::rec("ui::update_batch_remain");
+}
+
+// Real LogRing (header-only pure logic, no ESP-IDF dependency) rather than a
+// fake: motion_cmd's log-clear path asserts on its observable effect.
+autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
+uint32_t logSentSerial = 0;
+
+namespace settings_store {
+void tick() {
+  // Deliberately silent: tick() runs on every pump iteration, so recording it
+  // would bury every other event in the trace.
+}
+void saveNow() {
+  fake::rec("settings::saveNow");
+}
+void resetToDefaults() {
+  fake::rec("settings::resetToDefaults");
+}
+}  // namespace settings_store
