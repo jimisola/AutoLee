@@ -18,11 +18,13 @@ manually skips every check below and leaves the tag pushed with nothing built.
      and it has to *agree* with the auto-detected value unless you also tick
      **force**.
    - **force**: allow a version that disagrees with the auto-detected one. The
-     run warns and records what it overrode.
-   - **dry-run**: **defaults to on.** Resolves the version, checks the tag is
-     free and the ref is on `main`, generates the release notes, and writes it
-     all to the job summary without building or publishing anything. Uncheck it
-     to actually release.
+     run warns and records what it overrode. That is *all* it overrides — it is
+     not a general "release anyway" switch, and in particular it cannot release
+     a commit that already carries a tag (see below).
+   - **dry-run**: **defaults to on.** Resolves the version, checks the ref is
+     unreleased and on `main` and that the tag is free, generates the release
+     notes, and writes it all to the job summary without building or publishing
+     anything. Uncheck it to actually release.
 3. The full CI suite runs — firmware build, host tests, lint, API specs,
    workflow lint — so what you approve next is already green.
 4. **The run pauses for approval.** The job that tags is bound to the `stable`
@@ -56,8 +58,27 @@ before a release runs.
 
 That last row is deliberate: a range containing nothing but maintainer-facing
 changes has nothing in it for whoever flashes the board, so auto-detect returns
-the tag that already exists and the run fails on "tag already exists". Pass a
+the tag that already exists and the run fails on "nothing to release". Pass a
 version explicitly (with **force**) if you really do want to ship it.
+
+## One release per commit
+
+A commit that is already tagged cannot be released again, whatever version you
+pass and whether or not **force** is ticked. `prepare` rejects it in seconds
+with *"is already released as …"*.
+
+This is not bookkeeping fussiness. The version the firmware reports comes from
+`git describe` at CMake-configure time, and `git describe` picks arbitrarily
+between two tags sitting on the same commit — so tagging `1.0.1` onto the commit
+already tagged `1.0.0` builds a binary that reports **`1.0.0`**. The readback
+assertion in the release job catches it, but not before an approval and a cold
+ESP-IDF build have been spent.
+
+If a release attempt failed and you want to retry, the fix is to land the
+commits you meant to ship, not to bump the number: `git describe` counts from
+the tagged commit, so anything new on `main` is a distinct commit and releases
+cleanly. Release tags are created **annotated** for the same reason — where a
+commit does end up multi-tagged, `describe` at least resolves to the newest.
 
 Two cases where you must pass the version yourself:
 

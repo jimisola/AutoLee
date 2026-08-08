@@ -105,6 +105,24 @@ jobs:
         run: |
           echo "tag=$(git describe --tags --abbrev=0 "$SHA" 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
 
+      # Before anything looks at versions: a commit gets exactly one release,
+      # and no input — `force` included — overrides that. Tagging an
+      # already-tagged commit bakes the *wrong* version into the firmware:
+      # `git describe --tags` picks arbitrarily between two tags at distance 0,
+      # so PROJECT_VER can come out as the older one. The readback assertion in
+      # the release job does catch it, but only after the approval gate and a
+      # cold ESP-IDF build. This costs a second.
+      - name: Check the ref is not already released
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          EXISTING="$(git tag --points-at "$SHA" | paste -sd' ' -)"
+          if [ -n "$EXISTING" ]; then
+            echo "::error::${SHA:0:12} is already released as '$EXISTING'. There is nothing new to release from it — merge your commits to main first."
+            exit 1
+          fi
+
       - name: Resolve version
         id: resolve
         env:
@@ -117,6 +135,15 @@ jobs:
           if [ -z "$REQUESTED" ]; then
             VERSION="$AUTO"
             SOURCE="auto-detected from Conventional Commits"
+            # git-cliff answers with the tag that already exists when nothing in
+            # the range earns a bump — only ci:/build:/tools:, or nothing
+            # conventional at all. The tag check below would then fail on "tag
+            # already exists", which describes the symptom and invites the wrong
+            # fix (bump past it and force), so name the actual cause here.
+            if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+              echo "::error::Nothing to release: no commits since '$VERSION' earn a version bump (see RELEASING.md, 'Auto-detected versions'). Pass a version explicitly with force if you really do want to ship them."
+              exit 1
+            fi
           else
             # Already shape-checked by check-version above.
             VERSION="$REQUESTED"
@@ -306,7 +333,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$VERSION"
+          # Annotated, not lightweight: `git describe` prefers annotated tags
+          # and orders them by tagger date, so a commit that somehow ends up
+          # carrying two tags still resolves to the newer one. Belt to the
+          # already-released check in `prepare`, which is the actual brace.
+          # Tags 0.1.0 and 1.0.0 predate this and stay lightweight.
+          git tag -a -m "$VERSION" "$VERSION"
 
       - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
         with:
