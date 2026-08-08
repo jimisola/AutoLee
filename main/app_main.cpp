@@ -182,8 +182,9 @@ static void sse_task(void *) {
   //    can crush hands is worse than 130ms of paused SSE.
   uint32_t lastRepaintMs = 0;
   for (;;) {
-    otaWatchdogTick();  // release a stuck OTA flag from a vanished-client upload
-    broadcastState();   // internally rate-limited to SSE_INTERVAL_MS
+    otaWatchdogTick();       // release a stuck OTA flag from a vanished-client upload
+    webPasswordResetTick();  // apply a touch-requested web-password reset (NVS + s_auth)
+    broadcastState();        // internally rate-limited to SSE_INTERVAL_MS
 
     // UI heartbeat, for the "panel is dark but the firmware is clearly healthy"
     // report. Every explanation checked so far has been ruled out by evidence -

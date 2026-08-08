@@ -312,7 +312,9 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <select id="nsList" style="flex:1" onchange="if(this.value)document.getElementById('ns').value=this.value"></select>
 <button class="btn btn-dark btn-sm" onclick="loadWifiScan()" title="Rescan">&#8635;</button></div>
 <input type="text" id="ns" placeholder="SSID (pick above or type)">
-<input type="password" id="np" placeholder="Password">
+<div class="row" style="gap:6px;margin-bottom:6px">
+<input type="password" id="np" autocomplete="off" placeholder="Password" style="flex:1;margin:0">
+<button class="btn btn-dark btn-sm" onclick="togPw('np',this)" aria-label="Show password" title="Show/hide">&#128065;</button></div>
 <div class="row" style="gap:6px">
 <button class="btn btn-blue btn-sm" onclick="saveWifi()" style="flex:1">Save &amp; Connect</button>
 <button class="btn btn-red btn-sm" onclick="resetWifi()" style="flex:1">Reset WiFi</button></div>
@@ -320,8 +322,13 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <div class="sec">
 <h2>Web Password</h2>
-<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload once AutoLee has joined a WiFi network for the first time (user: <b>autolee</b>, password: <b>autolee</b>). Until then &mdash; including after Skip on the setup screen &mdash; no password is asked for at all: the AP key on the screen already means you are standing at the press. That factory default is public knowledge &mdash; so once you go on a network, until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all.</div>
-<input type="password" id="wpNew" placeholder="New password">
+<div class="hint" style="margin-bottom:8px">Required for every control action and firmware upload once AutoLee has joined a WiFi network for the first time (user: <b>autolee</b>; the factory-default password is <b>autolee</b> until you change it). Until then &mdash; including after Skip on the setup screen &mdash; no password is asked for at all: the AP key on the screen already means you are standing at the press. That factory default is public knowledge &mdash; so once you go on a network, until you change it, the firmware refuses to run, calibrate or accept a firmware upload at all. <b>Locked out?</b> Reset the password from the press itself: <b>Config &rarr; Reset Pwd</b> (two taps), which restores the factory default so you can set a new one here.</div>
+<div class="row" style="gap:6px;margin-bottom:6px">
+<input type="password" id="wpNew" autocomplete="new-password" placeholder="New password (at least 8 characters)" style="flex:1;margin:0">
+<button class="btn btn-dark btn-sm" onclick="togPw('wpNew',this)" aria-label="Show password" title="Show/hide">&#128065;</button></div>
+<div class="row" style="gap:6px;margin-bottom:6px">
+<input type="password" id="wpNew2" autocomplete="new-password" placeholder="Repeat new password" style="flex:1;margin:0">
+<button class="btn btn-dark btn-sm" onclick="togPw('wpNew2',this)" aria-label="Show password" title="Show/hide">&#128065;</button></div>
 <button class="btn btn-blue btn-sm" onclick="saveWebPassword()" style="width:100%">Change Password</button>
 <div id="wpMsg" class="hint" style="margin-top:6px"></div>
 </div>
@@ -660,21 +667,43 @@ function saveWifi(){
   // browser history and in any proxy/server access log along the way. The
   // firmware reads query and form-encoded body params from the same map, so
   // the handler is unchanged.
+  // Parity with the captive portal, which renders an explicit error page for a
+  // refusal. This used to alert "Connecting..." on the .then() of ANY response,
+  // so a 400 (bad SSID) or the force-change 403 read as success and the
+  // operator went off waiting for a join that was never attempted.
   fetch('/api/v1/wifi/save',{method:'POST',
     headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)})
-  .then(()=>{alert('Connecting to the new network - no reboot. If it succeeds this page goes unreachable at the old address; the new IP is on the device screen (WiFi page). If it fails, AutoLee falls back to its setup network.')})}
+  .then(r=>{if(r.ok){alert('Connecting to the new network - no reboot. If it succeeds this page goes unreachable at the old address; the new IP is on the device screen (WiFi page). If it fails, AutoLee falls back to its setup network.')}
+    else{r.text().then(t=>alert('Not saved: '+(t||('HTTP '+r.status))))}})
+  .catch(()=>alert('Request failed - AutoLee did not answer.'))}
 function resetWifi(){
   if(!confirm('Clear saved WiFi credentials and switch to setup mode? This page will go unreachable.'))return;
   fetch('/api/v1/wifi/reset',{method:'POST'})
-  .then(()=>{alert('WiFi cleared - the AutoLee-Setup network is coming up now (key on the device screen).')})}
+  .then(r=>{if(r.ok){alert('WiFi cleared - the AutoLee-Setup network is coming up now (key on the device screen).')}
+    else{r.text().then(t=>alert('Not cleared: '+(t||('HTTP '+r.status))))}})
+  .catch(()=>alert('Request failed - AutoLee did not answer.'))}
+// Shared by both password boxes. The dashboard never had a reveal control at
+// all (the captive portal always did), which is a poor place to leave it when
+// the field it hides can lock you out of the machine.
+function togPw(id,b){
+  const e=document.getElementById(id),hidden=e.type==='password';
+  e.type=hidden?'text':'password';
+  b.innerHTML=hidden?'&#128584;':'&#128065;';
+  b.setAttribute('aria-label',hidden?'Hide password':'Show password')}
 function saveWebPassword(){
-  const p=document.getElementById('wpNew').value,m=document.getElementById('wpMsg');
+  const p=document.getElementById('wpNew').value,p2=document.getElementById('wpNew2').value,
+        m=document.getElementById('wpMsg');
   if(!p){m.textContent='Enter a new password.';m.style.color='#FF4444';return}
+  // Caught here as well as on the device: a typo in a masked box would
+  // otherwise be discovered only by being refused a login later.
+  if(p!==p2){m.textContent='The two passwords do not match.';m.style.color='#FF4444';return}
+  if(p.length<8){m.textContent='Password must be at least 8 characters.';m.style.color='#FF4444';return}
   fetch('/api/v1/system/web_password',{method:'POST',
     headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:'pass='+encodeURIComponent(p)})
-  .then(r=>{if(r.ok){document.getElementById('wpNew').value='';m.style.color='#00FF00';
+  .then(r=>{if(r.ok){document.getElementById('wpNew').value='';
+    document.getElementById('wpNew2').value='';m.style.color='#00FF00';
     m.textContent='Password changed. The browser will ask for it on your next action.'}
     else{m.style.color='#FF4444';r.text().then(t=>m.textContent='Failed: '+t)}})
   .catch(()=>{m.style.color='#FF4444';m.textContent='Request failed.'})}

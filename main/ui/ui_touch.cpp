@@ -19,6 +19,7 @@
 #include "motion.h"
 #include "motion_state.h"
 #include "wifi_mgr.h"
+#include "web_server.h"  // requestWebPasswordReset() - the "Reset Pwd" button
 
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
@@ -713,6 +714,66 @@ static void on_reset_cal(lv_event_t *e) {
   motion_cmd::requestResetSettings();
 }
 
+// ==========================================================================
+//  "Reset Pwd" - forgotten-password recovery, same two-tap confirm
+// ==========================================================================
+// The escape hatch for an operator locked out of the web UI. Lives here, on the
+// LCD, because pressing a button on the panel is the strongest proof of
+// physical presence the device has - stronger than the setup AP, whose key can
+// be read from across the room. See webPasswordResetTick() in web_server.cpp
+// for what it restores and why that is safe.
+static lv_obj_t *btn_reset_pwd = nullptr;
+static lv_timer_t *reset_pwd_timer = nullptr;  // non-null == armed
+
+static void reset_pwd_set_label(const char *txt, uint32_t color) {
+  if (!btn_reset_pwd) return;
+  lv_obj_t *lbl = lv_obj_get_child(btn_reset_pwd, 0);
+  if (lbl) lv_label_set_text(lbl, txt);
+  lv_obj_set_style_bg_color(btn_reset_pwd, lv_color_hex(color), LV_PART_MAIN);
+}
+
+static void reset_pwd_timeout_cb(lv_timer_t *t) {
+  LV_UNUSED(t);
+  reset_pwd_timer = nullptr;
+  reset_pwd_set_label("Reset Pwd", 0xB42318);
+}
+
+static void reset_pwd_disarm() {
+  if (reset_pwd_timer) {
+    lv_timer_del(reset_pwd_timer);
+    reset_pwd_timer = nullptr;
+  }
+  reset_pwd_set_label("Reset Pwd", 0xB42318);
+}
+
+static void on_reset_pwd(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  if (!reset_pwd_timer) {  // first tap: arm only
+    reset_pwd_set_label("Sure? Tap", 0xB4540A);
+    reset_pwd_timer = lv_timer_create(reset_pwd_timeout_cb, UI_CONFIRM_ARM_MS, nullptr);
+    if (reset_pwd_timer) lv_timer_set_repeat_count(reset_pwd_timer, 1);
+    return;
+  }
+  if (reset_pwd_timer) {
+    lv_timer_del(reset_pwd_timer);
+    reset_pwd_timer = nullptr;
+  }
+  // No optimistic "done" here - the label stays neutral until sse_task reports
+  // the NVS write actually landed (ui_web_password_reset_finished). Telling an
+  // operator their password is back to the default when the write failed would
+  // send them off to log in with a credential the device does not have.
+  reset_pwd_set_label("Resetting...", 0x2A2A2A);
+  requestWebPasswordReset();
+}
+
+// The reset itself is a one-shot: once it reports, leave the outcome on screen
+// until the operator navigates away (build_config_screen's Back disarms/clears).
+void ui_web_password_reset_finished(bool ok) {
+  if (!ui_lock("ui_web_password_reset_finished")) return;
+  reset_pwd_set_label(ok ? "Pwd = autolee" : "Reset FAILED", ok ? 0x1F6FEB : 0xB42318);
+  lvgl_port_unlock();
+}
+
 static void counter_timer_cb(lv_timer_t *t) {
   LV_UNUSED(t);
   const MotionState ms = motion_state::snapshot();
@@ -906,6 +967,9 @@ static void build_config_screen() {
   // normal operation: it discards the calibration + tuning. Two-tap confirm,
   // see on_reset_cal().
   btn_reset_cal = make_btn(cfgc, "Reset Cal", 140, 44, 0xB42318, &lv_font_montserrat_20);
+  // Alongside Reset Cal, for the same reason: destructive, rarely used, and the
+  // screen scrolls so it costs nothing above the fold. Two-tap confirm.
+  btn_reset_pwd = make_btn(cfgc, "Reset Pwd", 140, 44, 0xB42318, &lv_font_montserrat_20);
   lv_obj_t *b_back_cfg = make_btn(cfgn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_cfg, LV_ALIGN_CENTER, 0, 0);
 
@@ -928,11 +992,13 @@ static void build_config_screen() {
       },
       LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(btn_reset_cal, on_reset_cal, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(btn_reset_pwd, on_reset_pwd, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(
       b_back_cfg,
       [](lv_event_t *e) {
         LV_UNUSED(e);
         reset_cal_disarm();  // leaving the screen cancels a pending confirm
+        reset_pwd_disarm();  // and clears any lingering reset outcome
         go(settings_scr);
       },
       LV_EVENT_CLICKED, nullptr);
