@@ -49,6 +49,30 @@ void test_cannot_start_while_stalled() {
   TEST_ASSERT_TRUE(canStart(MotorState::Idle));
 }
 
+// Abort exists so a sensorless search - which blocks pump_task for tens of
+// seconds - can be stopped by the operator. It is deliberately narrow.
+void test_abort_ends_calibration_and_homing() {
+  TEST_ASSERT_TRUE(valid(MotorState::Calibrating, MotorEvent::Abort));
+  TEST_ASSERT_EQUAL(MotorState::Idle, next(MotorState::Calibrating, MotorEvent::Abort));
+  TEST_ASSERT_TRUE(valid(MotorState::Homing, MotorEvent::Abort));
+  TEST_ASSERT_EQUAL(MotorState::Idle, next(MotorState::Homing, MotorEvent::Abort));
+}
+
+// The two refusals that matter, and why:
+//  - Running: a run must decelerate through Stopping. An Abort that jumped
+//    straight to Idle would skip the deceleration the stop path exists to do.
+//  - Stalled: "you must home first" is the whole reason Stalled is a state. An
+//    Abort that cleared it would be a way around the jam-recovery rule.
+void test_abort_cannot_bypass_stopping_or_jam_recovery() {
+  TEST_ASSERT_FALSE(valid(MotorState::Running, MotorEvent::Abort));
+  TEST_ASSERT_EQUAL(MotorState::Running, next(MotorState::Running, MotorEvent::Abort));
+  TEST_ASSERT_FALSE(valid(MotorState::Stalled, MotorEvent::Abort));
+  TEST_ASSERT_EQUAL(MotorState::Stalled, next(MotorState::Stalled, MotorEvent::Abort));
+  // Nothing to abort in these two either.
+  TEST_ASSERT_FALSE(valid(MotorState::Idle, MotorEvent::Abort));
+  TEST_ASSERT_FALSE(valid(MotorState::Stopping, MotorEvent::Abort));
+}
+
 void test_invalid_events_are_ignored() {
   TEST_ASSERT_FALSE(valid(MotorState::Idle, MotorEvent::Jam));
   TEST_ASSERT_FALSE(valid(MotorState::Running, MotorEvent::Calibrate));
@@ -74,13 +98,15 @@ void test_all_invalid_transitions_ignored() {
       {MotorState::Stopping, MotorEvent::ReachedHome},
       {MotorState::Stopping, MotorEvent::StopTimeout},
       {MotorState::Calibrating, MotorEvent::CalibrationDone},
+      {MotorState::Calibrating, MotorEvent::Abort},
       {MotorState::Stalled, MotorEvent::ReturnHome},
       {MotorState::Homing, MotorEvent::HomeDone},
+      {MotorState::Homing, MotorEvent::Abort},
   };
   const MotorState states[] = {MotorState::Idle,        MotorState::Running, MotorState::Stopping,
                                MotorState::Calibrating, MotorState::Stalled, MotorState::Homing};
   for (MotorState s : states) {
-    for (uint8_t ei = 0; ei <= (uint8_t)MotorEvent::HomeDone; ei++) {
+    for (uint8_t ei = 0; ei <= (uint8_t)MotorEvent::Abort; ei++) {
       MotorEvent e = (MotorEvent)ei;
       bool isValid = false;
       for (const V &v : kValid) {
@@ -103,6 +129,8 @@ int main(int, char **) {
   RUN_TEST(test_return_home_from_idle);
   RUN_TEST(test_calibration_cycle);
   RUN_TEST(test_cannot_start_while_stalled);
+  RUN_TEST(test_abort_ends_calibration_and_homing);
+  RUN_TEST(test_abort_cannot_bypass_stopping_or_jam_recovery);
   RUN_TEST(test_invalid_events_are_ignored);
   RUN_TEST(test_all_invalid_transitions_ignored);
   return UNITY_END();

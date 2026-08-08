@@ -70,6 +70,13 @@ struct Sim {
 
   uint16_t sgStalled = 4;     // SG when the carriage is against a stop
   uint16_t sgBaseline = 120;  // SG while moving freely
+
+  // ---- operator cancel ----
+  // Stands in for motion_cmd's std::atomic abort flag (this harness is
+  // single-threaded, so a plain bool is the whole of it). Set it to simulate
+  // the operator tapping Cancel during a calibration or creep-home; motion.cpp
+  // polls it inside move_until_stall()'s loop and the abortable waits.
+  bool abortPending = false;
 };
 
 extern Sim sim;

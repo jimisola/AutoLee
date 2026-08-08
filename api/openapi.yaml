@@ -181,6 +181,37 @@ paths:
         "200": { $ref: "#/components/responses/Ok" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
+  /api/v1/motion/abort:
+    post:
+      summary: Cancel an in-progress calibration or creep-home
+      description: >
+        Stops a running sensorless search. Those searches own the motion task for
+        their whole duration - tens of seconds - so nothing queued can reach the
+        press while one is in progress; this is the one command that does not go
+        through that queue, and instead sets a flag the search loops poll
+        directly.
+
+        Idempotent, and a no-op when nothing is searching (the flag is cleared at
+        the start of the next calibration or home, so a stray request cannot
+        cancel a later one). It cannot start, stop or move anything by itself.
+
+        On abort the press returns to IDLE with the position reference marked
+        unconfirmed, since the axis stopped mid-search and nothing re-zeroed it -
+        a run stays refused until a Return Home or a fresh calibration. An
+        aborted calibration stores nothing at all, including when both hard stops
+        had already been found: the DOWN endpoint is only measured after the
+        final backoff, and a short DOWN would let the ram travel deeper than
+        intended.
+
+        Deliberately does NOT stop a run - use POST /api/v1/motion/toggle_run,
+        which decelerates through STOPPING - and does not clear a STALLED latch,
+        which must be resolved by homing.
+      tags: [Motion]
+      operationId: abortSearch
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
   /api/v1/motion/reset_counter:
     post:
       summary: Zero the piece counter

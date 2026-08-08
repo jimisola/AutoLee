@@ -85,6 +85,10 @@ extern lv_obj_t *btn_run_global;
 extern lv_obj_t *btn_calibrate;
 extern lv_obj_t *jam_scr;
 extern lv_obj_t *jam_status_lbl;
+// The jam screen's action button. File-scope because counter_timer_cb() flips
+// it between "Return Home" and "Cancel" as HOMING comes and goes, the same way
+// it drives btn_calibrate and btn_run_global.
+extern lv_obj_t *btn_jam_home;
 extern lv_obj_t *stall_scr;
 extern lv_obj_t *lbl_sg_val;
 extern lv_obj_t *batch_scr;

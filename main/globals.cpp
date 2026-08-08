@@ -41,6 +41,7 @@ lv_obj_t *btn_run_global = nullptr;
 lv_obj_t *btn_calibrate = nullptr;
 lv_obj_t *jam_scr = nullptr;
 lv_obj_t *jam_status_lbl = nullptr;
+lv_obj_t *btn_jam_home = nullptr;
 lv_obj_t *stall_scr = nullptr;
 lv_obj_t *lbl_sg_val = nullptr;
 lv_obj_t *batch_scr = nullptr;

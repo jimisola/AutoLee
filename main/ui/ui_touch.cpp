@@ -245,6 +245,16 @@ void ui_jam_recovery_finished(bool homed) {
 
 static void onJamReturnHome(lv_event_t *e) {
   LV_UNUSED(e);
+  // While the home is running, this button cancels it - same one-button pattern
+  // as Calibrate. safeCreepHome() is the same blocking sensorless search and was
+  // equally uninterruptible. Cancelling lands on IDLE with the axis
+  // unreferenced, so a run is still refused and Return Home is still offered:
+  // an abort is never a way past the jam recovery, only a way to stop the
+  // machine creeping while you look at it.
+  if (motion_state::snapshot().runState == HOMING) {
+    motion_cmd::requestAbort();
+    return;
+  }
   // Deferred to pump_task: safeCreepHome() drives the stepper + TMC SPI for
   // seconds. Running it here would block the LVGL task and race pump_task.
   motion_cmd::requestReturnHome();
@@ -646,6 +656,15 @@ static void on_go_ep_dn(lv_event_t *e) {
 static void on_calibrate(lv_event_t *e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
   LV_UNUSED(e);
+  // While a calibration is running this same button is the cancel. The label
+  // already says so (counter_timer_cb below), and a button that changes meaning
+  // with the state it displays beats a second button that is disabled 99% of
+  // the time on a 172x320 panel. A calibration blocks pump_task for tens of
+  // seconds, so before this there was no way to stop one at all.
+  if (motion_state::snapshot().runState == CALIBRATING) {
+    motion_cmd::requestAbort();
+    return;
+  }
   // Deferred to pump_task rather than blocking the LVGL task here.
   //
   // This also fixes the "Calibrating..." label never rendering: calibration
@@ -784,15 +803,28 @@ static void counter_timer_cb(lv_timer_t *t) {
     ui_update_batch_remain();
   }
   // Calibration runs on pump_task now, so the button reflects runState here
-  // instead of being driven inline by a blocking handler.
+  // instead of being driven inline by a blocking handler. It stays TAPPABLE
+  // while busy - that tap is the cancel (on_calibrate above); disabling it was
+  // what made an in-progress calibration a dead end.
   if (btn_calibrate) {
     lv_obj_t *lbl = lv_obj_get_child(btn_calibrate, 0);
-    bool busy = (ms.runState == CALIBRATING);
-    if (lbl) lv_label_set_text(lbl, busy ? "Calibrating..." : "Calibrate");
-    if (busy)
-      lv_obj_add_state(btn_calibrate, LV_STATE_DISABLED);
-    else
-      lv_obj_clear_state(btn_calibrate, LV_STATE_DISABLED);
+    const bool busy = (ms.runState == CALIBRATING);
+    if (lbl) lv_label_set_text(lbl, busy ? "Cancel Cal" : "Calibrate");
+    lv_obj_set_style_bg_color(btn_calibrate, lv_color_hex(busy ? 0xB42318 : 0x444444),
+                              LV_PART_MAIN);
+    lv_obj_clear_state(btn_calibrate, LV_STATE_DISABLED);
+  }
+  // Same one-button pattern on the jam screen: Return Home becomes the cancel
+  // for the home it started. Driven from here rather than from
+  // ui_jam_recovery_finished() so it also follows a home started from the main
+  // screen's stale-position banner, and so HOMING -> IDLE reverts it whatever
+  // ended the home.
+  if (btn_jam_home) {
+    lv_obj_t *jl = lv_obj_get_child(btn_jam_home, 0);
+    const bool homing = (ms.runState == HOMING);
+    if (jl) lv_label_set_text(jl, homing ? "Cancel" : "Return Home");
+    lv_obj_set_style_bg_color(btn_jam_home, lv_color_hex(homing ? 0xB42318 : 0x1F6FEB),
+                              LV_PART_MAIN);
   }
 }
 
@@ -1228,9 +1260,9 @@ static void build_jam_screen() {
   lv_obj_set_style_text_align(jam_status_lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_align(jam_status_lbl, LV_ALIGN_CENTER, 0, 20);
 
-  lv_obj_t *btn_home = make_btn(jn, "Return Home", 140, 44, 0x1F6FEB, &lv_font_montserrat_18);
-  lv_obj_align(btn_home, LV_ALIGN_CENTER, 0, 0);
-  lv_obj_add_event_cb(btn_home, onJamReturnHome, LV_EVENT_CLICKED, nullptr);
+  btn_jam_home = make_btn(jn, "Return Home", 140, 44, 0x1F6FEB, &lv_font_montserrat_18);
+  lv_obj_align(btn_jam_home, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_add_event_cb(btn_jam_home, onJamReturnHome, LV_EVENT_CLICKED, nullptr);
 }
 
 // Stall sensitivity screen
