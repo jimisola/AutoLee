@@ -5,7 +5,7 @@ name: Release
 # Previously this fired on `release: published` and did nothing but build. That
 # ordering was backwards in two ways. The release was public *before* the
 # firmware existed — so for the length of a cold ESP-IDF build there was a live
-# release advertising `AutoLee_vX.Y.Z_merged.bin` with no such file attached,
+# release advertising `autolee-X.Y.Z-factory.bin` with no such file attached,
 # and if the build failed the release stayed public and permanently empty, with
 # a tag already pushed. And nothing verified the artifacts at all: the version
 # in the filename came from the tag name, while the version actually *inside*
@@ -239,8 +239,8 @@ jobs:
             echo ""
             echo "Artifacts that will be attached:"
             echo ""
-            echo "- \`AutoLee_v${VERSION}_merged.bin\` — full flash image (fresh install, 4 MB)"
-            echo "- \`AutoLee_v${VERSION}_update.bin\` — app image only (OTA / re-flash)"
+            echo "- \`autolee-${VERSION}-factory.bin\` — full flash image (fresh install, 4 MB)"
+            echo "- \`autolee-${VERSION}-ota.bin\` — app image only (OTA / re-flash)"
             echo "- \`SHA256SUMS.txt\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -283,8 +283,8 @@ jobs:
     permissions:
       contents: write
     outputs:
-      merged_sha256: ${{ steps.build.outputs.merged_sha256 }}
-      update_sha256: ${{ steps.build.outputs.update_sha256 }}
+      factory_sha256: ${{ steps.build.outputs.factory_sha256 }}
+      ota_sha256: ${{ steps.build.outputs.ota_sha256 }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
         with:
@@ -343,25 +343,25 @@ jobs:
 
           # -o is relative to build/, not the project root: idf.py runs esptool
           # with the build dir as its cwd, so a "build/" prefix here would fail.
-          idf.py merge-bin -o "AutoLee_v${VERSION}_merged.bin" --pad-to-size 4MB
-          cp build/autolee.bin "build/AutoLee_v${VERSION}_update.bin"
+          idf.py merge-bin -o "autolee-${VERSION}-factory.bin" --pad-to-size 4MB
+          cp build/autolee.bin "build/autolee-${VERSION}-ota.bin"
 
-          # The merged image is assembled by a separate esptool pass, so check
+          # The factory image is assembled by a separate esptool pass, so check
           # it independently — a merge that picked up a stale build/autolee.bin
           # would otherwise ship a full-flash image disagreeing with the OTA one.
-          MERGED="$(python3 tools/app_desc.py "build/AutoLee_v${VERSION}_merged.bin" --scan --field version)"
-          if [ "$MERGED" != "$VERSION" ]; then
-            echo "::error::Merged image reports version '$MERGED', not '$VERSION' — refusing to release."
+          FACTORY="$(python3 tools/app_desc.py "build/autolee-${VERSION}-factory.bin" --scan --field version)"
+          if [ "$FACTORY" != "$VERSION" ]; then
+            echo "::error::Factory image reports version '$FACTORY', not '$VERSION' — refusing to release."
             exit 1
           fi
-          echo "Merged image reports $MERGED ✓"
+          echo "Factory image reports $FACTORY ✓"
 
           cd build
-          sha256sum "AutoLee_v${VERSION}_merged.bin" "AutoLee_v${VERSION}_update.bin" > SHA256SUMS.txt
+          sha256sum "autolee-${VERSION}-factory.bin" "autolee-${VERSION}-ota.bin" > SHA256SUMS.txt
           cat SHA256SUMS.txt
           {
-            echo "merged_sha256=$(sha256sum "AutoLee_v${VERSION}_merged.bin" | cut -d' ' -f1)"
-            echo "update_sha256=$(sha256sum "AutoLee_v${VERSION}_update.bin" | cut -d' ' -f1)"
+            echo "factory_sha256=$(sha256sum "autolee-${VERSION}-factory.bin" | cut -d' ' -f1)"
+            echo "ota_sha256=$(sha256sum "autolee-${VERSION}-ota.bin" | cut -d' ' -f1)"
           } >> "$GITHUB_OUTPUT"
 
       # persist-credentials: false means `origin` carries no auth; push to an
@@ -395,8 +395,8 @@ jobs:
             --title "$VERSION" \
             --notes-file NOTES.md \
             --prerelease \
-            "build/AutoLee_v${VERSION}_merged.bin" \
-            "build/AutoLee_v${VERSION}_update.bin" \
+            "build/autolee-${VERSION}-factory.bin" \
+            "build/autolee-${VERSION}-ota.bin" \
             build/SHA256SUMS.txt)
           echo "url=$URL" >> "$GITHUB_OUTPUT"
           {
@@ -436,8 +436,8 @@ jobs:
       - name: Verify checksums, sizes and embedded versions
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
-          MERGED_SHA256: ${{ needs.release.outputs.merged_sha256 }}
-          UPDATE_SHA256: ${{ needs.release.outputs.update_sha256 }}
+          FACTORY_SHA256: ${{ needs.release.outputs.factory_sha256 }}
+          OTA_SHA256: ${{ needs.release.outputs.ota_sha256 }}
         run: |
           set -euo pipefail
           cd dl
@@ -447,18 +447,18 @@ jobs:
 
           # ...and that the manifest itself describes what was built, not
           # whatever happened to be uploaded alongside it.
-          echo "${MERGED_SHA256}  AutoLee_v${VERSION}_merged.bin" | sha256sum -c -
-          echo "${UPDATE_SHA256}  AutoLee_v${VERSION}_update.bin" | sha256sum -c -
+          echo "${FACTORY_SHA256}  autolee-${VERSION}-factory.bin" | sha256sum -c -
+          echo "${OTA_SHA256}  autolee-${VERSION}-ota.bin" | sha256sum -c -
 
           # --pad-to-size 4MB, so anything else means the merge or the
           # upload was truncated.
-          SIZE="$(stat -c%s "AutoLee_v${VERSION}_merged.bin")"
+          SIZE="$(stat -c%s "autolee-${VERSION}-factory.bin")"
           if [ "$SIZE" -ne 4194304 ]; then
-            echo "::error::Merged image is $SIZE bytes, expected 4194304 (4 MB)."
+            echo "::error::Factory image is $SIZE bytes, expected 4194304 (4 MB)."
             exit 1
           fi
 
-          for f in "AutoLee_v${VERSION}_update.bin:" "AutoLee_v${VERSION}_merged.bin:--scan"; do
+          for f in "autolee-${VERSION}-ota.bin:" "autolee-${VERSION}-factory.bin:--scan"; do
             BIN="${f%%:*}"
             FLAGS="${f##*:}"
             # shellcheck disable=SC2086

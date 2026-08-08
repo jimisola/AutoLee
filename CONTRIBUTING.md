@@ -142,8 +142,10 @@ configurable.
   count (`v5.5`, then `v5.5.1`...`v5.5.5`) — a precedent this project already rejects on the digit
   count, so it isn't one to defer to on the prefix either. The **web UI adds a display-only `v`
   prefix when rendering** (`main/net/index_html.h`) — the underlying tag/version string never has
-  one; release artifact filenames also keep a literal `v` (`AutoLee_v2.0.0_merged.bin`) since a
-  filename is prose, not the version identifier.
+  one, and neither do release artifact filenames: they are
+  `autolee-<version>-factory.bin` / `autolee-<version>-ota.bin`, lowercase and
+  hyphenated, so the version in a filename is byte-identical to the tag and to what the firmware
+  reports, with nothing to add or strip when mapping between them.
 - There is therefore no source file to bump when releasing. **Don't tag by hand**, though: releases
   are cut by the **Release** workflow (Actions → Run workflow), which resolves the version from the
   Conventional Commits since the last tag (or validates one you pass explicitly), runs the full CI

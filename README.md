@@ -141,11 +141,11 @@ If you don't want to build the firmware yourself, you can flash a pre-built bina
 
 - A **Chrome** or **Edge** browser (Web Serial is not supported in Firefox or Safari)
 - A **USB-C cable** connected to the Waveshare ESP32-C6 board
-- The merged firmware `.bin` file from the latest [GitHub Release](https://github.com/jimisola/AutoLee/releases)
+- The factory firmware `.bin` file from the latest [GitHub Release](https://github.com/jimisola/AutoLee/releases)
 
 ### Steps
 
-1. Download the latest `AutoLee_<version>_merged.bin` from [GitHub Releases](https://github.com/jimisola/AutoLee/releases)
+1. Download the latest `autolee-<version>-factory.bin` from [GitHub Releases](https://github.com/jimisola/AutoLee/releases)
 2. Open the [**Espressif Web Flasher**](https://espressif.github.io/esptool-js/) in Chrome or Edge
 3. Click **Connect** and select the port for your ESP32-C6
 4. In the **Program** section, enter **`0x0`** in the Flash Address field
@@ -160,7 +160,7 @@ If you don't want to build the firmware yourself, you can flash a pre-built bina
 
 ### Updating Firmware Later
 
-Once AutoLee is on your WiFi, go to the web UI → **Firmware** page and drag-and-drop the **app-only** `.bin` file (not the merged binary). The merged binary is only needed for the initial USB flash.
+Once AutoLee is on your WiFi, go to the web UI → **Firmware** page and drag-and-drop `autolee-<version>-ota.bin` (not the factory binary). The factory binary is only needed for the initial USB flash — it also erases NVS, so it would wipe your calibration, WiFi credentials and web password.
 
 ### OTA Updates
 
