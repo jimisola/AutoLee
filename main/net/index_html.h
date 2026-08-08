@@ -379,7 +379,11 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <div class="sec">
 <h2>Lifetime Health</h2>
-<div class="sr"><span class="l">Cycle Count</span><span class="v" id="dgCycles">-</span></div>
+<!-- "Total Cycles", not "Cycle Count": this is health.cycleCount, the lifetime
+     stroke count, and it is deliberately NOT the piece counter on the Main page
+     (that one caps at 9999 and Reset Counter zeroes it). Two different numbers
+     both labelled "count" is what made the old reading look broken. -->
+<div class="sr"><span class="l">Total Cycles (lifetime)</span><span class="v" id="dgCycles">-</span></div>
 <div class="sr"><span class="l">Stall Count</span><span class="v" id="dgStalls">-</span></div>
 <div class="sr"><span class="l">Avg Cycle Time</span><span class="v" id="dgAvgCycle">-</span></div>
 <div class="sr"><span class="l">Longest Cycle</span><span class="v" id="dgLongestCycle">-</span></div>

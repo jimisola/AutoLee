@@ -55,8 +55,10 @@ Persisted capture() {
   for (uint8_t i = 0; i < NUM_PROFILES; i++) p.sgTrip[i] = ms.profiles[i].sg_trip;
   p.activeProfile = ms.activeProfile;
   p.endpointsCalibrated = ms.endpointsCalibrated ? 1 : 0;
-  // Lifetime health counters (v2). Diagnostics, but persisted for exactly the
-  // reason the calibration is: they are worthless if a reboot resets them.
+  // Lifetime health counters (v2, plus lifetimeCycles in v3). Diagnostics, but
+  // persisted for exactly the reason the calibration is: they are worthless if a
+  // reboot resets them.
+  p.lifetimeCycles = ms.lifetimeCycles;
   p.totalCycleTimeMs = ms.totalCycleTimeMs;
   p.longestCycleMs = ms.longestCycleMs;
   p.stallCount = ms.stallCount;
@@ -78,6 +80,7 @@ void apply(const Persisted &p) {
   for (uint8_t i = 0; i < NUM_PROFILES; i++) g_motion.profiles[i].sg_trip = p.sgTrip[i];
   g_motion.activeProfile = p.activeProfile;
   g_motion.endpointsCalibrated = p.endpointsCalibrated != 0;
+  g_motion.lifetimeCycles = p.lifetimeCycles;
   g_motion.totalCycleTimeMs = p.totalCycleTimeMs;
   g_motion.longestCycleMs = p.longestCycleMs;
   g_motion.stallCount = p.stallCount;
@@ -123,6 +126,7 @@ void applyCompiledDefaults() {
   // part of what a deliberate "reset to defaults" clears - the operator asked
   // for a factory-fresh device, and leaving stale jam/cycle statistics behind
   // would also desync the memcmp() dirty check against the blob just erased.
+  g_motion.lifetimeCycles = def.lifetimeCycles;
   g_motion.totalCycleTimeMs = def.totalCycleTimeMs;
   g_motion.longestCycleMs = def.longestCycleMs;
   g_motion.stallCount = def.stallCount;
@@ -261,9 +265,10 @@ void load() {
   }
   {
     const MotionState ms = motion_state::snapshot();
-    webLog("Settings", "Health (boots=%u stalls=%u cals=%u otas=%u cycle_ms=%lu max_ms=%lu)",
-           (unsigned)ms.resetCount, (unsigned)ms.stallCount, (unsigned)ms.calibrationCount,
-           (unsigned)ms.otaCount, (unsigned long)ms.totalCycleTimeMs,
+    webLog("Settings",
+           "Health (cycles=%lu boots=%u stalls=%u cals=%u otas=%u cycle_ms=%lu max_ms=%lu)",
+           (unsigned long)ms.lifetimeCycles, (unsigned)ms.resetCount, (unsigned)ms.stallCount,
+           (unsigned)ms.calibrationCount, (unsigned)ms.otaCount, (unsigned long)ms.totalCycleTimeMs,
            (unsigned long)ms.longestCycleMs);
   }
 
