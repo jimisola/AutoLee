@@ -34,6 +34,7 @@
 
 #include "state_json.h"
 #include "endpoint_math.h"  // autolee::clamp_i32
+#include "command_gate.h"   // autolee::gate*() - why a command is refused
 
 static const char *TAG = "web_server";
 static const char *kNvsNamespace = "autolee";
@@ -44,6 +45,99 @@ static PsychicHttpServer server;
 static PsychicEventSource events;
 static esp_ota_handle_t s_ota_handle = 0;
 static const esp_partition_t *s_ota_partition = nullptr;
+
+// ==========================================================================
+//  CONTROL-ROUTE VALIDATION AND REFUSAL REPORTING
+//
+//  Every motion route used to end in an unconditional
+//  `res->send(200, "text/plain", "ok")`, whatever it had actually done - a
+//  missing parameter, an unparseable one, a command the machine could not
+//  possibly carry out from its current state, all answered "ok". No caller
+//  could tell a honoured request from a dropped one, so nothing ever did.
+//
+//  Two distinct failures, two distinct codes:
+//    400 - the request itself is wrong (missing/unparseable/unknown parameter).
+//          Decidable here, always.
+//    409 - the request is well-formed but the machine is not in a state where
+//          it can be honoured. Decided from a MotionState snapshot via the
+//          host-tested predicates in lib/autolee_logic/command_gate.h.
+//
+//  The 409 check is advisory by construction: these commands are deferred to
+//  pump_task, which re-checks the same rule when it applies them and stays
+//  authoritative. State can change in between - a press can jam between the tap
+//  and the execution - so a "yes" here is never permission, only the absence of
+//  an already-known refusal. Nothing about the safety gating moves to the HTTP
+//  task; this only stops the caller being lied to.
+// ==========================================================================
+static esp_err_t sendJsonError(PsychicResponse *res, int code, const char *slug,
+                               const char *message) {
+  std::string body = "{\"error\":\"";
+  body += slug;
+  body += "\",\"message\":\"";
+  body += message;
+  body += "\"}";
+  return res->send(code, "application/json", body.c_str());
+}
+
+static esp_err_t sendBadParam(PsychicResponse *res, const char *message) {
+  return sendJsonError(res, 400, "bad_parameter", message);
+}
+
+static esp_err_t sendRefusal(PsychicResponse *res, autolee::Refusal r) {
+  return sendJsonError(res, 409, autolee::refusalSlug(r), autolee::refusalMessage(r));
+}
+
+// Strict decimal parse. atoi() was the old path and it cannot fail: "abc"
+// yields 0, which for /motion/current clamps to RUN_CURRENT_MIN and for
+// /motion/sg_trip is a request to switch jam detection off. A typo must be a
+// 400, not a silent setting change.
+static bool parseInt32(const std::string &s, int32_t &out) {
+  if (s.empty()) return false;
+  size_t i = 0;
+  bool neg = false;
+  if (s[0] == '+' || s[0] == '-') {
+    neg = (s[0] == '-');
+    i = 1;
+    if (s.size() == 1) return false;
+  }
+  int64_t v = 0;
+  for (; i < s.size(); i++) {
+    if (s[i] < '0' || s[i] > '9') return false;
+    v = v * 10 + (s[i] - '0');
+    if (v > 2147483647LL) return false;  // also caps the negative range at -2^31+1
+  }
+  out = (int32_t)(neg ? -v : v);
+  return true;
+}
+
+// Reads a required integer query parameter. On failure it has already sent the
+// 400 and the caller must return `err` untouched.
+static bool requireInt32(PsychicRequest *req, PsychicResponse *res, const char *name, int32_t &out,
+                         esp_err_t &err) {
+  if (!req->hasParam(name)) {
+    std::string m = std::string("missing required parameter '") + name + "'";
+    err = sendBadParam(res, m.c_str());
+    return false;
+  }
+  if (!parseInt32(req->getParam(name, ""), out)) {
+    std::string m = std::string("parameter '") + name + "' must be an integer";
+    err = sendBadParam(res, m.c_str());
+    return false;
+  }
+  return true;
+}
+
+// The gate's view of the machine, taken from a snapshot: this runs on the HTTP
+// task, which must never read g_motion directly (motion_state.h).
+static autolee::GateInput gateInput() {
+  const MotionState ms = motion_state::snapshot();
+  autolee::GateInput in;
+  in.state = toMotorState(ms.runState);
+  in.calibrated = ms.endpointsCalibrated;
+  in.positionStale = ms.positionReferenceStale;
+  in.batchTarget = ms.batchTarget;
+  return in;
+}
 
 // ==========================================================================
 //  WEB AUTHENTICATION (see config.h's WEB AUTHENTICATION block for the
@@ -1138,57 +1232,75 @@ void setupWebServer() {
             });
 
   server.on("/api/v1/motion/toggle_run", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    // Refuse here only what is already impossible; pump_task re-checks.
+    const autolee::Refusal r = autolee::gateToggleRun(gateInput());
+    if (r != autolee::Refusal::None) return sendRefusal(res, r);
     // Deferred to pump_task: touches the stepper, TMC5160 SPI and LVGL.
     motion_cmd::requestToggleRun();
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/motion/profile", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    if (req->hasParam("idx")) {
-      uint8_t idx = (uint8_t)atoi(req->getParam("idx", "0"));
-      // Deferred: setActiveProfile() drives the stepper and refreshes LVGL.
-      if (idx < NUM_PROFILES) motion_cmd::requestProfile(idx);
+    esp_err_t err;
+    int32_t idx;
+    if (!requireInt32(req, res, "idx", idx, err)) return err;
+    // An enum, not a range: clamping an out-of-range index would select a
+    // profile the caller did not ask for, at a different speed and StallGuard
+    // trip. Previously this answered 200 and did nothing.
+    if (idx < 0 || idx >= (int32_t)NUM_PROFILES) {
+      return sendBadParam(res, "idx must be 0, 1 or 2");
     }
+    // Deferred: setActiveProfile() drives the stepper and refreshes LVGL.
+    motion_cmd::requestProfile((uint8_t)idx);
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/motion/current", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    if (req->hasParam("ma")) {
-      // Deferred: rms_current() is an SPI write that would collide with
-      // pump_task's StallGuard reads on the shared display/TMC bus.
-      // Clamping happens at execution time.
-      motion_cmd::requestCurrentMa(atoi(req->getParam("ma", "0")));
+    esp_err_t err;
+    int32_t ma;
+    if (!requireInt32(req, res, "ma", ma, err)) return err;
+    // Out-of-range is still clamped at execution time, as it always was and as
+    // the touch UI does - but the value has to be a number. `atoi("abc")` was 0,
+    // which clamped to RUN_CURRENT_MIN: a typo quietly halved the motor current.
+    if (ma < RUN_CURRENT_MIN || ma > RUN_CURRENT_MAX) {
+      return sendBadParam(res, "ma is outside the supported range (1000-4500)");
     }
+    // Deferred: rms_current() is an SPI write that would collide with
+    // pump_task's StallGuard reads on the shared display/TMC bus.
+    motion_cmd::requestCurrentMa(ma);
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/motion/endpoint", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    if (req->hasParam("which") && req->hasParam("delta") &&
-        motion_state::snapshot().endpointsCalibrated) {
-      std::string w = req->getParam("which", "");
-      int32_t d = atoi(req->getParam("delta", "0"));
-      // Reject anything that isn't exactly "up" or "down". Falling through to
-      // the DOWN endpoint for every unrecognised value meant a typo'd or
-      // mis-cased parameter silently moved the wrong endpoint - and the DOWN
-      // endpoint is the one that determines how deep the ram travels.
-      if (w != "up" && w != "down") {
-        return res->send(400, "application/json",
-                         "{\"error\":\"bad_parameter\",\"message\":\"which must be "
-                         "'up' or 'down'\"}");
-      }
-      {
-        // Read-modify-write of state pump_task also reads - must be guarded.
-        motion_state::Guard g;
-        if (w == "up")
-          g_motion.upOffsetSteps =
-              autolee::clamp_i32(g_motion.upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
-        else
-          g_motion.downOffsetSteps =
-              autolee::clamp_i32(g_motion.downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
-      }
-      recomputeEffectiveEndpoints();   // pure math (takes the guard itself)
-      motion_cmd::requestUiRefresh();  // LVGL label update deferred to pump_task
+    if (!req->hasParam("which")) return sendBadParam(res, "missing required parameter 'which'");
+    const std::string w = req->getParam("which", "");
+    // Reject anything that isn't exactly "up" or "down". Falling through to
+    // the DOWN endpoint for every unrecognised value meant a typo'd or
+    // mis-cased parameter silently moved the wrong endpoint - and the DOWN
+    // endpoint is the one that determines how deep the ram travels.
+    if (w != "up" && w != "down") return sendBadParam(res, "which must be 'up' or 'down'");
+
+    esp_err_t err;
+    int32_t d;
+    if (!requireInt32(req, res, "delta", d, err)) return err;
+
+    // Offsets are relative to endpoints that do not exist yet on an
+    // uncalibrated press, so this was already a no-op - it just said "ok".
+    if (!motion_state::snapshot().endpointsCalibrated) {
+      return sendRefusal(res, autolee::Refusal::NotCalibrated);
     }
+    {
+      // Read-modify-write of state pump_task also reads - must be guarded.
+      motion_state::Guard g;
+      if (w == "up")
+        g_motion.upOffsetSteps =
+            autolee::clamp_i32(g_motion.upOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
+      else
+        g_motion.downOffsetSteps =
+            autolee::clamp_i32(g_motion.downOffsetSteps + d, OFFSET_MIN, OFFSET_MAX);
+    }
+    recomputeEffectiveEndpoints();   // pure math (takes the guard itself)
+    motion_cmd::requestUiRefresh();  // LVGL label update deferred to pump_task
     return res->send(200, "text/plain", "ok");
   });
 
@@ -1196,72 +1308,111 @@ void setupWebServer() {
     const MotionState ms = motion_state::snapshot();
     uint8_t tgt = ms.activeProfile;
     if (req->hasParam("profile")) {
-      uint8_t p = (uint8_t)atoi(req->getParam("profile", "0"));
-      if (p < NUM_PROFILES) tgt = p;
+      int32_t p;
+      esp_err_t err;
+      if (!requireInt32(req, res, "profile", p, err)) return err;
+      // Was silently ignored, leaving the trip applied to the *active* profile
+      // instead - a request aimed at Slow could land on Fast.
+      if (p < 0 || p >= (int32_t)NUM_PROFILES)
+        return sendBadParam(res, "profile must be 0, 1 or 2");
+      tgt = (uint8_t)p;
     }
-    if (req->hasParam("value")) {
-      int32_t v = atoi(req->getParam("value", "0"));
-      if (v < RUN_SG_TRIP_MIN) v = RUN_SG_TRIP_MIN;
-      if (v > RUN_SG_TRIP_MAX) v = RUN_SG_TRIP_MAX;
-      {
-        motion_state::Guard g;
-        g_motion.profiles[tgt].sg_trip = (uint16_t)v;
-      }
-      motion_cmd::requestUiRefresh();
-    } else if (req->hasParam("delta")) {
-      int32_t v = (int32_t)ms.profiles[tgt].sg_trip + atoi(req->getParam("delta", "0"));
-      if (v < RUN_SG_TRIP_MIN) v = RUN_SG_TRIP_MIN;
-      if (v > RUN_SG_TRIP_MAX) v = RUN_SG_TRIP_MAX;
-      {
-        motion_state::Guard g;
-        g_motion.profiles[tgt].sg_trip = (uint16_t)v;
-      }
-      motion_cmd::requestUiRefresh();
+
+    const bool hasValue = req->hasParam("value"), hasDelta = req->hasParam("delta");
+    if (hasValue == hasDelta) {
+      // Both was previously "value wins, delta ignored"; neither was a 200 that
+      // did nothing at all.
+      return sendBadParam(res, "supply exactly one of 'value' or 'delta'");
     }
+
+    esp_err_t err;
+    int32_t v;
+    if (hasValue) {
+      if (!requireInt32(req, res, "value", v, err)) return err;
+      // Range is enforced rather than clamped: sg_trip is the jam-detection
+      // threshold and 0 switches detection off entirely, so a request that
+      // clamped down to 0 would be a silent safety change. A deliberate 0 is
+      // still accepted - it is inside the range.
+      if (v < RUN_SG_TRIP_MIN || v > RUN_SG_TRIP_MAX) {
+        return sendBadParam(res, "value is outside the supported range (0-500)");
+      }
+    } else {
+      int32_t d;
+      if (!requireInt32(req, res, "delta", d, err)) return err;
+      // A delta is an adjustment, so saturating at the ends is the intended
+      // behaviour here (it is what the +/- buttons on both UIs rely on).
+      v = autolee::clamp_i32((int32_t)ms.profiles[tgt].sg_trip + d, RUN_SG_TRIP_MIN,
+                             RUN_SG_TRIP_MAX);
+    }
+    {
+      motion_state::Guard g;
+      g_motion.profiles[tgt].sg_trip = (uint16_t)v;
+    }
+    motion_cmd::requestUiRefresh();
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/motion/work_zone", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    if (req->hasParam("delta")) {
-      const int32_t d = atoi(req->getParam("delta", "0"));
-      {
-        motion_state::Guard g;
-        int32_t v = g_motion.sgWorkZoneSteps + d;
-        if (v < SG_WORK_ZONE_MIN) v = SG_WORK_ZONE_MIN;
-        if (v > SG_WORK_ZONE_MAX) v = SG_WORK_ZONE_MAX;
-        g_motion.sgWorkZoneSteps = v;
-      }
-      motion_cmd::requestUiRefresh();
+    esp_err_t err;
+    int32_t d;
+    if (!requireInt32(req, res, "delta", d, err)) return err;
+    {
+      motion_state::Guard g;
+      g_motion.sgWorkZoneSteps =
+          autolee::clamp_i32(g_motion.sgWorkZoneSteps + d, SG_WORK_ZONE_MIN, SG_WORK_ZONE_MAX);
     }
+    motion_cmd::requestUiRefresh();
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/motion/batch", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
-    if (req->hasParam("delta")) {
-      const int32_t d = atoi(req->getParam("delta", "0"));
+    const bool hasDelta = req->hasParam("delta"), hasAction = req->hasParam("action");
+    if (!hasDelta && !hasAction) return sendBadParam(res, "supply 'delta' and/or 'action'");
+
+    // Validate both before applying either: a request carrying a good delta and
+    // a bad action must not half-happen and then report a 400.
+    int32_t d = 0;
+    std::string a;
+    if (hasDelta) {
+      esp_err_t err;
+      if (!requireInt32(req, res, "delta", d, err)) return err;
+    }
+    if (hasAction) {
+      a = req->getParam("action", "");
+      if (a != "start" && a != "clear")
+        return sendBadParam(res, "action must be 'start' or 'clear'");
+      // Checked against the target this request is about to set, not the one
+      // currently stored - otherwise "?delta=50&action=start" on a fresh press
+      // would be refused for having no target it is in the middle of giving it.
+      if (a == "start") {
+        autolee::GateInput in = gateInput();
+        if (hasDelta) {
+          in.batchTarget = autolee::clamp_i32(in.batchTarget + d, 0, BATCH_TARGET_MAX);
+        }
+        const autolee::Refusal r = autolee::gateBatchStart(in);
+        if (r != autolee::Refusal::None) return sendRefusal(res, r);
+      }
+    }
+
+    if (hasDelta) {
+      motion_state::Guard g;
+      g_motion.batchTarget = autolee::clamp_i32(g_motion.batchTarget + d, 0, BATCH_TARGET_MAX);
+    }
+    if (hasDelta && !hasAction) motion_cmd::requestUiRefresh();
+
+    if (a == "start") {
+      // Deferred: startRunBetweenEndpoints() drives the stepper + TMC SPI.
+      // Validity (target set, IDLE, calibrated, referenced) is re-checked there.
+      motion_cmd::requestBatchStart();
+    } else if (a == "clear") {
       {
+        // One guard: readers must never see target/count/active disagree.
         motion_state::Guard g;
-        int32_t v = g_motion.batchTarget + d;
-        g_motion.batchTarget = (v < 0) ? 0 : (v > BATCH_TARGET_MAX ? BATCH_TARGET_MAX : v);
+        g_motion.batchTarget = 0;
+        g_motion.batchCount = 0;
+        g_motion.batchActive = false;
       }
       motion_cmd::requestUiRefresh();
-    }
-    if (req->hasParam("action")) {
-      std::string a = req->getParam("action", "");
-      if (a == "start") {
-        // Deferred: startRunBetweenEndpoints() drives the stepper + TMC SPI.
-        // Validity (target set, IDLE, calibrated) is re-checked at execution.
-        motion_cmd::requestBatchStart();
-      } else if (a == "clear") {
-        {
-          // One guard: readers must never see target/count/active disagree.
-          motion_state::Guard g;
-          g_motion.batchTarget = 0;
-          g_motion.batchCount = 0;
-          g_motion.batchActive = false;
-        }
-        motion_cmd::requestUiRefresh();
-      }
     }
     return res->send(200, "text/plain", "ok");
   });
@@ -1271,11 +1422,15 @@ void setupWebServer() {
   // into nested paths - same underlying motion_cmd calls, one route each, no
   // query parameter.
   server.on("/api/v1/motion/calibrate", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    const autolee::Refusal r = autolee::gateCalibrate(gateInput());
+    if (r != autolee::Refusal::None) return sendRefusal(res, r);
     motion_cmd::requestCalibrate();
     return res->send(200, "text/plain", "ok");
   });
 
   server.on("/api/v1/motion/return_home", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    const autolee::Refusal r = autolee::gateReturnHome(gateInput());
+    if (r != autolee::Refusal::None) return sendRefusal(res, r);
     motion_cmd::requestReturnHome();
     return res->send(200, "text/plain", "ok");
   });
@@ -1304,9 +1459,12 @@ void setupWebServer() {
   // and reverts it to compiled defaults - "delete the customized settings",
   // not an action verb, so the HTTP method carries that meaning directly.
   server.on("/api/v1/settings", HTTP_DELETE, [](PsychicRequest *req, PsychicResponse *res) {
+    // Gated on IDLE at execution time (motion_cmd.cpp) and pre-checked here, so
+    // a reset asked for mid-run is reported instead of vanishing.
+    const autolee::Refusal r = autolee::gateResetSettings(gateInput());
+    if (r != autolee::Refusal::None) return sendRefusal(res, r);
     // Deferred: erases the calibration/tuning NVS blob and re-programs the
-    // TMC5160 over the display's SPI bus - pump_task work, not HTTP-task
-    // work. Gated on IDLE at execution time (motion_cmd.cpp), not here.
+    // TMC5160 over the display's SPI bus - pump_task work, not HTTP-task work.
     motion_cmd::requestResetSettings();
     return res->send(200, "text/plain", "ok");
   });

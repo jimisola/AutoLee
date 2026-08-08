@@ -60,8 +60,14 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 .nav-footer a.active{color:var(--green)}
 .back-link{display:inline-block;color:var(--accent);font-size:.85em;font-weight:600;cursor:pointer;margin-bottom:12px;text-decoration:none}
 .back-link:hover{opacity:.7}
+/* Refusal toast. Fixed to the viewport, not the page: the control that was
+   refused may be anywhere on a long page, and the message has to be seen. */
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);width:max-content;max-width:min(92vw,420px);background:#42160f;border:1px solid #7a2b1d;color:#ffd9d2;padding:10px 14px;border-radius:10px;font-size:.85em;font-weight:600;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20}
+#toast.on{opacity:1}
 </style></head><body>
 <div class="wrap">
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <h1>AutoLee</h1>
 <div class="sub">by K.L Design · <span id="ver"></span></div>
@@ -505,7 +511,7 @@ function setLogFilter(lvl){
 function clearLog(){
   logLines=[];
   renderLog();
-  fetch('/api/v1/system/logs',{method:'DELETE'});
+  ctl('/api/v1/system/logs',{method:'DELETE'});
 }
 
 function loadWifiScan(){
@@ -533,7 +539,7 @@ function loadServerLogLevel(){
   }).catch(()=>{});
 }
 function setServerLogLevel(level){
-  fetch('/api/v1/system/log_level?level='+level,{method:'PUT'}).then(loadServerLogLevel).catch(()=>{});
+  ctl('/api/v1/system/log_level?level='+level,{method:'PUT'}).then(loadServerLogLevel);
 }
 
 function showPage(id){
@@ -726,7 +732,38 @@ function upd(d){
   }else{['ru','rd','rt','eu','ed'].forEach(i=>document.getElementById(i).textContent='-')}
 }
 
-function toggleRun(){fetch('/api/v1/motion/toggle_run',{method:'POST'})}
+// ---- control POSTs --------------------------------------------------------
+// Every control action goes through ctl(). The endpoints answer 400 with
+// {error,message} for a malformed request and 409 for one the press cannot
+// carry out from its current state (not calibrated, position unreferenced,
+// wrong run state, no batch target); 403 is the factory-password gate. None of
+// that used to reach the operator: these were bare fire-and-forget fetches with
+// no .then and no .catch, and every route answered 200 regardless, so a refused
+// command and an honoured one looked exactly the same - nothing moved, nothing
+// said why.
+//
+// Resolves to true/false and never rejects, so callers can branch without
+// needing their own error handling.
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.classList.add('on');
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>t.classList.remove('on'),5000);
+}
+function ctl(url,opts){
+  return fetch(url,Object.assign({method:'POST'},opts||{})).then(r=>{
+    if(r.ok)return true;
+    return r.text().then(t=>{
+      let m='';
+      try{const j=JSON.parse(t);if(j&&j.message)m=j.message}catch(x){}
+      toast(m||t||('HTTP '+r.status));
+      return false;
+    });
+  }).catch(()=>{toast('AutoLee did not answer.');return false});
+}
+function toggleRun(){ctl('/api/v1/motion/toggle_run')}
 function setSg(p){
   const inp=document.getElementById('sgIn'+p);
   const raw=inp.value.trim();
@@ -747,11 +784,14 @@ function setSg(p){
   // blur fires whether or not anything was edited. Don't spend a request - and a
   // log line - re-sending the value the firmware already holds.
   if(v===sgLast[p])return;
-  fetch('/api/v1/motion/sg_trip?profile='+p+'&value='+v,{method:'POST'})}
-function setWz(d){fetch('/api/v1/motion/work_zone?delta='+d,{method:'POST'})}
-function setBatch(d){fetch('/api/v1/motion/batch?delta='+d,{method:'POST'})}
-function doBatch(a){fetch('/api/v1/motion/batch?action='+a,{method:'POST'})}
-function setProfile(i){fetch('/api/v1/motion/profile?idx='+i,{method:'POST'})}
+  // On refusal put the box back to what the device still holds, so the field
+  // never shows a value that was not applied.
+  ctl('/api/v1/motion/sg_trip?profile='+p+'&value='+v).then(ok=>{
+    if(!ok&&sgLast[p]!==undefined)inp.value=sgLast[p]})}
+function setWz(d){ctl('/api/v1/motion/work_zone?delta='+d)}
+function setBatch(d){ctl('/api/v1/motion/batch?delta='+d)}
+function doBatch(a){ctl('/api/v1/motion/batch?action='+a)}
+function setProfile(i){ctl('/api/v1/motion/profile?idx='+i)}
 // Split so a drag costs one request instead of ~35. The slider is bound to
 // showCurrent() on oninput (fires continuously while dragging) and setCurrent()
 // on onchange (once, on release). Each committed value is a POST that ends in an
@@ -759,17 +799,18 @@ function setProfile(i){fetch('/api/v1/motion/profile?idx='+i,{method:'POST'})}
 // display, so firing them per pixel was both pointless traffic and pointless
 // contention.
 function showCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none'}
-function setCurrent(v){showCurrent(v);fetch('/api/v1/motion/current?ma='+v,{method:'POST'})}
-function adj(w,d){fetch('/api/v1/motion/endpoint?which='+w+'&delta='+d,{method:'POST'})}
-function doAct(p){fetch(p,{method:'POST'})}
+function setCurrent(v){showCurrent(v);ctl('/api/v1/motion/current?ma='+v)}
+function adj(w,d){ctl('/api/v1/motion/endpoint?which='+w+'&delta='+d)}
+function doAct(p){ctl(p)}
 // One button, two meanings, decided by the state the label already reflects -
-// rather than a second button that is disabled most of the time.
+// rather than a second button that is disabled most of the time. doAct() is
+// ctl()-based, so the abort inherits the refusal reporting for free.
 function jamAction(){
   doAct(document.getElementById('bh').textContent==='Cancel'
         ?'/api/v1/motion/abort':'/api/v1/motion/return_home')}
 function resetSettings(){
   if(!confirm('Discard the stored calibration and all tuning, and restore factory defaults?\n\nThe press will be UNCALIBRATED and must be recalibrated before it can run. WiFi and the web password are not affected.'))return;
-  fetch('/api/v1/settings',{method:'DELETE'})}
+  ctl('/api/v1/settings',{method:'DELETE'})}
 function saveWifi(){
   const s=document.getElementById('ns').value,p=document.getElementById('np').value;
   if(!s){alert('SSID required');return}
