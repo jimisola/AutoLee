@@ -291,10 +291,13 @@ void handleMotion() {
             // forever once the lifetime counter saturates. (Fixed upstream in
             // Karl's v1.10.0; this port inherited the v1.8 bug.)
             if (g_motion.counter < COUNTER_MAX) g_motion.counter++;
-            // Lifetime cycle-time statistics (diagnostics only - nothing in the
-            // motion logic reads them). Unlike `counter` these are NOT capped
-            // by COUNTER_MAX: the display cap is cosmetic and would silently
-            // freeze the averages once it saturated.
+            // Lifetime statistics (diagnostics only - nothing in the motion
+            // logic reads them). Unlike `counter` these are NOT capped by
+            // COUNTER_MAX and are never zeroed by Reset Counter: the display cap
+            // and the reset are both properties of the operator-facing counter,
+            // and letting either reach the lifetime figures is what made the
+            // health block's mean stroke time drift.
+            g_motion.lifetimeCycles++;
             g_motion.totalCycleTimeMs += strokeMs;
             if (strokeMs > g_motion.longestCycleMs) g_motion.longestCycleMs = strokeMs;
             if (g_motion.batchActive) {
