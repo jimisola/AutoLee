@@ -135,6 +135,20 @@ built afterwards: for the length of a cold ESP-IDF build, a live release
 advertised binaries that did not exist, and a failed build left it public and
 permanently empty.
 
+## Before you run it: the API specs
+
+`api/openapi.yaml` and `api/asyncapi.yaml` carry `info.version`, and it is the
+**firmware release version**, not a separately-evolving document version. They
+are the only hand-maintained version strings in the repo — everything else is
+derived from the git tag (see "What the version assertion is for" below).
+
+So: bump both to the version you are about to release, in the PR that makes the
+last API-affecting change, *before* the release runs. Nothing enforces this yet
+— the workflow asserts the firmware binaries match the tag, but it does not look
+at the specs, so a stale `info.version` ships quietly and points whoever reads
+it at the wrong contract. If that turns out to bite, the fix is a one-line CI
+check comparing `info.version` against the resolved release version.
+
 ## What the version assertion is for
 
 There is no version constant in the source. `esp_app_desc_t.version` comes from

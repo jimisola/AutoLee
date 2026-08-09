@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: AutoLee HTTP API
-  version: "1.0"
+  version: "2.0.0"
   description: >
     REST control surface served by the AutoLee firmware's on-device web server.
     All mutating endpoints are POST; the canonical device state is returned by
@@ -16,10 +16,15 @@ info:
     `no_batch_target`). Up to and including firmware 1.0.1 these routes answered
     200 to everything, including requests they dropped on the floor; a client
     written against those builds that only checked for a 2xx will start seeing
-    failures it was previously blind to, which is the point. (`info.version`
-    above tracks the shape of this document, not the firmware - consumers should
-    key off the firmware release tag, which `GET /api/v1/state` reports as
-    `version`.) 200 on a deferred motion command means "queued and not already
+    failures it was previously blind to, which is the point.
+
+    Versioning: `info.version` above is the **firmware release** this document
+    describes, not a separately-evolving document version - the two are kept
+    equal deliberately, so "which spec matches the box on my bench" needs no
+    lookup table. `GET /api/v1/state` reports the same string as `version`
+    (derived from the git tag; see CONTRIBUTING.md). It is the one
+    hand-maintained version string in the repo, and RELEASING.md carries the
+    step that keeps it honest. 200 on a deferred motion command means "queued and not already
     refusable", never "done" - the motion task re-checks and stays
     authoritative, so watch `GET /api/v1/state` for the effect.
 
