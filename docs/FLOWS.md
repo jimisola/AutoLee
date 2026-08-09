@@ -77,6 +77,11 @@ Both evaluations call the same pure predicates in
 [`lib/autolee_logic/command_gate.h`](../lib/autolee_logic/command_gate.h), so the
 rule lives in one host-tested place rather than being written out twice.
 
+`motion_cmd.cpp` keeps a single `canStart()` call, and it is deliberately not a
+gate: `gateToggleRun()` has already allowed the command by that point, and the
+call only asks which of the button's two meanings the tap had. It uses the same
+predicate the gate used to make that decision, so the two cannot disagree.
+
 **What a `200` means here:** *accepted into the queue, and not already
 refusable.* It is not "done". Watch `GET /api/v1/state` — or the SSE stream — for
 the effect, and the log for a late refusal.

@@ -230,19 +230,20 @@ runs `motorTransition()` inside the same `motion_state::Guard` as the other
 fields going live with the state change — the table is a pure switch, so it is
 safe in that critical section. A rejected event leaves the state untouched and
 makes the entry point a logged no-op *before* it drives the TMC or the stepper.
-`main/motion/motion_cmd.cpp`'s command gates ask the same table (`canStart()` /
-`motionEventAllowed()`) rather than re-hardcoding which states each command is
-legal from, so "cannot Start from Stalled" is enforced by the tested code, in one
-place.
 
 The table is not the whole gate, though. A `Start` is also refused when the press
 was never calibrated, or when a restored calibration has left the axis
 unreferenced, and a batch `Start` is refused with no target set — none of which
-the FSM knows about. Those rules live in
-[`lib/autolee_logic/command_gate.h`](../lib/autolee_logic/command_gate.h), as
-pure functions of a `MotionState` snapshot, so the HTTP layer can consult them to
-answer a caller **and** `pump_task` can re-evaluate them when it actually applies
-the command. The second evaluation stays authoritative: state can change in
+the FSM knows about. Those extra rules, and the FSM lookups themselves, live
+together in
+[`lib/autolee_logic/command_gate.h`](../lib/autolee_logic/command_gate.h) as pure
+functions of a `MotionState` snapshot.
+
+Both callers use it: the HTTP layer (`main/net/web_server.cpp`) to answer a
+caller synchronously, and `pump_task` (`main/motion/motion_cmd.cpp`) when it
+actually applies the command. Neither re-hardcodes which states a command is
+legal from, so "cannot Start from Stalled" is enforced by tested code in exactly
+one place. The second evaluation stays authoritative: state can change in
 between, so the first is only ever the absence of an already-known refusal, never
 permission. [FLOWS.md §1](FLOWS.md#1-a-control-command-end-to-end) walks the whole
 path, including which failures become `400` and which become `409`.

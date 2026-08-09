@@ -139,6 +139,9 @@ void processPendingCommands() {
     const autolee::Refusal r = autolee::gateToggleRun(in);
     if (r != autolee::Refusal::None) {
       logRefusal("Motion", "Run/stop", r);
+      // NOT a gate - gateToggleRun() has already allowed this. canStart() is
+      // only asking which of the two meanings the tap had, and it is the same
+      // predicate the gate used to decide that, so the two cannot disagree.
     } else if (autolee::canStart(in.state)) {
       startRunBetweenEndpoints();
       ui_update_run_button();
