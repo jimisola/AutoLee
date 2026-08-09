@@ -10,6 +10,7 @@
 // ============================================================================
 #include "motion.h"
 #include "globals.h"
+#include "motion_cmd.h"  // abortRequested()/clearAbort() - the operator cancel flag
 #include "motion_state.h"
 #include "stepper.h"
 #include "tmc5160_ctrl.h"
@@ -117,9 +118,24 @@ uint16_t read_sg() {
 // that. On timeout it escalates to forceStop() and gives the move a short
 // grace period; if even that doesn't clear, it gives up and returns false so
 // the caller can treat the axis as untrustworthy.
-static bool fas_wait_for_stop() {
+// `abortable`: also poll the operator's cancel flag and force-stop if it is
+// set. Only the positioning moves inside calibration/homing pass true - never
+// the waits that ARE a stop, where honouring an abort would mean abandoning the
+// wait for the axis to actually come to rest. Once an abort has been honoured
+// the wait continues non-abortably, so this function still only returns with the
+// stepper stopped (or after the same escalation as before). Callers tell an
+// abort apart from a normal finish by asking motion_cmd::abortRequested().
+static bool fas_wait_for_stop(bool abortable = false) {
   const uint32_t start = millis();
   while (stepper::isRunning()) {
+    if (abortable && motion_cmd::abortRequested()) {
+      webLogLevel(LogLevel::Warn, "Motion", "Abort requested - stopping move");
+      stepper::forceStop();
+      // Same total timeout budget from here on: an abort must not become a way
+      // to wait forever on a wedged move.
+      abortable = false;
+      continue;
+    }
     if ((millis() - start) > MOVE_WAIT_TIMEOUT_MS) {
       webLogLevel(LogLevel::Error, "Motion", "Move did not stop within %lums - forcing stop",
                   (unsigned long)MOVE_WAIT_TIMEOUT_MS);
@@ -461,7 +477,14 @@ void handleMotion() {
 // Safe creep home: slow sensorless move toward UP until mechanical stop, then
 // back off and re-establish position. Uses the same move_until_stall() as
 // calibration.
-static bool move_until_stall(int dir, long &hit_pos);
+// Three outcomes, not two: a search that the operator cancelled is neither a
+// found stop nor a failed search, and the caller has to unwind differently.
+enum class SearchOutcome : uint8_t {
+  Found,     // hard stop located and confirmed; hit_pos is meaningful
+  NotFound,  // ran the full search distance without a stall
+  Aborted,   // operator cancelled; the axis stopped wherever it was
+};
+static SearchOutcome move_until_stall(int dir, long &hit_pos);
 
 void safeCreepHome() {
   bool homing;
@@ -479,6 +502,10 @@ void safeCreepHome() {
     return;
   }
 
+  // Any abort left over from an earlier search must not cancel this one before
+  // it has moved: the flag is set by another task and is only consumed here.
+  motion_cmd::clearAbort();
+
   tmc5160::rms_current(CAL_CURRENT_MA);
   stepper::setSpeedInHz(CAL_SPEED_HZ);
   stepper::setAcceleration(CAL_ACCEL);
@@ -487,13 +514,15 @@ void safeCreepHome() {
          (unsigned long)CAL_SPEED_HZ);
 
   long hit_pos = 0;
-  bool found = move_until_stall(-1, hit_pos);  // -1 = toward UP
+  const SearchOutcome outcome = move_until_stall(-1, hit_pos);  // -1 = toward UP
+  const bool found = (outcome == SearchOutcome::Found);
+  const bool aborted = (outcome == SearchOutcome::Aborted);
 
   if (found) {
     webLog("Motion", "Creep home: found stop at %ld", hit_pos);
 
     stepper::move(+CAL_OVERSHOOT_BACKOFF_STEPS);
-    fas_wait_for_stop();
+    fas_wait_for_stop(true);
 
     stepper::setCurrentPosition(0);
     {
@@ -504,10 +533,19 @@ void safeCreepHome() {
     recomputeEffectiveEndpoints();
 
     stepper::moveTo(g_motion.endpointUp);
-    fas_wait_for_stop();
+    fas_wait_for_stop(true);
+  } else if (aborted) {
+    webLogLevel(LogLevel::Warn, "Motion", "Creep home: aborted by operator");
   } else {
     webLogLevel(LogLevel::Error, "Motion", "Creep home: FAILED to find stop!");
   }
+
+  // An abort during one of the two positioning moves above happens AFTER the
+  // stop was found and the axis re-zeroed, so re-read the flag rather than
+  // trusting `aborted`: either way the carriage is no longer where the re-zero
+  // put it, and the reference has to be treated as lost.
+  const bool abortedAnywhere = aborted || motion_cmd::abortRequested();
+  motion_cmd::clearAbort();
 
   tmc5160::rms_current(g_motion.runCurrentMa);
   stepper::setSpeedInHz(ui_speed_hz);
@@ -515,13 +553,18 @@ void safeCreepHome() {
 
   {
     motion_state::Guard g;
-    applyMotorEventLocked(autolee::MotorEvent::HomeDone);  // HOMING -> IDLE
+    // Abort is its own transition (motor_fsm.h) rather than a quiet HomeDone:
+    // the two land on IDLE from HOMING alike, but only one of them means the
+    // home actually completed, and the tested table is where that distinction
+    // belongs.
+    applyMotorEventLocked(abortedAnywhere ? autolee::MotorEvent::Abort
+                                          : autolee::MotorEvent::HomeDone);
     // A confirmed UP hard stop + re-zero IS the position reference, so it goes
     // live in the same transaction as the state change. On failure the search
-    // ran its full length without finding a stop, so the counter is no longer
-    // trustworthy - latch it stale rather than leaving a previously-good
-    // reference standing.
-    g_motion.positionReferenceStale = !found;
+    // ran its full length without finding a stop, and on an abort the axis
+    // stopped mid-move - in both cases the counter is no longer trustworthy, so
+    // latch it stale rather than leaving a previously-good reference standing.
+    g_motion.positionReferenceStale = !found || abortedAnywhere;
   }
 
   webLog("Motion", "Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
@@ -539,7 +582,7 @@ void safeCreepHome() {
 // ==========================================================================
 //  SENSORLESS CALIBRATION
 // ==========================================================================
-static bool move_until_stall(int dir, long &hit_pos) {
+static SearchOutcome move_until_stall(int dir, long &hit_pos) {
   const int32_t target = (dir > 0) ? +CAL_SEARCH_STEPS : -CAL_SEARCH_STEPS;
   const int32_t start_pos = stepper::getCurrentPosition();
   const uint32_t ignore_ms = autolee::calIgnoreMs(CAL_SPEED_HZ, CAL_ACCEL);
@@ -565,6 +608,18 @@ static bool move_until_stall(int dir, long &hit_pos) {
   autolee::ConfirmCounter confirm_dyn(CAL_HIT_CONFIRM);
 
   while (stepper::isRunning()) {
+    // Polled first, before any StallGuard work: this loop is what makes a
+    // calibration or a creep-home uninterruptible: it owns pump_task for the
+    // whole search (tens of seconds at CAL_SPEED_HZ), so processPendingCommands()
+    // does not run and no queued command can reach the machine until it ends.
+    // The abort flag is read directly here for exactly that reason.
+    if (motion_cmd::abortRequested()) {
+      stepper::forceStop();
+      fas_wait_for_stop();  // deliberately NOT abortable: this wait IS the stop
+      hit_pos = stepper::getCurrentPosition();
+      webLogLevel(LogLevel::Warn, "Motion", "Search aborted by operator at pos=%ld", (long)hit_pos);
+      return SearchOutcome::Aborted;
+    }
     const uint32_t now = millis();
     const uint32_t elapsed_ms = now - start_ms;
     const int32_t dist = labs(stepper::getCurrentPosition() - start_pos);
@@ -586,7 +641,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
         stepper::forceStop();
         fas_wait_for_stop();
         hit_pos = stepper::getCurrentPosition();
-        return true;
+        return SearchOutcome::Found;
       }
     }
 
@@ -615,7 +670,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
         stepper::forceStop();
         fas_wait_for_stop();
         hit_pos = stepper::getCurrentPosition();
-        return true;
+        return SearchOutcome::Found;
       }
     }
 
@@ -624,7 +679,7 @@ static bool move_until_stall(int dir, long &hit_pos) {
   }
   hit_pos = stepper::getCurrentPosition();
   webLogLevel(LogLevel::Debug, "Motion", "MUS: NO STALL DETECTED, ended at pos=%ld", hit_pos);
-  return false;
+  return SearchOutcome::NotFound;
 }
 
 void setActiveProfile(uint8_t idx) {
@@ -657,31 +712,62 @@ bool calibrateEndpointsSensorless() {
     stepper::forceStop();
     fas_wait_for_stop();
   }
+  // A leftover abort from an earlier search must not cancel this one before it
+  // has moved: the flag is set by another task and is only consumed here.
+  motion_cmd::clearAbort();
 
   const uint32_t saved_speed = ui_speed_hz;
   stepper::setSpeedInHz(CAL_SPEED_HZ);
   stepper::setAcceleration(CAL_ACCEL);
   tmc5160::rms_current(CAL_CURRENT_MA);
 
-  stepper::move(+CAL_PREMOVE_DOWN_STEPS);
-  fas_wait_for_stop();
-
-  long hit_up = 0;
-  if (!move_until_stall(-1, hit_up)) {
-    webLogLevel(LogLevel::Error, "Motion", "Calibration: FAILED (no UP stop found)");
+  // Every exit below this point restores the drive settings, leaves the
+  // endpoints invalid (they were cleared on entry) and latches the position
+  // reference stale. A calibration that did not finish must never leave the
+  // machine looking like one that did.
+  const auto abandon = [&](const char *why, LogLevel level) {
+    webLogLevel(level, "Motion", "Calibration: %s", why);
     tmc5160::rms_current(g_motion.runCurrentMa);
     stepper::setSpeedInHz(saved_speed);
     stepper::setAcceleration(RUN_DECEL);
+    const bool aborted = motion_cmd::abortRequested();
+    motion_cmd::clearAbort();
     motion_state::Guard g;
-    applyMotorEventLocked(autolee::MotorEvent::CalibrationDone);  // CALIBRATING -> IDLE
-    // The search ran its full length without finding a stop: nothing re-zeroed
-    // the axis, so whatever reference existed before is no longer trustworthy.
+    // Abort is its own transition rather than a quiet CalibrationDone: both
+    // reach IDLE from CALIBRATING, but only one of them means the calibration
+    // ran to completion, and the tested table is where that belongs.
+    applyMotorEventLocked(aborted ? autolee::MotorEvent::Abort
+                                  : autolee::MotorEvent::CalibrationDone);
+    // Nothing re-zeroed the axis (or the re-zero has since been driven away
+    // from), so whatever reference existed before is no longer trustworthy.
     g_motion.positionReferenceStale = true;
+  };
+
+  stepper::move(+CAL_PREMOVE_DOWN_STEPS);
+  fas_wait_for_stop(true);
+  if (motion_cmd::abortRequested()) {
+    abandon("aborted by operator", LogLevel::Warn);
     return false;
   }
 
+  long hit_up = 0;
+  switch (move_until_stall(-1, hit_up)) {
+    case SearchOutcome::Aborted:
+      abandon("aborted by operator", LogLevel::Warn);
+      return false;
+    case SearchOutcome::NotFound:
+      abandon("FAILED (no UP stop found)", LogLevel::Error);
+      return false;
+    case SearchOutcome::Found:
+      break;
+  }
+
   stepper::move(+CAL_OVERSHOOT_BACKOFF_STEPS);
-  fas_wait_for_stop();
+  fas_wait_for_stop(true);
+  if (motion_cmd::abortRequested()) {
+    abandon("aborted by operator", LogLevel::Warn);
+    return false;
+  }
   stepper::setCurrentPosition(0);
   {
     motion_state::Guard g;
@@ -689,21 +775,29 @@ bool calibrateEndpointsSensorless() {
   }
 
   long hit_down = 0;
-  if (!move_until_stall(+1, hit_down)) {
-    webLogLevel(LogLevel::Error, "Motion", "Calibration: FAILED (no DOWN stop found)");
-    tmc5160::rms_current(g_motion.runCurrentMa);
-    stepper::setSpeedInHz(saved_speed);
-    stepper::setAcceleration(RUN_DECEL);
-    motion_state::Guard g;
-    applyMotorEventLocked(autolee::MotorEvent::CalibrationDone);  // CALIBRATING -> IDLE
-    // The UP stop was found and re-zeroed, but the DOWN search then ran its
-    // full length; the counter has travelled an unbounded distance since.
-    g_motion.positionReferenceStale = true;
-    return false;
+  switch (move_until_stall(+1, hit_down)) {
+    case SearchOutcome::Aborted:
+      abandon("aborted by operator", LogLevel::Warn);
+      return false;
+    case SearchOutcome::NotFound:
+      // The UP stop was found and re-zeroed, but the DOWN search then ran its
+      // full length; the counter has travelled an unbounded distance since.
+      abandon("FAILED (no DOWN stop found)", LogLevel::Error);
+      return false;
+    case SearchOutcome::Found:
+      break;
   }
 
   stepper::move(-CAL_OVERSHOOT_BACKOFF_STEPS);
-  fas_wait_for_stop();
+  fas_wait_for_stop(true);
+  if (motion_cmd::abortRequested()) {
+    // Both stops were found, but the backoff that defines rawDown did not
+    // complete - the measurement below would be wrong. Discard the whole thing
+    // rather than store a DOWN endpoint that is short by an unknown amount:
+    // DOWN is what decides how deep the ram travels.
+    abandon("aborted by operator before the DOWN measurement", LogLevel::Warn);
+    return false;
+  }
   const long measuredDown = stepper::getCurrentPosition();
   {
     motion_state::Guard g;
@@ -728,7 +822,11 @@ bool calibrateEndpointsSensorless() {
   stepper::setSpeedInHz(saved_speed);
   stepper::setAcceleration(RUN_DECEL);
   stepper::moveTo(g_motion.endpointUp);
+  // Deliberately NOT abortable: the calibration is complete and stored by this
+  // point, and this move only parks the carriage at the UP endpoint. Cancelling
+  // it would throw away a good calibration to save a few seconds of travel.
   fas_wait_for_stop();
+  motion_cmd::clearAbort();
 
   {
     motion_state::Guard g;

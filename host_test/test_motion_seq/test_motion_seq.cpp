@@ -454,6 +454,138 @@ static void test_failed_calibration_does_not_count(void) {
 }
 
 // --------------------------------------------------------------------------
+//  Operator abort of a blocking search
+// --------------------------------------------------------------------------
+// A calibration or a creep-home owns pump_task for the whole sensorless search
+// (tens of seconds on the real machine), so processPendingCommands() never runs
+// and no queued command can reach the press - which is why these were previously
+// impossible to stop. The abort flag is polled inside the search loop itself;
+// the tests below set it part-way through, the way the Cancel button does.
+
+// Trips the abort after N StallGuard reads. read_sg() takes 5 samples per loop
+// iteration, so N=50 is ten iterations in - well before either hard stop below.
+static int s_sgReadsBeforeAbort = 0;
+static uint16_t sg_abort_after_n(void) {
+  if (s_sgReadsBeforeAbort > 0 && --s_sgReadsBeforeAbort == 0) motion_cmd::requestAbort();
+  return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
+}
+
+// Trips the abort only once the carriage has reached the DOWN hard stop, i.e.
+// during the second search, after the UP stop was found and the axis re-zeroed.
+static uint16_t sg_abort_at_down_stop(void) {
+  if (fake::sim.hardStops && fake::sim.physical >= fake::sim.hardStopDown) {
+    motion_cmd::requestAbort();
+  }
+  return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
+}
+
+static void test_calibration_aborted_during_the_up_search(void) {
+  g_motion.runState = IDLE;
+  g_motion.endpointsCalibrated = true;  // an older calibration the operator had
+  givenPress(-2000, 40000);
+  s_sgReadsBeforeAbort = 50;
+  fake::sg_source = sg_abort_after_n;
+
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+
+  // Back to IDLE, not stuck in CALIBRATING - an abort that left the FSM parked
+  // would lock the operator out of every other command.
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  // Entering CALIBRATING cleared the flag; an abort must not put it back.
+  TEST_ASSERT_FALSE(g_motion.endpointsCalibrated);
+  // Nothing re-referenced the axis, so a run must stay refused.
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+  // Specifically the search loop's own line, not the abortable wait that
+  // follows it: the point of this test is that a search in progress can be
+  // interrupted, which is the case that was impossible before.
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Search aborted by operator at pos="),
+                           fake::dump().c_str());
+  // The motor really was stopped, and the run current restored.
+  TEST_ASSERT_FALSE(fake::sim.running);
+  TEST_ASSERT_EQUAL_UINT16(g_motion.runCurrentMa, fake::sim.runCurrentMa);
+  // The flag was consumed, so it cannot cancel the next calibration.
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
+}
+
+// The expensive case: both hard stops may already have been found, but rawDown
+// is only measured after the backoff move. Storing a half-measured DOWN would
+// be worse than storing nothing - DOWN is what decides how deep the ram goes.
+static void test_calibration_aborted_during_the_down_search_stores_nothing(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 40000);
+  fake::sg_source = sg_abort_at_down_stop;
+
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Search aborted by operator at pos="),
+                           fake::dump().c_str());
+  // It really did get past the UP stage - rawUp was found and re-zeroed - and
+  // still stored nothing. rawDown is what a partial calibration would have
+  // corrupted, and it is untouched.
+  TEST_ASSERT_EQUAL_INT32(0, (int32_t)g_motion.rawUp);
+  TEST_ASSERT_EQUAL_INT32(0, (int32_t)g_motion.rawDown);
+}
+
+// The flag is set by another task and consumed only by the search loops, so a
+// request that arrived after a search had already ended would otherwise sit
+// there and cancel the NEXT one before it moved.
+static void test_a_stale_abort_does_not_cancel_the_next_calibration(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 40000);
+  motion_cmd::requestAbort();
+
+  TEST_ASSERT_TRUE_MESSAGE(calibrateEndpointsSensorless(), fake::dump().c_str());
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.calibrationCount);
+  TEST_ASSERT_TRUE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_FALSE(g_motion.positionReferenceStale);
+}
+
+static void test_creep_home_aborted_leaves_the_axis_unreferenced(void) {
+  g_motion.runState = IDLE;
+  fake::sim.position = 8000;
+  givenPress(2000, 40000);
+  s_sgReadsBeforeAbort = 50;
+  fake::sg_source = sg_abort_after_n;
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  // The whole point of a home is to re-reference the axis. It did not get to.
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Creep home: aborted by operator"),
+                           fake::dump().c_str());
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Search aborted by operator at pos="),
+                           fake::dump().c_str());
+  TEST_ASSERT_FALSE(fake::sim.running);
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
+}
+
+// Aborting a jam-recovery home must not become a way around the recovery: the
+// press ends IDLE with an unreferenced axis, so a start is still refused.
+static void test_aborted_home_still_refuses_to_start(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.runState = IDLE;
+  fake::sim.position = 8000;
+  givenPress(2000, 40000);
+  s_sgReadsBeforeAbort = 50;
+  fake::sg_source = sg_abort_after_n;
+
+  safeCreepHome();
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);  // refused
+  TEST_ASSERT_TRUE(fake::logContains("Start refused: position reference unconfirmed"));
+}
+
+// --------------------------------------------------------------------------
 //  Graceful stop
 // --------------------------------------------------------------------------
 static void test_graceful_stop_reaches_home_then_idles(void) {
@@ -935,6 +1067,11 @@ int main(void) {
   RUN_TEST(test_stall_count_accumulates_across_runs);
   RUN_TEST(test_successful_calibration_counts);
   RUN_TEST(test_failed_calibration_does_not_count);
+  RUN_TEST(test_calibration_aborted_during_the_up_search);
+  RUN_TEST(test_calibration_aborted_during_the_down_search_stores_nothing);
+  RUN_TEST(test_a_stale_abort_does_not_cancel_the_next_calibration);
+  RUN_TEST(test_creep_home_aborted_leaves_the_axis_unreferenced);
+  RUN_TEST(test_aborted_home_still_refuses_to_start);
   RUN_TEST(test_graceful_stop_reaches_home_then_idles);
   RUN_TEST(test_graceful_stop_times_out_and_force_stops);
   RUN_TEST(test_graceful_stop_ignored_when_stalled);

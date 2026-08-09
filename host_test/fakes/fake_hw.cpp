@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "motion_cmd.h"
 #include "globals.h"  // webLog()'s declaration - keep the signature honest
 #include "stepper.h"
 #include "tmc5160_ctrl.h"
@@ -35,6 +36,9 @@ void reset() {
   logs.clear();
   sg_source = default_sg_source;
   s_now_us = 0;
+  // The abort flag lives in the real motion_cmd.cpp, which is compiled into this
+  // suite, so clearing Sim no longer clears it.
+  motion_cmd::clearAbort();
 }
 
 // Any seam call must happen OUTSIDE a motion_state::Guard (motion_state.h:

@@ -36,7 +36,26 @@ void requestUiRefresh();            // refresh LVGL labels from pump_task
 void requestLogClear();             // clear the log ring
 void requestResetSettings();        // discard stored calibration/tuning (IDLE only)
 
+// Cancel an in-progress calibration or creep-home.
+//
+// The odd one out: every other request above is consumed by
+// processPendingCommands(), which cannot run while a calibration or a home is
+// in progress - those block pump_task inside motion.cpp for tens of seconds,
+// which is exactly why they were uninterruptible. So this one is not a queued
+// command but a flag the blocking search loops poll directly, and it is
+// therefore the only request with a reader visible outside pump_task's command
+// pump. It cannot start, stop or move anything; the worst a spurious set can do
+// is end a search early, leaving the axis unreferenced and the press idle.
+void requestAbort();
+
 // --- Consumer: pump_task ONLY --------------------------------------------
+// True while an abort is pending. Polled by motion.cpp's search/wait loops.
+bool abortRequested();
+// Consumes the flag. Called by motion.cpp once a search has finished unwinding,
+// and at the start of every calibration/home so a stale request from a search
+// that already ended cannot cancel the next one before it begins.
+void clearAbort();
+
 // Executes whatever was requested since the last call. Must not be called
 // from any other task.
 void processPendingCommands();

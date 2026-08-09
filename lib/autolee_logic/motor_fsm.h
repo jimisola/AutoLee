@@ -21,7 +21,13 @@ enum class MotorEvent : uint8_t {
   Calibrate,        // begin sensorless calibration
   CalibrationDone,  // calibration finished (ok or fail)
   ReturnHome,       // "return home" pressed (jam screen, or to re-reference the axis)
-  HomeDone          // creep-home finished
+  HomeDone,         // creep-home finished
+  // Operator cancelled an in-progress calibration or creep-home. Deliberately
+  // NOT accepted from Running: a run must decelerate through Stopping, and
+  // letting anything jump straight to Idle would skip that. Also not accepted
+  // from Stalled - the "you must home first" rule is the whole reason Stalled
+  // exists, and an abort that cleared it would be a way around it.
+  Abort
 };
 
 struct Transition {
@@ -55,12 +61,23 @@ inline Transition motorTransition(MotorState s, MotorEvent e) {
       break;
     case MotorState::Calibrating:
       if (e == MotorEvent::CalibrationDone) return {true, MotorState::Idle};
+      // A sensorless search is a slow, current-limited creep that can run for
+      // tens of seconds; before Abort existed it could not be interrupted at
+      // all, because the search blocks pump_task and nothing else gets to run.
+      // The caller must leave the position reference stale on this path - the
+      // axis stopped mid-search and nothing re-zeroed it.
+      if (e == MotorEvent::Abort) return {true, MotorState::Idle};
       break;
     case MotorState::Stalled:
       if (e == MotorEvent::ReturnHome) return {true, MotorState::Homing};
       break;
     case MotorState::Homing:
       if (e == MotorEvent::HomeDone) return {true, MotorState::Idle};
+      // Same reasoning as Calibrating. Note this is the one way out of a
+      // jam-recovery home that has not reached the stop: the result is Idle with
+      // an unreferenced axis, so a run is still refused and Return Home is still
+      // available - an abort must not become a shortcut past the recovery.
+      if (e == MotorEvent::Abort) return {true, MotorState::Idle};
       break;
   }
   return {false, s};

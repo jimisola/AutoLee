@@ -1280,6 +1280,17 @@ void setupWebServer() {
     return res->send(200, "text/plain", "ok");
   });
 
+  // Cancels an in-progress calibration or creep-home. Unlike every other
+  // command here it is NOT queued for processPendingCommands() - that pump does
+  // not run while a search is in progress, which is exactly the problem. It
+  // sets a flag the search loops poll directly (motion_cmd.h). Idempotent, and
+  // a no-op if nothing is searching: the flag is cleared at the start of the
+  // next calibration/home, so a stray request cannot cancel a later one.
+  server.on("/api/v1/motion/abort", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    motion_cmd::requestAbort();
+    return res->send(200, "text/plain", "ok");
+  });
+
   server.on("/api/v1/motion/reset_counter", HTTP_POST,
             [](PsychicRequest *req, PsychicResponse *res) {
               {

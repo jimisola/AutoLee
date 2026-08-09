@@ -24,6 +24,10 @@ std::atomic<bool> s_batchStart{false};
 std::atomic<bool> s_uiRefresh{false};
 std::atomic<bool> s_logClear{false};
 std::atomic<bool> s_resetSettings{false};
+// Not consumed by processPendingCommands() - see the header. Polled directly by
+// motion.cpp's blocking search loops, which is the only place that can observe
+// it in time to matter.
+std::atomic<bool> s_abort{false};
 std::atomic<int32_t> s_profile{-1};    // -1 = none pending
 std::atomic<int32_t> s_currentMa{-1};  // -1 = none pending
 
@@ -52,6 +56,15 @@ void requestLogClear() {
 }
 void requestResetSettings() {
   s_resetSettings.store(true);
+}
+void requestAbort() {
+  s_abort.store(true);
+}
+bool abortRequested() {
+  return s_abort.load();
+}
+void clearAbort() {
+  s_abort.store(false);
 }
 void requestProfile(uint8_t idx) {
   s_profile.store((int32_t)idx);

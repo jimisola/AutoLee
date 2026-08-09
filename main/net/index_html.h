@@ -94,10 +94,10 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 <div class="jam-alert" id="jamAlert">
 <div style="color:#FF4444;font-weight:700;margin-bottom:4px" id="jamTitle">&#9888; JAM DETECTED</div>
 <div style="color:#aaa;font-size:.8em;margin-bottom:8px" id="jamMsg">Motor stalled and backed off.</div>
-<button class="btn btn-blue" onclick="doAct('/api/v1/motion/return_home')" id="bh">Return Home</button>
+<button class="btn btn-blue" onclick="jamAction()" id="bh">Return Home</button>
 </div>
 <div class="row ctr" style="margin-top:10px;gap:8px">
-<button class="btn btn-dark" onclick="doAct('/api/v1/motion/calibrate')" id="bc">Calibrate</button>
+<button class="btn btn-dark" id="bc" onclick="doAct('/api/v1/motion/calibrate')">Calibrate</button>
 <button class="btn btn-red" onclick="doAct('/api/v1/motion/reset_counter')">Reset Counter</button></div>
 <hr>
 <h2 style="margin-top:8px">Batch Run</h2>
@@ -634,15 +634,26 @@ function upd(d){
   sb.className='badge '+(d.state==='RUNNING'?'run':d.state==='CALIBRATING'?'warn':d.state==='STALLED'||d.state==='HOMING'?'stall':'ok');
   const ja=document.getElementById('jamAlert'),jt=document.getElementById('jamTitle'),jm=document.getElementById('jamMsg'),bh=document.getElementById('bh');
   if(d.state==='STALLED'){jt.textContent='\u26A0 JAM DETECTED';jm.textContent='Motor stalled and backed off.';ja.style.display='block';bh.disabled=false;bh.textContent='Return Home'}
-  else if(d.state==='HOMING'){ja.style.display='block';bh.disabled=true;bh.textContent='Returning...'}
+  // Same for the jam-recovery home: it is the same blocking search, so it gets
+  // the same escape. Aborting leaves the press IDLE with the axis unreferenced,
+  // so a run is still refused and Return Home is still offered - cancelling is
+  // never a way past the recovery.
+  else if(d.state==='HOMING'){ja.style.display='block';bh.disabled=false;bh.textContent='Cancel'}
   else if(d.positionStale&&d.calibrated){jt.textContent='\u26A0 POSITION UNCONFIRMED';jm.textContent='Calibration restored after a reboot - return home to re-reference the axis before running.';ja.style.display='block';bh.disabled=false;bh.textContent='Return Home'}
   else{ja.style.display='none'}
   const br=document.getElementById('br');
   if(d.state==='RUNNING'){br.textContent='STOP';br.classList.add('active')}
   else{br.textContent='RUN';br.classList.remove('active')}
+  // A calibration blocks the motion task for tens of seconds and used to be
+  // uninterruptible, so the button simply went dead and said "Calibrating...".
+  // It is now the way out: same button, Cancel while the search runs.
   const bc=document.getElementById('bc');
-  bc.disabled=d.state==='CALIBRATING';
-  bc.textContent=d.state==='CALIBRATING'?'Calibrating...':'Calibrate';
+  const calibrating=d.state==='CALIBRATING';
+  bc.disabled=false;
+  bc.textContent=calibrating?'Cancel Calibration':'Calibrate';
+  bc.className='btn '+(calibrating?'btn-red':'btn-dark');
+  bc.onclick=calibrating?()=>doAct('/api/v1/motion/abort')
+                        :()=>doAct('/api/v1/motion/calibrate');
   if(d.calibrated){
     document.getElementById('ru').textContent=d.rawUp;
     document.getElementById('rd').textContent=d.rawDown;
@@ -661,6 +672,11 @@ function setProfile(i){fetch('/api/v1/motion/profile?idx='+i,{method:'POST'})}
 function setCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none';fetch('/api/v1/motion/current?ma='+v,{method:'POST'})}
 function adj(w,d){fetch('/api/v1/motion/endpoint?which='+w+'&delta='+d,{method:'POST'})}
 function doAct(p){fetch(p,{method:'POST'})}
+// One button, two meanings, decided by the state the label already reflects -
+// rather than a second button that is disabled most of the time.
+function jamAction(){
+  doAct(document.getElementById('bh').textContent==='Cancel'
+        ?'/api/v1/motion/abort':'/api/v1/motion/return_home')}
 function resetSettings(){
   if(!confirm('Discard the stored calibration and all tuning, and restore factory defaults?\n\nThe press will be UNCALIBRATED and must be recalibrated before it can run. WiFi and the web password are not affected.'))return;
   fetch('/api/v1/settings',{method:'DELETE'})}
