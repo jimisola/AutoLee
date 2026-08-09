@@ -62,6 +62,14 @@ first for the *why* and the per‑subsystem analysis.
 - [x] **FastAccelStepper dropped** — verified (not assumed) it requires `arduino-esp32` running as an ESP‑IDF component even in "ESP‑IDF mode" (its own README). Replaced with a **native RMT + PCNT step generator** (`main/stepper.*`), adapted from Espressif's official `examples/peripherals/rmt/stepper_motor` reference for the pulse encoding, with PCNT hardware step counting for position and a chunked-transmission design for `forceStop()` (see `main/stepper.h`'s hardware-verification note for why, and the bounded latency it gives instead of an unverified hard-abort). A TMC5160-internal-ramp-generator alternative (no STEP/DIR at all) was considered and rejected — needs a hardware pin strap that can't be confirmed remotely. ADR 0001's table corrected accordingly.
 - [x] Ported `motion.cpp`'s algorithms (calibration phases, sliding‑counter jam detection, homing/creep, `handleMotion` state machine) verbatim onto the above (`main/motion.cpp`) — only the plumbing changed (TMCStepper→`tmc5160::`, FastAccelStepper→`stepper::`, `millis()`/`delay()`→`esp_timer`/`vTaskDelay`), safety logic unchanged. UI hooks (`showJamScreen()` etc.) are logged stubs pending Phase 3's UI port.
 - **DoD:** ⚙️ **not yet met — build/boot-verified only, zero hardware verification.** No motor/TMC5160 rig was connected while this was written (bare ESP32-C6 board only). Before trusting on the real press: calibration finds UP/DOWN stops; a run cycle; **jam detection triggers + safe return‑home**; speed‑profile change; and specifically confirm `forceStop()`'s actual latency (designed bound: one `kCruiseChunkMs` chunk, see `stepper.cpp`) is acceptable. Needs a safety-focused code review before that bench session, not just before shipping.
+  - **Update 2026-08-09** — a bench session on a **bare ESP32-C6 (still no TMC5160, still no
+    motor)** verified the parts that do not need the mechanics: the control-route refusal
+    contract end to end, the settings-blob v2 → v3 migration carrying counters forward, the SSE
+    heartbeat at its designed 8 s cadence, and an operator abort interrupting a live
+    `move_until_stall()` search and unwinding to IDLE with the position reference latched stale.
+    None of that touches the list above: calibration finding real stops, a run cycle, jam
+    detection + return-home and `forceStop()` latency all still require the motor rig, and this
+    line stays ⚙️ until they are done.
 
 ### Concurrency/motion-safety rework — partially done, bench verification + two items still outstanding (from PR #4 review, findings #2-#8)
 The Arduino cooperative `loop()` became several FreeRTOS tasks (`pump_task`, LVGL, HTTP, `sse_task`), so motion state and the shared SPI bus are now touched concurrently with no synchronization. These findings are all facets of that one root cause, touch the same files, and must be fixed together (fixing one in isolation risks half-measures). Deliberately slotted here, not done earlier, because they can only be *meaningfully* verified with the motor rig attached — the same session + safety review this phase already requires. **Re-verified against the repo 2026-07-25** (see `docs/review-2026-07-25.md`): #2 and #4 were previously marked done together with #8, but only the command-routing half of #8 and the counter half of #4 actually shipped — reopened below. Suggested internal order:
@@ -144,6 +152,14 @@ Deferred low-priority cleanups from the PR #4 review (not blocking):
 ## Phase 8 — Post-migration hardening
 Non-bench-blocking follow-ups from the 2026-07-25 codebase review (`docs/review-2026-07-25.md`).
 The safety-critical, bench-blocking items from that review are tracked in Phase 4 above, not here.
+- [x] **UX/UI/bug review follow-ups (2026-08-08/09).** Five PRs: the batch-start gate on a stale
+  position reference; the dashboard's silent `SG=0` write, invisible SSE dropout, per-pixel slider
+  POSTs and counter-parity; control routes reporting `400`/`409` instead of a blanket `200 ok`
+  (new `lib/autolee_logic/command_gate.h`); a true persisted lifetime cycle count (settings blob
+  v3); and operator-abortable calibration/creep-home (new `MotorEvent::Abort`). Findings judged
+  not worth fixing now were filed as issues rather than left implicit — command coalescing,
+  confirmation-pattern consistency, web-UI cleanups, and STOP reachability from every screen.
+  Sequence diagrams for the resulting flows are in [`FLOWS.md`](FLOWS.md).
 - [x] **Persist settings/calibration to NVS as a versioned struct** (`main/settings_store.{h,cpp}`,
   registered in `main/CMakeLists.txt:6`). One fixed-layout `Persisted` blob
   (`PersistedV1`, `main/settings_blob.h:74`) in NVS namespace `autolee`, key `settings`, `uint16_t version`

@@ -16,6 +16,9 @@ semantics of motion code; do not weaken stop/backoff/homing logic.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the task model, the shared-SPI
 rules and the motion FSM (read this before touching motion or concurrency),
+[`docs/FLOWS.md`](docs/FLOWS.md) for the sequence diagrams that go with it — how a control
+command is gated twice, why abort bypasses the command queue, and how the event stream
+distinguishes "quiet" from "dead" (read this before touching the control API),
 [`docs/PLAN.md`](docs/PLAN.md) for the phased migration checklist (this is an active,
 in-progress port) and [`docs/adr/0001-build-tooling-and-platform.md`](docs/adr/0001-build-tooling-and-platform.md)
 for why ESP-IDF was chosen.
@@ -112,9 +115,12 @@ module boundary the compiler enforces:
   (registry components require LVGL 9; this project is pinned to LVGL 8.4), registered as an LVGL
   8 `lv_indev_drv_t`.
 - **`lib/autolee_logic/`** — pure, hardware-independent modules (endpoint math, SG filter/blanking,
-  stall FSM, batch, log ring, calibration, state JSON, motor FSM), header-only, no ESP-IDF or
-  Arduino dependency. Shared by the firmware **and** the host tests in `host_test/`, so tested code
-  == shipped code.
+  stall FSM, batch, log ring, calibration, state JSON, motor FSM, command gates), header-only, no
+  ESP-IDF or Arduino dependency. Shared by the firmware **and** the host tests in `host_test/`, so
+  tested code == shipped code. `command_gate.h` is the one to know about when touching the control
+  API: it answers *why* a command is refused, and is deliberately evaluated twice — once by the HTTP
+  handler to answer the caller, once by `pump_task` when the command is applied. The second is
+  authoritative; see [`docs/FLOWS.md`](docs/FLOWS.md).
 
 ### Shared SPI bus
 

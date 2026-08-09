@@ -64,29 +64,31 @@ The stall detection and jam protection features are designed to detect brass get
 - **Works with all profiles** — batch runs at whatever speed profile is active
 
 ### Counter
-- **Stroke counter** — counts each completed down-up cycle, displayed large on the main screen (max 9999)
+- **Stroke counter** — counts each completed down-up cycle, displayed large on the main screen. The panel's 4-digit field saturates at `9999+`; the web dashboard shows the exact figure
 - **Resettable** from touch UI or web interface
+- **Lifetime cycle count** — a separate, uncapped total that Reset Counter does not clear, persisted across reboots and shown on the web Diagnostics page
 
 ### Touch UI (172×320 LVGL)
 - **Main screen** — Counter, active speed profile indicator, calibration warning, batch remaining, buttons for Batch Run and Settings
-- **Settings screen** — Calibrate, Configuration, Reset Counter
+- **Settings screen** — Calibrate (doubles as Cancel while a calibration runs), Configuration, Reset Counter
 - **Configuration screen** — Speed Profile, Endpoints, Stall Guard, WiFi Info
 - **Speed Profile screen** — Three buttons with green highlight on active, info card showing Hz + SG
 - **Endpoints (tuning) screen** — Raw and effective endpoint values, buttons to edit UP and DOWN
 - **Stall Guard screen** — Adjust SG trip for the active profile with ±1/±5 buttons
 - **Batch Run screen** — Set target count with ±1/10/100 buttons, start batch
-- **Jam screen** — Warning display with one-button return home
+- **Jam screen** — Warning display with one-button return home; the same button cancels a home in progress
 - **WiFi screen** — Shows connected SSID and IP address, Reset WiFi button to clear credentials and reboot
 
-### Web Interface (5-page layout)
+### Web Interface (6-page layout)
 - **Full control from any browser** — responsive dark-theme UI works on phone and desktop
-- **Real-time updates** — Server-Sent Events (SSE) push state changes at 250 ms intervals
+- **Real-time updates** — Server-Sent Events (SSE). State is polled every 250 ms and pushed only when it actually changed, plus a heartbeat every 8 s so the page can tell "nothing changed" from "connection died" — a dropout greys the values out and says so
 - **Main page** — status, counter, RUN/STOP, calibrate, reset counter, speed profile selector, batch run controls
 - **Configuration page** — motor current slider (1,000–4,500 mA with overcurrent warning), endpoint tuning with collapsible offsets, per-profile StallGuard text inputs, work zone adjustment
-- **Log page** — full-height 500-line scrollable log with real-time streaming and clear button
+- **Log page** — full-height 500-line scrollable log with real-time streaming, level filter and clear button
+- **Diagnostics page** — build identity, uptime, reset reason, heap, and the persisted lifetime health counters
 - **Firmware page** — drag-and-drop OTA .bin upload with progress bar
 - **WiFi page** — shows connection status, SSID, and IP address; change credentials, reset to AP mode
-- **Footer navigation** — blue text links on every page to jump between all five pages
+- **Footer navigation** — blue text links on every page to jump between all six pages
 
 ### WiFi & Networking
 - **Auto-connect** — attempts saved credentials on boot, falls back to AP if it fails
@@ -131,7 +133,8 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full toolchain setup, host-test
 instructions, and repo layout, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-for how the firmware fits together (task model, shared SPI bus, motion FSM).
+for how the firmware fits together (task model, shared SPI bus, motion FSM) —
+with [docs/FLOWS.md](docs/FLOWS.md) for the sequence diagrams that go with it.
 
 ## Flash Pre-Compiled Binary
 
