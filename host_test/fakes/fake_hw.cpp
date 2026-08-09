@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "motion_cmd.h"
 #include "globals.h"  // webLog()'s declaration - keep the signature honest
 #include "stepper.h"
 #include "tmc5160_ctrl.h"
@@ -35,6 +36,9 @@ void reset() {
   logs.clear();
   sg_source = default_sg_source;
   s_now_us = 0;
+  // The abort flag lives in the real motion_cmd.cpp, which is compiled into this
+  // suite, so clearing Sim no longer clears it.
+  motion_cmd::clearAbort();
 }
 
 // Any seam call must happen OUTSIDE a motion_state::Guard (motion_state.h:
@@ -305,25 +309,6 @@ void webLogLevel(LogLevel /*level*/, const char * /*category*/, const char *fmt,
   va_end(ap);
   fake::logs.push_back(buf);
 }
-
-// ============================================================================
-//  motion_cmd:: - only the abort flag, which motion.cpp polls directly
-// ============================================================================
-// The rest of motion_cmd is a separate translation unit this suite does not
-// link. The flag is a plain bool here (single-threaded harness) and is driven
-// by the tests through fake::request_abort() so a search can be cancelled
-// mid-loop the way an operator would.
-namespace motion_cmd {
-void requestAbort() {
-  fake::sim.abortPending = true;
-}
-bool abortRequested() {
-  return fake::sim.abortPending;
-}
-void clearAbort() {
-  fake::sim.abortPending = false;
-}
-}  // namespace motion_cmd
 
 void showJamScreen() {
   fake::rec("ui::showJamScreen");

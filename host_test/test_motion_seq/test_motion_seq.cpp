@@ -466,7 +466,7 @@ static void test_failed_calibration_does_not_count(void) {
 // iteration, so N=50 is ten iterations in - well before either hard stop below.
 static int s_sgReadsBeforeAbort = 0;
 static uint16_t sg_abort_after_n(void) {
-  if (s_sgReadsBeforeAbort > 0 && --s_sgReadsBeforeAbort == 0) fake::sim.abortPending = true;
+  if (s_sgReadsBeforeAbort > 0 && --s_sgReadsBeforeAbort == 0) motion_cmd::requestAbort();
   return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
 }
 
@@ -474,7 +474,7 @@ static uint16_t sg_abort_after_n(void) {
 // during the second search, after the UP stop was found and the axis re-zeroed.
 static uint16_t sg_abort_at_down_stop(void) {
   if (fake::sim.hardStops && fake::sim.physical >= fake::sim.hardStopDown) {
-    fake::sim.abortPending = true;
+    motion_cmd::requestAbort();
   }
   return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
 }
@@ -505,7 +505,7 @@ static void test_calibration_aborted_during_the_up_search(void) {
   TEST_ASSERT_FALSE(fake::sim.running);
   TEST_ASSERT_EQUAL_UINT16(g_motion.runCurrentMa, fake::sim.runCurrentMa);
   // The flag was consumed, so it cannot cancel the next calibration.
-  TEST_ASSERT_FALSE(fake::sim.abortPending);
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
 }
 
 // The expensive case: both hard stops may already have been found, but rawDown
@@ -522,7 +522,7 @@ static void test_calibration_aborted_during_the_down_search_stores_nothing(void)
   TEST_ASSERT_FALSE(g_motion.endpointsCalibrated);
   TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
   TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
-  TEST_ASSERT_FALSE(fake::sim.abortPending);
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
   TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Search aborted by operator at pos="),
                            fake::dump().c_str());
   // It really did get past the UP stage - rawUp was found and re-zeroed - and
@@ -538,7 +538,7 @@ static void test_calibration_aborted_during_the_down_search_stores_nothing(void)
 static void test_a_stale_abort_does_not_cancel_the_next_calibration(void) {
   g_motion.runState = IDLE;
   givenPress(-2000, 40000);
-  fake::sim.abortPending = true;
+  motion_cmd::requestAbort();
 
   TEST_ASSERT_TRUE_MESSAGE(calibrateEndpointsSensorless(), fake::dump().c_str());
   TEST_ASSERT_EQUAL_UINT16(1, g_motion.calibrationCount);
@@ -563,7 +563,7 @@ static void test_creep_home_aborted_leaves_the_axis_unreferenced(void) {
   TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Search aborted by operator at pos="),
                            fake::dump().c_str());
   TEST_ASSERT_FALSE(fake::sim.running);
-  TEST_ASSERT_FALSE(fake::sim.abortPending);
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
 }
 
 // Aborting a jam-recovery home must not become a way around the recovery: the
