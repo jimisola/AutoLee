@@ -17,7 +17,11 @@ namespace {
 // std::atomic rather than `volatile`: volatile gives no cross-task ordering or
 // atomicity guarantees in C++, it only stops the compiler caching the value.
 // These are all lock-free on this target.
-std::atomic<bool> s_toggleRun{false};
+//
+// s_toggleRun counts taps instead of latching: two taps in one pump window
+// are a start-then-stop, and a latch would coalesce them into a lone start
+// (#15). The rest are genuinely last-write-wins and stay latches.
+std::atomic<uint32_t> s_toggleRun{0};
 std::atomic<bool> s_stop{false};
 std::atomic<bool> s_calibrate{false};
 std::atomic<bool> s_returnHome{false};
@@ -61,7 +65,7 @@ void logRefusal(const char *category, const char *what, autolee::Refusal r) {
 }  // namespace
 
 void requestToggleRun() {
-  s_toggleRun.store(true);
+  s_toggleRun.fetch_add(1);
 }
 void requestStop() {
   s_stop.store(true);
@@ -129,7 +133,9 @@ void processPendingCommands() {
       logRefusal("Motion", "Return home", r);
   }
 
-  if (s_toggleRun.exchange(false)) {
+  // Replay every queued toggle in order. Start/stop apply their FSM transition
+  // synchronously, so each iteration sees the state the previous one produced.
+  for (uint32_t n = s_toggleRun.exchange(0); n > 0; --n) {
     // One button, two meanings: from IDLE this is a start, from RUNNING a stop.
     // gateToggleRun() decides which, and names the refusal for whichever it was
     // - so an uncalibrated press sitting at IDLE is told it needs calibrating
@@ -139,6 +145,7 @@ void processPendingCommands() {
     const autolee::Refusal r = autolee::gateToggleRun(in);
     if (r != autolee::Refusal::None) {
       logRefusal("Motion", "Run/stop", r);
+      break;  // a refusal changes no state, so the remaining taps would refuse identically
     } else if (autolee::canStart(in.state)) {
       startRunBetweenEndpoints();
       ui_update_run_button();

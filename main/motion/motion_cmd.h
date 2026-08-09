@@ -25,7 +25,8 @@
 namespace motion_cmd {
 
 // --- Producers: safe to call from any task -------------------------------
-void requestToggleRun();            // RUN/STOP button (web + touch UI)
+void requestToggleRun();            // RUN/STOP button (web + touch UI); counted,
+                                    // so rapid taps replay instead of coalescing
 void requestStop();                 // stop only (used by the OTA upload path)
 void requestCalibrate();            // begin sensorless calibration
 void requestReturnHome();           // jam-screen "return home"

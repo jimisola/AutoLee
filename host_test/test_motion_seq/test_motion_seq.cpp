@@ -1062,6 +1062,37 @@ static void test_toggle_run_out_of_running_stops_and_disarms_the_batch(void) {
   TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOPPING)"));
 }
 
+// The #15 race: two RUN/STOP taps landing inside one pump window are a
+// start-then-stop. The old bool latch coalesced them into a lone start and the
+// press kept running; the counter replays both, so the pass ends in STOPPING.
+static void test_toggle_run_double_tap_in_one_pump_window_ends_stopping(void) {
+  givenCalibrated(0, 20000, 0);
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOPPING)"));
+}
+
+// A refused toggle changes no state, so surplus queued taps are dropped after
+// one logged refusal rather than logging one identical line per tap.
+static void test_queued_toggles_after_a_refusal_log_one_line(void) {
+  g_motion = MotionState{};
+  g_motion.runState = IDLE;  // uncalibrated: every toggle refuses
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::requestToggleRun();
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  int refusals = 0;
+  for (const auto &l : fake::logs)
+    if (l.find("Run/stop refused") != std::string::npos) refusals++;
+  TEST_ASSERT_EQUAL_INT_MESSAGE(1, refusals, fake::dump().c_str());
+}
+
 // A settings reset is gated on the literal IDLE state, not on the motion
 // permission table - so it can never pull the endpoints out from under a run.
 static void test_settings_reset_only_when_idle(void) {
@@ -1140,6 +1171,8 @@ int main(void) {
   RUN_TEST(test_toggle_run_uncalibrated_names_the_refusal);
   RUN_TEST(test_toggle_run_unreferenced_names_the_refusal);
   RUN_TEST(test_toggle_run_out_of_running_stops_and_disarms_the_batch);
+  RUN_TEST(test_toggle_run_double_tap_in_one_pump_window_ends_stopping);
+  RUN_TEST(test_queued_toggles_after_a_refusal_log_one_line);
   RUN_TEST(test_settings_reset_only_when_idle);
   RUN_TEST(test_motion_init_order);
   return UNITY_END();
