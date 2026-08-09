@@ -128,6 +128,9 @@ jobs:
         env:
           REQUESTED: ${{ inputs.version }}
           FORCE: ${{ inputs.force }}
+          # cliff.toml's template reads commit.remote.* (the "by @user in #N" attribution), which makes
+          # git-cliff call the GitHub API even for --bumped-version; unauthenticated it rate-limits and panics.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           AUTO="$(git-cliff --config cliff.toml --bumped-version)"
@@ -141,7 +144,8 @@ jobs:
             # already exists", which describes the symptom and invites the wrong
             # fix (bump past it and force), so name the actual cause here.
             if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
-              echo "::error::Nothing to release: no commits since '$VERSION' earn a version bump (see RELEASING.md, 'Auto-detected versions'). Pass a version explicitly with force if you really do want to ship them."
+              MSG="Nothing to release: no commits since '$VERSION' earn a version bump (see RELEASING.md, 'Auto-detected versions')."
+              echo "::error::$MSG Pass a version explicitly with force if you really do want to ship them."
               exit 1
             fi
           else
