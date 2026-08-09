@@ -19,6 +19,7 @@
 
 #include "config.h"
 #include "motion.h"
+#include "motion_cmd.h"
 #include "motion_state.h"
 
 // --------------------------------------------------------------------------
@@ -155,7 +156,10 @@ static void test_batch_completion_requests_graceful_stop(void) {
   TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
   TEST_ASSERT_FALSE(g_motion.batchActive);
   TEST_ASSERT_TRUE(fake::logContains("Batch complete: 1/1"));
-  TEST_ASSERT_TRUE(fake::saw("ui::setRunButtonState(0)"));
+  // STOPPING, not RUN: the decel move toward UP is still in flight, and the
+  // tested table accepts neither Start nor GracefulStop until it lands - so a
+  // green "RUN" here would advertise a tap that gets silently discarded.
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOPPING)"));
   TEST_ASSERT_EQUAL_INT32(0, g_motion.currentTarget);  // decel move toward UP
   TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::moveTo(0)"));
 }
@@ -750,7 +754,7 @@ static void test_creep_home_finds_stop_rezeros_and_returns_idle(void) {
   ASSERT_BEFORE("stepper::move(300)", "stepper::setCurrentPosition(0)");
   ASSERT_BEFORE("stepper::setCurrentPosition(0)", "tmc5160::rms_current(3500)");
   TEST_ASSERT_TRUE(fake::logContains("Creep home: found stop"));
-  TEST_ASSERT_TRUE(fake::saw("ui::setRunButtonState(0)"));
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(RUN)"));
   TEST_ASSERT_EQUAL_INT32(g_motion.endpointUp, fake::sim.position);
 }
 
@@ -910,6 +914,130 @@ static void test_set_active_profile_pushes_new_speed(void) {
   TEST_ASSERT_EQUAL_INT(0, (int)fake::events.size());
 }
 
+// --------------------------------------------------------------------------
+//  motion_cmd:: command gates
+//
+//  These drive the deferred-command path the touch UI and every web control
+//  route actually use: request*() sets an atomic flag, then pump_task calls
+//  processPendingCommands(). The gates inside decide whether the request is
+//  legal, and - for a batch - whether it is safe to arm the batch at all.
+// --------------------------------------------------------------------------
+
+// The regression test for the batch-start bug: a restored calibration comes back
+// with the axis unreferenced (settings_store latches positionReferenceStale), so
+// startRunBetweenEndpoints() refuses. The batch must not be armed on the way in,
+// or both UIs report "Running: 0/N" on a press that is standing still, with no
+// way out but a toggle.
+static void test_batch_start_refused_when_position_reference_stale(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.positionReferenceStale = true;
+  g_motion.batchTarget = 5;
+
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("position reference unconfirmed"));
+  // And the run button must never have been flipped to STOP.
+  TEST_ASSERT_FALSE(fake::saw("ui::run_button(STOP)"));
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::moveTo(20000)"));
+}
+
+// The happy path, for contrast: referenced axis, target set, so the batch arms
+// and the run goes out.
+static void test_batch_start_arms_the_batch_when_referenced(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.batchTarget = 5;
+
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_TRUE(g_motion.batchActive);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.batchCount);
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOP)"));
+}
+
+// Each refusal names itself rather than being a silent no-op - on the touch UI
+// "Start Batch" navigates straight back to the main screen, so the log line is
+// the only thing that distinguishes "refused" from "unresponsive".
+static void test_batch_start_refusals_are_reported(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.batchTarget = 0;  // nothing to run
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("no target set"));
+
+  fake::logs.clear();
+  g_motion.batchTarget = 5;
+  g_motion.endpointsCalibrated = false;
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("not calibrated"));
+
+  fake::logs.clear();
+  givenCalibrated(0, 20000, 0);
+  g_motion.batchTarget = 5;
+  g_motion.runState = STALLED;  // must home first
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("Batch start ignored in state"));
+}
+
+// A tap that lands while the press is decelerating is accepted by neither Start
+// nor GracefulStop. It used to be discarded in complete silence, which reads as
+// an unresponsive machine.
+static void test_toggle_run_while_stopping_is_reported(void) {
+  givenCalibrated(0, 20000, 5000);
+  g_motion.runState = STOPPING;
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("Run/stop ignored in state"));
+}
+
+// Toggling out of RUNNING stops the run AND disarms the batch, so a stopped
+// batch does not silently resume on the next start.
+static void test_toggle_run_out_of_running_stops_and_disarms_the_batch(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.batchTarget = 5;
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_TRUE(g_motion.batchActive);
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOPPING)"));
+}
+
+// A settings reset is gated on the literal IDLE state, not on the motion
+// permission table - so it can never pull the endpoints out from under a run.
+static void test_settings_reset_only_when_idle(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.runState = RUNNING;
+
+  motion_cmd::requestResetSettings();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_FALSE(fake::saw("settings::resetToDefaults"));
+  TEST_ASSERT_TRUE(fake::logContains("Reset ignored in state"));
+
+  g_motion.runState = IDLE;
+  motion_cmd::requestResetSettings();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_TRUE(fake::saw("settings::resetToDefaults"));
+}
+
 // motion_init()'s bring-up order: TMC first (it owns the SPI device), then the
 // stepper, then the run current.
 static void test_motion_init_order(void) {
@@ -962,6 +1090,12 @@ int main(void) {
   RUN_TEST(test_handle_motion_is_inert_in_blocking_states);
   RUN_TEST(test_effective_endpoints_are_zero_until_calibrated);
   RUN_TEST(test_set_active_profile_pushes_new_speed);
+  RUN_TEST(test_batch_start_refused_when_position_reference_stale);
+  RUN_TEST(test_batch_start_arms_the_batch_when_referenced);
+  RUN_TEST(test_batch_start_refusals_are_reported);
+  RUN_TEST(test_toggle_run_while_stopping_is_reported);
+  RUN_TEST(test_toggle_run_out_of_running_stops_and_disarms_the_batch);
+  RUN_TEST(test_settings_reset_only_when_idle);
   RUN_TEST(test_motion_init_order);
   return UNITY_END();
 }

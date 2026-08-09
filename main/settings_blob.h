@@ -53,7 +53,7 @@
 namespace settings_store {
 
 // Bump whenever the persisted field set changes - and follow the recipe above.
-constexpr uint16_t kVersion = 2;
+constexpr uint16_t kVersion = 3;
 
 // ---------------------------------------------------------------------------
 //  Version 1 (shipped 2026-07)
@@ -129,15 +129,68 @@ static_assert(offsetof(PersistedV2, totalCycleTimeMs) == sizeof(PersistedV1),
               "V2's new fields must start exactly where V1 ended");
 static_assert(NUM_PROFILES == 3, "PersistedV2::sgTrip sizing assumes 3 profiles");
 
+// ---------------------------------------------------------------------------
+//  Version 3 - adds the true lifetime cycle count
+// ---------------------------------------------------------------------------
+// Every V2 field at the same offsets, plus lifetimeCycles.
+//
+// Why it has to be its own field rather than reusing `counter`: `counter` is
+// the operator-facing piece counter. It saturates at COUNTER_MAX (9999) so it
+// fits the LCD's 4-digit field, and the Reset Counter button zeroes it between
+// jobs. Both are correct for a piece counter and disqualifying for a lifetime
+// statistic - and /api/v1/diagnostics/info was reporting it as `cycleCount`
+// under "Lifetime Health" *and* using it as the denominator of `avgCycleMs`.
+// Past 9999 strokes the mean stroke time therefore climbed without bound, and a
+// counter reset made it jump; totalCycleTimeMs and longestCycleMs, which are
+// uncapped, stayed exact the whole time, so the block silently disagreed with
+// itself.
+//
+// V2 ends at offset 52, which is 4-aligned, so a uint32_t appends cleanly at 52
+// for a total of 56 - still a multiple of the struct's 4-byte alignment, so no
+// trailing padding. The static_asserts below are the tripwire.
+struct PersistedV3 {
+  // --- carried over from V2, byte-identical ---
+  uint16_t version;
+  uint16_t runCurrentMa;
+  int32_t rawUp;
+  int32_t rawDown;
+  int32_t upOffsetSteps;
+  int32_t downOffsetSteps;
+  int32_t sgWorkZoneSteps;
+  int32_t counter;
+  uint16_t sgTrip[NUM_PROFILES];
+  uint8_t activeProfile;
+  uint8_t endpointsCalibrated;  // uint8_t, not bool: fixed on-flash width
+  uint32_t totalCycleTimeMs;
+  uint32_t longestCycleMs;
+  uint16_t stallCount;
+  uint16_t calibrationCount;
+  uint16_t otaCount;
+  uint16_t resetCount;
+  // --- new in V3 ---
+  uint32_t lifetimeCycles;  // successful UP->DOWN strokes, ever. Never capped,
+                            // never zeroed by Reset Counter.
+};
+static_assert(sizeof(PersistedV3) == 56,
+              "PersistedV3 must stay padding-free - see the offsets comment above");
+static_assert(offsetof(PersistedV3, lifetimeCycles) == sizeof(PersistedV2),
+              "V3's new field must start exactly where V2 ended");
+static_assert(NUM_PROFILES == 3, "PersistedV3::sgTrip sizing assumes 3 profiles");
+
 // The layout the firmware works with in RAM. Repoint this (not PersistedV1)
 // when a new version is introduced.
-using Persisted = PersistedV2;
+using Persisted = PersistedV3;
 
 // Largest blob any known version occupies - the read buffer settings_store.cpp
 // sizes its nvs_get_blob() against. Extend with max(...) when a longer version
 // is added; a stored blob bigger than this is rejected as a size mismatch.
-constexpr size_t kMaxBlobBytes = sizeof(PersistedV1) > sizeof(PersistedV2) ? sizeof(PersistedV1)
-                                                                           : sizeof(PersistedV2);
+// Versions have only ever grown, so V3 is the largest; the expression is kept
+// explicit rather than collapsed to sizeof(Persisted) so a future version that
+// somehow shrinks cannot silently undersize the read buffer for older blobs.
+constexpr size_t kMaxBlobBytes =
+    sizeof(PersistedV1) > sizeof(PersistedV2)
+        ? (sizeof(PersistedV1) > sizeof(PersistedV3) ? sizeof(PersistedV1) : sizeof(PersistedV3))
+        : (sizeof(PersistedV2) > sizeof(PersistedV3) ? sizeof(PersistedV2) : sizeof(PersistedV3));
 
 // ---------------------------------------------------------------------------
 //  Per-version validation
@@ -217,10 +270,43 @@ inline bool validateV2(const PersistedV2 &p) {
   return true;
 }
 
+// Validates the V3 LAYOUT. A copy of validateV2()'s body for the same reason
+// that one is a copy of V1's: each version validates its own layout on its own
+// frozen terms.
+//
+// lifetimeCycles gets no bounds check either, and for the same reasons as the
+// v2 counters - unsigned, no live setter to mirror, and any ceiling would be an
+// invented number that could cost a device its calibration for having simply
+// run a long time. It is also not cross-checked against `counter`: they are
+// deliberately unrelated (one is capped and resettable, the other is not), so
+// lifetimeCycles < counter is not evidence of corruption, merely of a firmware
+// that migrated up from v2 and has been reset since.
+inline bool validateV3(const PersistedV3 &p) {
+  if (p.runCurrentMa < RUN_CURRENT_MIN || p.runCurrentMa > RUN_CURRENT_MAX) return false;
+  if (p.sgWorkZoneSteps < SG_WORK_ZONE_MIN || p.sgWorkZoneSteps > SG_WORK_ZONE_MAX) return false;
+  if (p.activeProfile >= NUM_PROFILES) return false;
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) {
+    if (p.sgTrip[i] < RUN_SG_TRIP_MIN || p.sgTrip[i] > RUN_SG_TRIP_MAX) return false;
+  }
+  if (p.upOffsetSteps < OFFSET_MIN || p.upOffsetSteps > OFFSET_MAX) return false;
+  if (p.downOffsetSteps < OFFSET_MIN || p.downOffsetSteps > OFFSET_MAX) return false;
+  if (p.counter < 0) return false;
+  if (p.endpointsCalibrated > 1) return false;
+
+  // Geometry sanity - identical to V1's (see there for the reasoning).
+  if (p.rawUp < -CAL_SEARCH_STEPS || p.rawUp > CAL_SEARCH_STEPS) return false;
+  if (p.rawDown < -CAL_SEARCH_STEPS || p.rawDown > CAL_SEARCH_STEPS) return false;
+  if (p.endpointsCalibrated) {
+    const int32_t travel = p.rawDown - p.rawUp;
+    if (travel <= 2 * ENDPOINT_GUARD || travel > CAL_SEARCH_STEPS) return false;
+  }
+  return true;
+}
+
 // Validation of the CURRENT layout, used by the direct (version == kVersion)
 // load path. Repoint at validateV<new> together with `Persisted`.
 inline bool validate(const Persisted &p) {
-  return validateV2(p);
+  return validateV3(p);
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +341,39 @@ inline void migrate_v1_to_v2(const PersistedV1 &in, PersistedV2 &out) {
   out.resetCount = 0;
 }
 
+// v2 -> v3: everything carried over, and lifetimeCycles seeded from `counter`.
+//
+// Unlike v1 -> v2's zeros, there IS something truthful to seed with here.
+// `counter` counts exactly the same event (a successful UP->DOWN stroke) and is
+// a genuine lower bound on the device's history: it saturates at COUNTER_MAX and
+// the operator may have zeroed it, so the real figure is >= this, never less.
+// Seeding 0 instead would be strictly worse - it would throw away a real
+// measurement and, on a press with recorded totalCycleTimeMs, leave avgCycleMs
+// dividing by zero on the first boot after the upgrade. The number is a
+// diagnostic, and a documented lower bound beats a known-false zero.
+inline void migrate_v2_to_v3(const PersistedV2 &in, PersistedV3 &out) {
+  out = PersistedV3{};  // zero-init first: no byte left indeterminate
+  out.version = 3;
+  out.runCurrentMa = in.runCurrentMa;
+  out.rawUp = in.rawUp;
+  out.rawDown = in.rawDown;
+  out.upOffsetSteps = in.upOffsetSteps;
+  out.downOffsetSteps = in.downOffsetSteps;
+  out.sgWorkZoneSteps = in.sgWorkZoneSteps;
+  out.counter = in.counter;
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) out.sgTrip[i] = in.sgTrip[i];
+  out.activeProfile = in.activeProfile;
+  out.endpointsCalibrated = in.endpointsCalibrated;
+  out.totalCycleTimeMs = in.totalCycleTimeMs;
+  out.longestCycleMs = in.longestCycleMs;
+  out.stallCount = in.stallCount;
+  out.calibrationCount = in.calibrationCount;
+  out.otaCount = in.otaCount;
+  out.resetCount = in.resetCount;
+  // New in v3. validateV2() has already established counter >= 0.
+  out.lifetimeCycles = (uint32_t)in.counter;
+}
+
 // ---------------------------------------------------------------------------
 //  Dispatch
 // ---------------------------------------------------------------------------
@@ -273,6 +392,7 @@ enum class ParseResult : uint8_t {
 inline bool peekBlobVersion(const void *data, size_t len, uint16_t &out) {
   static_assert(offsetof(PersistedV1, version) == 0, "version must lead every blob layout");
   static_assert(offsetof(PersistedV2, version) == 0, "version must lead every blob layout");
+  static_assert(offsetof(PersistedV3, version) == 0, "version must lead every blob layout");
   if (data == nullptr || len < sizeof(uint16_t)) return false;
   std::memcpy(&out, data, sizeof(uint16_t));
   return true;
@@ -303,7 +423,9 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
       // walks the whole chain; `out` is only ever assigned the current layout.
       PersistedV2 v2{};
       migrate_v1_to_v2(v1, v2);
-      out = v2;
+      PersistedV3 v3{};
+      migrate_v2_to_v3(v2, v3);
+      out = v3;
       return ParseResult::Ok;
     }
     case 2: {
@@ -311,7 +433,17 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
       if (len != sizeof(v2)) return ParseResult::SizeMismatch;
       std::memcpy(&v2, data, sizeof(v2));
       if (!validateV2(v2)) return ParseResult::Invalid;
-      out = v2;  // current version: nothing to migrate
+      PersistedV3 v3{};
+      migrate_v2_to_v3(v2, v3);
+      out = v3;
+      return ParseResult::Ok;
+    }
+    case 3: {
+      PersistedV3 v3{};
+      if (len != sizeof(v3)) return ParseResult::SizeMismatch;
+      std::memcpy(&v3, data, sizeof(v3));
+      if (!validateV3(v3)) return ParseResult::Invalid;
+      out = v3;  // current version: nothing to migrate
       return ParseResult::Ok;
     }
     default:
@@ -324,7 +456,7 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
 // Step 6 of the recipe above, enforced by the compiler: bumping kVersion
 // without extending parseAndMigrate()'s switch breaks the build here.
 static_assert(
-    kVersion == 2,
+    kVersion == 3,
     "kVersion was bumped - add the new `case` and the migrate_vN_to_vN+1() step to "
     "parseAndMigrate(), then update this assert. See the recipe at the top of this file.");
 

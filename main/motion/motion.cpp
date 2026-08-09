@@ -307,10 +307,13 @@ void handleMotion() {
             // forever once the lifetime counter saturates. (Fixed upstream in
             // Karl's v1.10.0; this port inherited the v1.8 bug.)
             if (g_motion.counter < COUNTER_MAX) g_motion.counter++;
-            // Lifetime cycle-time statistics (diagnostics only - nothing in the
-            // motion logic reads them). Unlike `counter` these are NOT capped
-            // by COUNTER_MAX: the display cap is cosmetic and would silently
-            // freeze the averages once it saturated.
+            // Lifetime statistics (diagnostics only - nothing in the motion
+            // logic reads them). Unlike `counter` these are NOT capped by
+            // COUNTER_MAX and are never zeroed by Reset Counter: the display cap
+            // and the reset are both properties of the operator-facing counter,
+            // and letting either reach the lifetime figures is what made the
+            // health block's mean stroke time drift.
+            g_motion.lifetimeCycles++;
             g_motion.totalCycleTimeMs += strokeMs;
             if (strokeMs > g_motion.longestCycleMs) g_motion.longestCycleMs = strokeMs;
             if (g_motion.batchActive) {
@@ -326,7 +329,10 @@ void handleMotion() {
           if (complete) {
             webLog("Motion", "Batch complete: %ld/%ld", (long)doneCount, (long)doneTarget);
             requestGracefulStop();
-            setRunButtonState(false);
+            // After requestGracefulStop(), so the button renders the STOPPING
+            // the press is actually in rather than a green RUN it will not
+            // accept for another STOP_TIMEOUT_MS worth of decel.
+            ui_update_run_button();
             break;
           }
         }
@@ -563,7 +569,7 @@ void safeCreepHome() {
 
   webLog("Motion", "Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
 
-  setRunButtonState(false);
+  ui_update_run_button();
   ui_update_main_warning();
   ui_update_tuning_numbers();
   ui_update_endpoint_edit_values();

@@ -12,11 +12,13 @@
 //      the struct's own static_assert on sizeof() might still pass.
 //
 //   2. That the migration chain actually carries an old device forward.
-//      kVersion is 2 (the health counters of #9), so the v1 -> v2 step is real
-//      and is exercised here through the shipped parseAndMigrate(): a raw v1
-//      byte buffer in, a PersistedV2 out, every carried-over field asserted and
-//      every new field asserted to be 0. This replaces the stand-in "recipe
-//      rehearsal" the file used to carry while kVersion was still 1.
+//      kVersion is 3, so there are two real steps - v1 -> v2 (the health
+//      counters) and v2 -> v3 (the true lifetime cycle count) - and both are
+//      exercised through the shipped parseAndMigrate(): a raw byte buffer of
+//      each shipped version in, a PersistedV3 out, every carried-over field
+//      asserted and every new field asserted to hold its documented seed.
+//      A v1 blob must walk the WHOLE chain (v1 -> v2 -> v3), which is the case
+//      a shortcut migration would silently get wrong.
 // ============================================================================
 #include <unity.h>
 
@@ -119,6 +121,22 @@ std::vector<uint8_t> buildV2(const V1Fields &f, const V2Extra &e) {
   return b;
 }
 
+// Raw v3 blob: the v2 bytes above, unchanged and at the same offsets, plus
+//    off 52 u32 lifetimeCycles
+struct V3Extra {
+  uint32_t lifetimeCycles = 58021;  // deliberately unequal to V1Fields::counter
+                                    // (1234): the two are different statistics
+                                    // and must never be conflated again
+};
+
+std::vector<uint8_t> buildV3(const V1Fields &f, const V2Extra &e, const V3Extra &x) {
+  std::vector<uint8_t> b = buildV2(f, e);  // identical prefix, by construction
+  b.resize(56, 0);
+  putU16(b, 0, 3);  // ... except the version field
+  putU32(b, 52, x.lifetimeCycles);
+  return b;
+}
+
 // Parse a blob built from `f` and assert only that it was rejected the way we
 // expect, leaving `out` untouched. Used by all the negative cases.
 void expectRejected(const V1Fields &f, ParseResult expected) {
@@ -183,9 +201,9 @@ void test_v2_layout_extends_v1_without_moving_anything() {
   TEST_ASSERT_EQUAL_UINT32(46, (uint32_t)offsetof(PersistedV2, calibrationCount));
   TEST_ASSERT_EQUAL_UINT32(48, (uint32_t)offsetof(PersistedV2, otaCount));
   TEST_ASSERT_EQUAL_UINT32(50, (uint32_t)offsetof(PersistedV2, resetCount));
-  // `Persisted` (what settings_store.cpp works with) must be the current one.
-  TEST_ASSERT_EQUAL_UINT16(2, kVersion);
-  TEST_ASSERT_EQUAL_UINT32(sizeof(PersistedV2), (uint32_t)sizeof(Persisted));
+  // v2 is a shipped layout and therefore frozen; `Persisted` moved on to v3.
+  // See test_v3_layout_extends_v2_without_moving_anything for the current one.
+  TEST_ASSERT_EQUAL_UINT32(sizeof(PersistedV3), (uint32_t)sizeof(Persisted));
 }
 
 void test_peek_version_reads_only_the_leading_field() {
@@ -208,7 +226,7 @@ void test_peek_version_reads_only_the_leading_field() {
 //  device flashed before the health counters existed - carried forward to v2
 //  through the shipped parseAndMigrate(). Nothing here is a stand-in.
 // ---------------------------------------------------------------------------
-void test_v1_blob_migrates_to_v2_carrying_every_field() {
+void test_v1_blob_migrates_all_the_way_to_v3_carrying_every_field() {
   V1Fields f;
   const std::vector<uint8_t> raw = buildV1(f);
   TEST_ASSERT_EQUAL_UINT32(36, (uint32_t)raw.size());  // it really is the v1 length
@@ -218,10 +236,11 @@ void test_v1_blob_migrates_to_v2_carrying_every_field() {
   TEST_ASSERT_EQUAL_INT((int)ParseResult::Ok,
                         (int)parseAndMigrate(raw.data(), raw.size(), out, &from));
 
-  // A migration ran: found v1, produced the current version.
+  // A migration ran: found v1, produced the current version. Two steps, chained
+  // (v1 -> v2 -> v3) - not a v1 -> v3 shortcut.
   TEST_ASSERT_EQUAL_UINT16(1, from);
   TEST_ASSERT_NOT_EQUAL_UINT16(kVersion, from);
-  TEST_ASSERT_EQUAL_UINT16(2, out.version);
+  TEST_ASSERT_EQUAL_UINT16(3, out.version);
   TEST_ASSERT_EQUAL_UINT16(kVersion, out.version);
 
   // Every field that existed in v1 survived, byte for byte - this is the whole
@@ -239,7 +258,7 @@ void test_v1_blob_migrates_to_v2_carrying_every_field() {
   TEST_ASSERT_EQUAL_UINT8(2, out.activeProfile);
   TEST_ASSERT_EQUAL_UINT8(1, out.endpointsCalibrated);
 
-  // ... and all six fields that did not exist in v1 are 0, not garbage: a
+  // ... and the six fields that did not exist in v1 are 0, not garbage: a
   // migrating device has no recorded history to backfill.
   TEST_ASSERT_EQUAL_UINT32(0, out.totalCycleTimeMs);
   TEST_ASSERT_EQUAL_UINT32(0, out.longestCycleMs);
@@ -247,6 +266,13 @@ void test_v1_blob_migrates_to_v2_carrying_every_field() {
   TEST_ASSERT_EQUAL_UINT16(0, out.calibrationCount);
   TEST_ASSERT_EQUAL_UINT16(0, out.otaCount);
   TEST_ASSERT_EQUAL_UINT16(0, out.resetCount);
+
+  // lifetimeCycles is the exception, and the reason the v2 -> v3 step is not a
+  // zero-fill: `counter` counts the same event, so it is a real (if capped and
+  // resettable) lower bound on this device's history. Seeding 0 would discard a
+  // measurement we actually have. The value here proves the SECOND step ran on
+  // the output of the first - it comes from the v1 blob's counter.
+  TEST_ASSERT_EQUAL_UINT32(1234, out.lifetimeCycles);
 }
 
 // The migration must not depend on `out` happening to arrive zeroed: a caller
@@ -259,6 +285,7 @@ void test_migration_overwrites_a_dirty_output_struct() {
   out.calibrationCount = 66;
   out.otaCount = 77;
   out.resetCount = 88;
+  out.lifetimeCycles = 123456;
   out.counter = 4321;
 
   const std::vector<uint8_t> raw = buildV1(V1Fields{});
@@ -270,7 +297,8 @@ void test_migration_overwrites_a_dirty_output_struct() {
   TEST_ASSERT_EQUAL_UINT16(0, out.calibrationCount);
   TEST_ASSERT_EQUAL_UINT16(0, out.otaCount);
   TEST_ASSERT_EQUAL_UINT16(0, out.resetCount);
-  TEST_ASSERT_EQUAL_INT32(1234, out.counter);  // from the blob, not the leftover
+  TEST_ASSERT_EQUAL_INT32(1234, out.counter);          // from the blob, not the leftover
+  TEST_ASSERT_EQUAL_UINT32(1234, out.lifetimeCycles);  // seeded from it, not the leftover
 }
 
 // A corrupt v1 blob must be rejected on V1's terms BEFORE it is migrated -
@@ -289,7 +317,7 @@ void test_corrupt_v1_blob_is_rejected_before_migrating() {
 // ---------------------------------------------------------------------------
 //  The direct (current-version) load path
 // ---------------------------------------------------------------------------
-void test_v2_blob_loads_unchanged() {
+void test_v2_blob_migrates_to_v3_seeding_lifetime_cycles_from_the_counter() {
   const std::vector<uint8_t> raw = buildV2(V1Fields{}, V2Extra{});
   TEST_ASSERT_EQUAL_UINT32(52, (uint32_t)raw.size());
 
@@ -299,7 +327,8 @@ void test_v2_blob_loads_unchanged() {
                         (int)parseAndMigrate(raw.data(), raw.size(), out, &from));
 
   TEST_ASSERT_EQUAL_UINT16(2, from);
-  TEST_ASSERT_EQUAL_UINT16(kVersion, from);  // no migration ran: same version
+  TEST_ASSERT_NOT_EQUAL_UINT16(kVersion, from);  // one migration step ran
+  TEST_ASSERT_EQUAL_UINT16(3, out.version);
   // Carried-over half still parses at the v1 offsets.
   TEST_ASSERT_EQUAL_UINT16(2200, out.runCurrentMa);
   TEST_ASSERT_EQUAL_INT32(41000, out.rawDown);
@@ -313,6 +342,11 @@ void test_v2_blob_loads_unchanged() {
   TEST_ASSERT_EQUAL_UINT16(4, out.calibrationCount);
   TEST_ASSERT_EQUAL_UINT16(9, out.otaCount);
   TEST_ASSERT_EQUAL_UINT16(302, out.resetCount);
+  // Seeded from the piece counter - a lower bound, documented as such, and
+  // specifically NOT 0: this device has 812345 ms of recorded stroke time, so a
+  // zero denominator would make avgCycleMs report 0 on the first boot after the
+  // upgrade rather than a plausible number.
+  TEST_ASSERT_EQUAL_UINT32(1234, out.lifetimeCycles);
 }
 
 // Deliberate design decision (see validateV2()): the counters themselves have
@@ -367,7 +401,7 @@ void test_unknown_versions_are_refused() {
   V1Fields f;
   f.version = 0;  // predates any layout we know
   expectRejected(f, ParseResult::UnknownVersion);
-  f.version = 3;  // from the future: an OTA rollback to this firmware
+  f.version = 4;  // from the future: an OTA rollback to this firmware
   expectRejected(f, ParseResult::UnknownVersion);
   f.version = 0xFFFF;  // erased flash / garbage
   expectRejected(f, ParseResult::UnknownVersion);
@@ -399,6 +433,18 @@ void test_size_mismatches_are_refused() {
   putU16(v1AsV2, 0, 2);
   TEST_ASSERT_EQUAL_INT((int)ParseResult::SizeMismatch,
                         (int)parseAndMigrate(v1AsV2.data(), v1AsV2.size(), out));
+
+  // Same again for v3. The dangerous one is v2's 52 bytes labelled version 3:
+  // a straight memcpy of that into a PersistedV3 would read four bytes past the
+  // blob and hand back whatever followed it as lifetimeCycles.
+  std::vector<uint8_t> v2AsV3 = buildV2(V1Fields{}, V2Extra{});
+  putU16(v2AsV3, 0, 3);
+  TEST_ASSERT_EQUAL_INT((int)ParseResult::SizeMismatch,
+                        (int)parseAndMigrate(v2AsV3.data(), v2AsV3.size(), out));
+  std::vector<uint8_t> v3AsV2 = buildV3(V1Fields{}, V2Extra{}, V3Extra{});
+  putU16(v3AsV2, 0, 2);
+  TEST_ASSERT_EQUAL_INT((int)ParseResult::SizeMismatch,
+                        (int)parseAndMigrate(v3AsV2.data(), v3AsV2.size(), out));
 }
 
 void test_out_of_range_fields_are_refused() {
@@ -460,15 +506,118 @@ void test_out_of_range_fields_are_refused() {
   }
 }
 
+// ---------------------------------------------------------------------------
+//  v3: the current layout
+// ---------------------------------------------------------------------------
+void test_v3_layout_extends_v2_without_moving_anything() {
+  TEST_ASSERT_EQUAL_UINT32(56, (uint32_t)sizeof(PersistedV3));
+  TEST_ASSERT_EQUAL_UINT16(3, kVersion);
+  // The whole v2 prefix keeps its offsets, which is what lets a v2 blob's bytes
+  // still mean what they meant.
+  TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)offsetof(PersistedV3, version));
+  TEST_ASSERT_EQUAL_UINT32(24, (uint32_t)offsetof(PersistedV3, counter));
+  TEST_ASSERT_EQUAL_UINT32(36, (uint32_t)offsetof(PersistedV3, totalCycleTimeMs));
+  TEST_ASSERT_EQUAL_UINT32(50, (uint32_t)offsetof(PersistedV3, resetCount));
+  // ... and the new field starts exactly where v2 ended.
+  TEST_ASSERT_EQUAL_UINT32(52, (uint32_t)offsetof(PersistedV3, lifetimeCycles));
+  TEST_ASSERT_EQUAL_UINT32((uint32_t)sizeof(PersistedV2),
+                           (uint32_t)offsetof(PersistedV3, lifetimeCycles));
+  // The read buffer must be able to hold it, or a v3 blob is unreadable.
+  TEST_ASSERT_TRUE(kMaxBlobBytes >= sizeof(PersistedV3));
+}
+
+void test_v3_blob_loads_unchanged() {
+  const std::vector<uint8_t> raw = buildV3(V1Fields{}, V2Extra{}, V3Extra{});
+  TEST_ASSERT_EQUAL_UINT32(56, (uint32_t)raw.size());
+
+  Persisted out{};
+  uint16_t from = 0;
+  TEST_ASSERT_EQUAL_INT((int)ParseResult::Ok,
+                        (int)parseAndMigrate(raw.data(), raw.size(), out, &from));
+
+  TEST_ASSERT_EQUAL_UINT16(3, from);
+  TEST_ASSERT_EQUAL_UINT16(kVersion, from);  // no migration ran: same version
+  // Carried-over halves still parse at their original offsets.
+  TEST_ASSERT_EQUAL_UINT16(2200, out.runCurrentMa);
+  TEST_ASSERT_EQUAL_INT32(41000, out.rawDown);
+  TEST_ASSERT_EQUAL_INT32(1234, out.counter);
+  TEST_ASSERT_EQUAL_UINT32(812345, out.totalCycleTimeMs);
+  TEST_ASSERT_EQUAL_UINT16(302, out.resetCount);
+  // And the new field is read from the blob, NOT re-seeded from counter - a
+  // device that has been running since v3 must keep its real total even after
+  // the operator has zeroed the piece counter.
+  TEST_ASSERT_EQUAL_UINT32(58021, out.lifetimeCycles);
+  TEST_ASSERT_NOT_EQUAL_UINT32((uint32_t)out.counter, out.lifetimeCycles);
+}
+
+// The two numbers are independent by design: lifetimeCycles < counter is what a
+// device looks like after migrating from v2 and then running past a reset, and
+// must not be treated as corruption.
+void test_v3_lifetime_cycles_below_the_piece_counter_is_valid() {
+  V1Fields f;
+  f.counter = 9999;  // saturated piece counter
+  V3Extra x;
+  x.lifetimeCycles = 12;
+  const std::vector<uint8_t> raw = buildV3(f, V2Extra{}, x);
+  Persisted out{};
+  TEST_ASSERT_EQUAL_INT((int)ParseResult::Ok, (int)parseAndMigrate(raw.data(), raw.size(), out));
+  TEST_ASSERT_EQUAL_UINT32(12, out.lifetimeCycles);
+  TEST_ASSERT_EQUAL_INT32(9999, out.counter);
+}
+
+// Same reasoning as validateV2()'s counters: an unbounded diagnostic must never
+// cost the operator their calibration.
+void test_v3_extreme_lifetime_cycles_is_still_valid() {
+  V3Extra x;
+  x.lifetimeCycles = 0xFFFFFFFFu;
+  const std::vector<uint8_t> raw = buildV3(V1Fields{}, V2Extra{}, x);
+  Persisted out{};
+  TEST_ASSERT_EQUAL_INT((int)ParseResult::Ok, (int)parseAndMigrate(raw.data(), raw.size(), out));
+  TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFFu, out.lifetimeCycles);
+  TEST_ASSERT_EQUAL_UINT8(1, out.endpointsCalibrated);  // calibration untouched
+}
+
+// The carried-over half of a v3 blob is validated exactly as v1's and v2's are.
+void test_v3_blob_with_a_bad_carried_field_is_refused() {
+  V1Fields f;
+  f.sgWorkZoneSteps = -1;  // < SG_WORK_ZONE_MIN
+  const std::vector<uint8_t> raw = buildV3(f, V2Extra{}, V3Extra{});
+  Persisted out{};
+  out.counter = -777;
+  TEST_ASSERT_EQUAL_INT((int)ParseResult::Invalid,
+                        (int)parseAndMigrate(raw.data(), raw.size(), out));
+  TEST_ASSERT_EQUAL_INT32(-777, out.counter);
+}
+
+// A v2 blob that fails V2's own validation must be rejected BEFORE the v2 -> v3
+// step runs - otherwise the migration would launder it into a v3 struct whose
+// only new field looks perfectly reasonable.
+void test_corrupt_v2_blob_is_rejected_before_migrating_to_v3() {
+  V1Fields f;
+  f.counter = -1;
+  const std::vector<uint8_t> raw = buildV2(f, V2Extra{});
+  Persisted out{};
+  out.lifetimeCycles = 4242;  // sentinel: must survive a rejected parse
+  TEST_ASSERT_EQUAL_INT((int)ParseResult::Invalid,
+                        (int)parseAndMigrate(raw.data(), raw.size(), out));
+  TEST_ASSERT_EQUAL_UINT32(4242, out.lifetimeCycles);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_v1_layout_is_frozen);
   RUN_TEST(test_v2_layout_extends_v1_without_moving_anything);
   RUN_TEST(test_peek_version_reads_only_the_leading_field);
-  RUN_TEST(test_v1_blob_migrates_to_v2_carrying_every_field);
+  RUN_TEST(test_v3_layout_extends_v2_without_moving_anything);
+  RUN_TEST(test_v1_blob_migrates_all_the_way_to_v3_carrying_every_field);
   RUN_TEST(test_migration_overwrites_a_dirty_output_struct);
   RUN_TEST(test_corrupt_v1_blob_is_rejected_before_migrating);
-  RUN_TEST(test_v2_blob_loads_unchanged);
+  RUN_TEST(test_v2_blob_migrates_to_v3_seeding_lifetime_cycles_from_the_counter);
+  RUN_TEST(test_corrupt_v2_blob_is_rejected_before_migrating_to_v3);
+  RUN_TEST(test_v3_blob_loads_unchanged);
+  RUN_TEST(test_v3_lifetime_cycles_below_the_piece_counter_is_valid);
+  RUN_TEST(test_v3_extreme_lifetime_cycles_is_still_valid);
+  RUN_TEST(test_v3_blob_with_a_bad_carried_field_is_refused);
   RUN_TEST(test_v2_extreme_counters_are_still_valid);
   RUN_TEST(test_v2_blob_with_a_bad_carried_field_is_refused);
   RUN_TEST(test_uncalibrated_v1_blob_loads);

@@ -95,32 +95,60 @@ void processPendingCommands() {
     // finished a batch between the tap and now.
     if (autolee::canStart(toMotorState(g_motion.runState))) {
       startRunBetweenEndpoints();
-      setRunButtonState(g_motion.runState == RUNNING);
+      ui_update_run_button();
     } else if (motionEventAllowed(autolee::MotorEvent::GracefulStop)) {
       requestGracefulStop();
-      setRunButtonState(false);
+      ui_update_run_button();
       motion_state::Guard g;
       g_motion.batchActive = false;
+    } else {
+      // STOPPING, CALIBRATING, STALLED or HOMING: the tested table accepts
+      // neither Start nor GracefulStop, so the tap has nowhere to go. Say so -
+      // it used to be discarded in complete silence, which reads to an operator
+      // as an unresponsive machine.
+      webLog("Motion", "Run/stop ignored in state %u", (unsigned)g_motion.runState);
     }
   }
 
   if (s_stop.exchange(false)) {
     if (motionEventAllowed(autolee::MotorEvent::GracefulStop)) {
       requestGracefulStop();
-      setRunButtonState(false);
+      ui_update_run_button();
     }
   }
 
   if (s_batchStart.exchange(false)) {
-    if (g_motion.batchTarget > 0 && autolee::canStart(toMotorState(g_motion.runState)) &&
-        g_motion.endpointsCalibrated) {
-      {
+    // Every gate startRunBetweenEndpoints() enforces is checked here too, one
+    // at a time, so a refusal can be named instead of the whole thing being a
+    // silent no-op.
+    //
+    // positionReferenceStale is the gate that used to be missing entirely, and
+    // it was the expensive one: after any reboot with a restored calibration the
+    // axis is unreferenced, motion.cpp refused the start - but batchActive and a
+    // red STOP label had *already* been set two lines earlier. Both UIs then
+    // reported a batch running on a press that was standing still ("Running:
+    // 0/N", Start Batch disabled), with no way out but a toggle, and nothing
+    // anywhere saying why.
+    if (g_motion.batchTarget <= 0) {
+      webLog("Motion", "Batch start ignored: no target set");
+    } else if (!g_motion.endpointsCalibrated) {
+      webLog("Motion", "Batch start ignored: not calibrated");
+    } else if (g_motion.positionReferenceStale) {
+      webLogLevel(LogLevel::Warn, "Motion",
+                  "Batch start refused: position reference unconfirmed - return home first");
+    } else if (!autolee::canStart(toMotorState(g_motion.runState))) {
+      webLog("Motion", "Batch start ignored in state %u", (unsigned)g_motion.runState);
+    } else {
+      startRunBetweenEndpoints();
+      // Arm the batch only once the run is genuinely under way. Anything that
+      // refuses inside startRunBetweenEndpoints() must leave the flag clear, or
+      // the dashboard reports a batch in progress forever.
+      if (g_motion.runState == RUNNING) {
         motion_state::Guard g;
         g_motion.batchCount = 0;
         g_motion.batchActive = true;
       }
-      startRunBetweenEndpoints();
-      setRunButtonState(true);
+      ui_update_run_button();
     }
   }
 

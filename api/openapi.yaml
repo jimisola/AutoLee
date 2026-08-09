@@ -416,10 +416,10 @@ paths:
                       - otaCount
                       - resetCount
                     properties:
-                      cycleCount: { type: integer, minimum: 0, description: "Successful cycles - the same piece counter as the state payload's `counter` (display-capped at 9999, zeroable via /api/v1/motion/reset_counter)" }
+                      cycleCount: { type: integer, minimum: 0, description: "Lifetime successful UP->DOWN strokes. NOT the state payload's `counter`, which is the operator-facing piece counter: that one saturates at 9999 for the LCD and is zeroed by /api/v1/motion/reset_counter, while this one is never capped and never reset. Persisted (settings blob v3). On a device upgrading from v2 firmware it is seeded from `counter`, so its first value after that upgrade is a lower bound rather than a true total." }
                       stallCount: { type: integer, minimum: 0, description: "Jams that latched STALLED" }
                       totalCycleTimeMs: { type: integer, minimum: 0, description: "Summed duration of every successful UP->DOWN stroke; jammed strokes are excluded" }
-                      avgCycleMs: { type: integer, minimum: 0, description: "totalCycleTimeMs / cycleCount, 0 when cycleCount is 0. Derived, not stored - skewed if the piece counter was reset or has saturated; totalCycleTimeMs and longestCycleMs stay exact" }
+                      avgCycleMs: { type: integer, minimum: 0, description: "totalCycleTimeMs / cycleCount, 0 when cycleCount is 0. Derived, not stored. Numerator and denominator now count the same strokes; before the v3 blob the denominator was the piece counter, so this drifted once that saturated or was reset" }
                       longestCycleMs: { type: integer, minimum: 0, description: "Longest single successful stroke seen" }
                       calibrationCount: { type: integer, minimum: 0, description: "Successful sensorless calibrations" }
                       otaCount: { type: integer, minimum: 0, description: "Successful OTA updates (counted once the new image is set to boot)" }

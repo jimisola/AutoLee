@@ -1018,14 +1018,15 @@ void setupWebServer() {
     // render the dashboard, whereas /api/v1/state is polled and re-broadcast
     // over SSE continuously and is already close to its fixed 768-byte buffer.
     const MotionState ms = motion_state::snapshot();
-    // Derived, not stored: the mean successful stroke time. `counter` is the
-    // successful-cycle count, so it is the right denominator - but note it is
-    // capped at COUNTER_MAX for the display and can be zeroed via
-    // /api/v1/motion/reset_counter, either of which skews this average while
-    // leaving totalCycleTimeMs/longestCycleMs exact. Prefer those two when the
-    // number has to be trusted.
+    // Derived, not stored: the mean successful stroke time. The denominator is
+    // lifetimeCycles, which counts exactly the strokes totalCycleTimeMs sums.
+    // It used to be `counter` - the operator-facing piece counter - which
+    // saturates at COUNTER_MAX and is zeroed by Reset Counter, so past 9999
+    // strokes this average climbed without bound and a counter reset made it
+    // jump, while the numerator stayed exact. Both surfaces reported the result
+    // under "Lifetime Health".
     const uint32_t avgCycleMs =
-        (ms.counter > 0) ? (uint32_t)(ms.totalCycleTimeMs / (uint32_t)ms.counter) : 0;
+        (ms.lifetimeCycles > 0) ? (uint32_t)(ms.totalCycleTimeMs / ms.lifetimeCycles) : 0;
 
     // Largest single allocatable block, MALLOC_CAP_8BIT to match
     // esp_get_free_heap_size()/esp_get_minimum_free_heap_size() above (both
@@ -1071,7 +1072,7 @@ void setupWebServer() {
              "\"runningPartition\":\"%s\",\"coredumpPresent\":%s,"
              "\"flashSizeBytes\":%lu,\"cpuFreqMhz\":%d,\"wifiRssi\":%s,"
              "\"pumpStackHighWaterMark\":%lu,\"settingsVersion\":%u,"
-             "\"health\":{\"cycleCount\":%ld,\"stallCount\":%u,\"totalCycleTimeMs\":%lu,"
+             "\"health\":{\"cycleCount\":%lu,\"stallCount\":%u,\"totalCycleTimeMs\":%lu,"
              "\"avgCycleMs\":%lu,\"longestCycleMs\":%lu,\"calibrationCount\":%u,"
              "\"otaCount\":%u,\"resetCount\":%u}}",
              desc->version, desc->idf_ver, desc->date, desc->time, sha,
@@ -1080,8 +1081,8 @@ void setupWebServer() {
              (unsigned long long)(esp_timer_get_time() / 1000), running ? running->label : "?",
              coredumpPresent ? "true" : "false", (unsigned long)flashSizeBytes, cpuFreqMhz,
              wifiRssiJson, (unsigned long)pumpStackHighWaterMarkBytes,
-             (unsigned)settings_store::kVersion, (long)ms.counter, (unsigned)ms.stallCount,
-             (unsigned long)ms.totalCycleTimeMs, (unsigned long)avgCycleMs,
+             (unsigned)settings_store::kVersion, (unsigned long)ms.lifetimeCycles,
+             (unsigned)ms.stallCount, (unsigned long)ms.totalCycleTimeMs, (unsigned long)avgCycleMs,
              (unsigned long)ms.longestCycleMs, (unsigned)ms.calibrationCount, (unsigned)ms.otaCount,
              (unsigned)ms.resetCount);
     return res->send(200, "application/json", buf);
