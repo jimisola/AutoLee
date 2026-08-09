@@ -278,6 +278,7 @@ grouping is navigational, not a module boundary the compiler enforces.
 
 | Mechanism | What it buys | Verified? |
 |---|---|---|
+| **Emergency Stop (hardware)** | **The only people-safety device.** Normally-closed, in series on the incoming DC rail upstream of everything, so it cuts the stepper driver *and* the controller. Independent of firmware entirely — it works when the board is wedged, mid-OTA, or unpowered-but-charged. See [wiring.md](wiring.md#power) | ⚙️ fit and test it before first use |
 | OTA rollback | An image that fails its post-boot self-check reverts automatically | ✅ on hardware |
 | Task + interrupt watchdog | A hung task resets the board rather than leaving a powered stepper frozen | ✅ on hardware |
 | Core dump to flash | Post-crash backtrace instead of a silent reboot | ✅ on hardware |
@@ -292,6 +293,16 @@ grouping is navigational, not a module boundary the compiler enforces.
 no motor attached** — the request/response contract, the state machine and the
 unwind paths are exercised, the mechanics are not. Anything that depends on the
 motor actually turning is still ⚙️.
+
+Everything in that table below the first row is firmware. None of it is a substitute
+for the E-stop, and the firmware's own controlled-stop paths (`requestGracefulStop()`,
+the jam backoff) are about protecting *brass and the mechanism*, not people.
+
+One consequence of the E-stop cutting logic power is worth knowing when reading motion
+code: a reboot mid-stroke is a **routine** event on this machine, not an edge case. The
+stepper counter returns as 0 wherever the carriage stopped, so `settings_store` restores
+the calibration with `positionReferenceStale` latched and a run is refused until a
+Return Home. That gate runs far more often than "after a power cut" suggests.
 
 Configuration lives in `sdkconfig.defaults`; see
 [adr/0001-build-tooling-and-platform.md](adr/0001-build-tooling-and-platform.md)
