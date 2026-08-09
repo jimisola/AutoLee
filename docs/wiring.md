@@ -26,14 +26,9 @@ Substitute the variant's actual rail voltage (24V or 36V — see the BOM links a
 "PSU" appears below; the buck converter always steps down to 5V logic power regardless of
 variant.
 
-The positive rail passes through **two switches in series** before it reaches
-anything. Both diagrams show this; it is identical for the 24V and 36V builds:
-
-```
-PSU (+) ──▶ On/Off switch (#8) ──▶ Emergency Stop (#10) ──┬──▶ TMC5160 HVIN
-                                                          ├──▶ Fan
-                                                          └──▶ Buck converter IN ──▶ 5 V ──▶ ESP32-C6
-```
+The On/Off switch (#8) and the Emergency Stop (#10) are both in series on the
+positive rail, upstream of every load — see the wiring diagrams above for the
+full picture, including the fan supply, which differs between the variants.
 
 | Connection | Details |
 |---|---|
@@ -41,7 +36,7 @@ PSU (+) ──▶ On/Off switch (#8) ──▶ Emergency Stop (#10) ──┬─
 | E-stop → TMC5160 VM (HVIN) | Motor power |
 | E-stop → Buck converter IN | Feeds the buck converter |
 | Buck converter OUT (5 V) → ESP32-C6 | Logic power |
-| E-stop → Fan | Direct PSU voltage to cooling fan |
+| PSU → Fan | See the variant wiring diagram — the fan supply is not the raw rail on every build |
 | GND | Common ground between all boards |
 
 > **The Emergency Stop (#10) is normally-closed and cuts the whole rail — including
