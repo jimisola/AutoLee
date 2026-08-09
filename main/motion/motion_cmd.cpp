@@ -2,6 +2,7 @@
 
 #include <atomic>
 
+#include "command_gate.h"
 #include "config.h"
 #include "globals.h"
 #include "motion.h"
@@ -30,6 +31,32 @@ std::atomic<bool> s_resetSettings{false};
 std::atomic<bool> s_abort{false};
 std::atomic<int32_t> s_profile{-1};    // -1 = none pending
 std::atomic<int32_t> s_currentMa{-1};  // -1 = none pending
+
+// The gate's view of the machine. pump_task owns g_motion and may read it
+// unlocked (motion_state.h), so this is a plain field copy.
+autolee::GateInput gateInput() {
+  autolee::GateInput in;
+  in.state = toMotorState(g_motion.runState);
+  in.calibrated = g_motion.endpointsCalibrated;
+  in.positionStale = g_motion.positionReferenceStale;
+  in.batchTarget = g_motion.batchTarget;
+  return in;
+}
+
+// Severity follows the refusal, not the call site: a refusal the operator has to
+// do something about (calibrate, home) is a warning wherever it came from, while
+// a transient one - tapping stop on an idle press, starting a batch with no
+// target - is ordinary information. The state is always included; for a
+// WrongState refusal it is the whole explanation, and for the others it is
+// context worth having in a support log.
+void logRefusal(const char *category, const char *what, autolee::Refusal r) {
+  const LogLevel level =
+      (r == autolee::Refusal::NotCalibrated || r == autolee::Refusal::PositionUnreferenced)
+          ? LogLevel::Warn
+          : LogLevel::Info;
+  webLogLevel(level, category, "%s refused: %s (state %u)", what, autolee::refusalMessage(r),
+              (unsigned)g_motion.runState);
+}
 
 }  // namespace
 
@@ -78,66 +105,73 @@ void requestCurrentMa(int32_t ma) {
 void processPendingCommands() {
   // Calibration and homing block for seconds; they were already deferred
   // before this module existed, so keep using their existing entry points.
-  // The state gates below ask the host-tested transition table
-  // (lib/autolee_logic/motor_fsm.h) rather than re-hardcoding which states each
-  // command is legal from; motion.cpp re-checks the same table when it actually
-  // applies the transition, so the rule lives in exactly one tested place.
+  //
+  // Every gate below asks lib/autolee_logic/command_gate.h - the same pure,
+  // host-tested predicates the HTTP layer uses to answer 400/409. This is the
+  // authoritative evaluation of the two: the HTTP one ran on another task and
+  // the press may have jammed, finished a batch or been stopped from the panel
+  // since. motion.cpp re-checks the FSM transition again when it applies it, so
+  // nothing here is the only thing standing between a bad request and the
+  // stepper. See docs/FLOWS.md §1.
   if (s_calibrate.exchange(false)) {
-    if (motionEventAllowed(autolee::MotorEvent::Calibrate)) calibrateEndpointsSensorless();
+    const autolee::Refusal r = autolee::gateCalibrate(gateInput());
+    if (r == autolee::Refusal::None)
+      calibrateEndpointsSensorless();
+    else
+      logRefusal("Motion", "Calibration", r);
   }
 
   if (s_returnHome.exchange(false)) {
-    if (motionEventAllowed(autolee::MotorEvent::ReturnHome)) safeCreepHome();
+    const autolee::Refusal r = autolee::gateReturnHome(gateInput());
+    if (r == autolee::Refusal::None)
+      safeCreepHome();
+    else
+      logRefusal("Motion", "Return home", r);
   }
 
   if (s_toggleRun.exchange(false)) {
-    // Re-check state here, not at request time: the press may have jammed or
-    // finished a batch between the tap and now.
-    if (autolee::canStart(toMotorState(g_motion.runState))) {
+    // One button, two meanings: from IDLE this is a start, from RUNNING a stop.
+    // gateToggleRun() decides which, and names the refusal for whichever it was
+    // - so an uncalibrated press sitting at IDLE is told it needs calibrating
+    // rather than the technically-true but useless "wrong state". That case used
+    // to return in complete silence from inside startRunBetweenEndpoints().
+    const autolee::GateInput in = gateInput();
+    const autolee::Refusal r = autolee::gateToggleRun(in);
+    if (r != autolee::Refusal::None) {
+      logRefusal("Motion", "Run/stop", r);
+    } else if (autolee::canStart(in.state)) {
       startRunBetweenEndpoints();
       ui_update_run_button();
-    } else if (motionEventAllowed(autolee::MotorEvent::GracefulStop)) {
+    } else {
       requestGracefulStop();
       ui_update_run_button();
       motion_state::Guard g;
       g_motion.batchActive = false;
-    } else {
-      // STOPPING, CALIBRATING, STALLED or HOMING: the tested table accepts
-      // neither Start nor GracefulStop, so the tap has nowhere to go. Say so -
-      // it used to be discarded in complete silence, which reads to an operator
-      // as an unresponsive machine.
-      webLog("Motion", "Run/stop ignored in state %u", (unsigned)g_motion.runState);
     }
   }
 
   if (s_stop.exchange(false)) {
-    if (motionEventAllowed(autolee::MotorEvent::GracefulStop)) {
+    const autolee::Refusal r = autolee::gateStop(gateInput());
+    if (r == autolee::Refusal::None) {
       requestGracefulStop();
       ui_update_run_button();
+    } else {
+      logRefusal("Motion", "Stop", r);
     }
   }
 
   if (s_batchStart.exchange(false)) {
-    // Every gate startRunBetweenEndpoints() enforces is checked here too, one
-    // at a time, so a refusal can be named instead of the whole thing being a
-    // silent no-op.
-    //
-    // positionReferenceStale is the gate that used to be missing entirely, and
-    // it was the expensive one: after any reboot with a restored calibration the
-    // axis is unreferenced, motion.cpp refused the start - but batchActive and a
-    // red STOP label had *already* been set two lines earlier. Both UIs then
-    // reported a batch running on a press that was standing still ("Running:
-    // 0/N", Start Batch disabled), with no way out but a toggle, and nothing
-    // anywhere saying why.
-    if (g_motion.batchTarget <= 0) {
-      webLog("Motion", "Batch start ignored: no target set");
-    } else if (!g_motion.endpointsCalibrated) {
-      webLog("Motion", "Batch start ignored: not calibrated");
-    } else if (g_motion.positionReferenceStale) {
-      webLogLevel(LogLevel::Warn, "Motion",
-                  "Batch start refused: position reference unconfirmed - return home first");
-    } else if (!autolee::canStart(toMotorState(g_motion.runState))) {
-      webLog("Motion", "Batch start ignored in state %u", (unsigned)g_motion.runState);
+    // A batch start is a plain start plus a target, so it inherits every gate a
+    // run has. positionReferenceStale is the one that used to be missing
+    // entirely, and it was the expensive one: after any reboot with a restored
+    // calibration the axis is unreferenced, motion.cpp refused the start - but
+    // batchActive and a red STOP label had *already* been set two lines earlier.
+    // Both UIs then reported a batch running on a press that was standing still
+    // ("Running: 0/N", Start Batch disabled), with no way out but a toggle, and
+    // nothing anywhere saying why.
+    const autolee::Refusal r = autolee::gateBatchStart(gateInput());
+    if (r != autolee::Refusal::None) {
+      logRefusal("Motion", "Batch start", r);
     } else {
       startRunBetweenEndpoints();
       // Arm the batch only once the run is genuinely under way. Anything that
@@ -183,13 +217,14 @@ void processPendingCommands() {
   }
 
   if (s_resetSettings.exchange(false)) {
-    // Deliberately NOT gated through motionEventAllowed()/canStart(): this is
-    // not a motion command, and coupling it to the motion-permission table
-    // would silently widen the gate if that table ever gains a state. The
-    // condition we actually need is the literal one - the machine must be fully
-    // idle, so a run/home/calibration can never have the endpoints, the run
-    // current or the active profile pulled out from under it mid-stroke.
-    if (g_motion.runState == IDLE) {
+    // gateResetSettings() is deliberately NOT routed through the motor FSM: this
+    // is not a motion command, and coupling it to that table would silently
+    // widen the gate if the table ever gains a state. It checks the literal
+    // condition - fully idle - so a run/home/calibration can never have the
+    // endpoints, the run current or the active profile pulled out from under it
+    // mid-stroke.
+    const autolee::Refusal r = autolee::gateResetSettings(gateInput());
+    if (r == autolee::Refusal::None) {
       // Erases the NVS blob and restores the compiled-in defaults (calibration
       // cleared, positionReferenceStale latched). WiFi credentials, the AP key
       // and the web password are in other NVS keys and are not touched.
@@ -202,7 +237,7 @@ void processPendingCommands() {
       ui_update_speed_val();
       s_uiRefresh.store(true);  // handled by the block below, same pass
     } else {
-      webLog("Settings", "Reset ignored in state %u", (unsigned)g_motion.runState);
+      logRefusal("Settings", "Reset", r);
     }
   }
 

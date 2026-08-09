@@ -11,17 +11,13 @@
 //  without duplicating them, and answered 200 to requests it was about to drop.
 //
 //  Everything here is a pure function of a MotionState snapshot, so the same
-//  rule can be evaluated twice: once by the HTTP handler, to answer the caller
-//  synchronously, and again on pump_task when the command is actually applied.
+//  rule can be evaluated twice: once by the HTTP handler
+//  (main/net/web_server.cpp), to answer the caller synchronously, and again on
+//  pump_task (main/motion/motion_cmd.cpp) when the command is actually applied.
 //  The second evaluation stays authoritative - state can change between the two,
-//  and a stale "yes" must never be allowed to move the press.
-//
-//  NOTE: main/motion/motion_cmd.cpp still carries its own inline copy of these
-//  rules for the execution-time re-check. Converting it to call this header is a
-//  tracked follow-up, deliberately not done here only because that file is being
-//  rewritten in a PR that is still open; the suites in
-//  host_test/test_command_gate and host_test/test_motion_seq pin both copies to
-//  the same behaviour in the meantime. Change one, change the other.
+//  and a stale "yes" must never be allowed to move the press. Both call THESE
+//  functions; there is no second copy of the rules anywhere. See docs/FLOWS.md
+//  §1 for the whole path.
 // ============================================================================
 #pragma once
 #include <cstdint>

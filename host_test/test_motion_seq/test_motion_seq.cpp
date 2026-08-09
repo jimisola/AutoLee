@@ -962,13 +962,19 @@ static void test_batch_start_arms_the_batch_when_referenced(void) {
 // Each refusal names itself rather than being a silent no-op - on the touch UI
 // "Start Batch" navigates straight back to the main screen, so the log line is
 // the only thing that distinguishes "refused" from "unresponsive".
+//
+// The expected TEXT here is command_gate.h's refusalMessage(), which is also
+// what the HTTP layer puts in the 409 body - so an operator reading the log and
+// a script reading the API see the same sentence for the same condition. Only
+// these strings changed when the gates were consolidated; every state assertion
+// around them is untouched.
 static void test_batch_start_refusals_are_reported(void) {
   givenCalibrated(0, 20000, 0);
   g_motion.batchTarget = 0;  // nothing to run
   motion_cmd::requestBatchStart();
   motion_cmd::processPendingCommands();
   TEST_ASSERT_FALSE(g_motion.batchActive);
-  TEST_ASSERT_TRUE(fake::logContains("no target set"));
+  TEST_ASSERT_TRUE(fake::logContains("no batch target set"));
 
   fake::logs.clear();
   g_motion.batchTarget = 5;
@@ -985,7 +991,7 @@ static void test_batch_start_refusals_are_reported(void) {
   motion_cmd::requestBatchStart();
   motion_cmd::processPendingCommands();
   TEST_ASSERT_FALSE(g_motion.batchActive);
-  TEST_ASSERT_TRUE(fake::logContains("Batch start ignored in state"));
+  TEST_ASSERT_TRUE(fake::logContains("Batch start refused: not allowed in the current state"));
 }
 
 // A tap that lands while the press is decelerating is accepted by neither Start
@@ -999,7 +1005,44 @@ static void test_toggle_run_while_stopping_is_reported(void) {
   motion_cmd::processPendingCommands();
 
   TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
-  TEST_ASSERT_TRUE(fake::logContains("Run/stop ignored in state"));
+  TEST_ASSERT_TRUE(fake::logContains("Run/stop refused: not allowed in the current state"));
+}
+
+// The refusal that used to be completely silent. A toggle from IDLE on an
+// uncalibrated press reached startRunBetweenEndpoints(), which returned on its
+// first line with no log at all - so the operator got nothing: no motion, no
+// message, no state change. Routing the toggle through gateToggleRun() names it,
+// and names the RIGHT one: "not calibrated", not the technically-true but
+// useless "wrong state".
+static void test_toggle_run_uncalibrated_names_the_refusal(void) {
+  g_motion = MotionState{};
+  g_motion.runState = IDLE;
+  g_motion.endpointsCalibrated = false;
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_FALSE(fake::sim.running);
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Run/stop refused: the press is not calibrated"),
+                           fake::dump().c_str());
+}
+
+// Same path, the other start gate: calibrated but never re-referenced after a
+// reboot. Reported as the unconfirmed position rather than as "not calibrated",
+// because the fix is different - return home, not recalibrate.
+static void test_toggle_run_unreferenced_names_the_refusal(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.runState = IDLE;
+  g_motion.positionReferenceStale = true;
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_FALSE(fake::sim.running);
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Run/stop refused: position reference unconfirmed"),
+                           fake::dump().c_str());
 }
 
 // Toggling out of RUNNING stops the run AND disarms the batch, so a stopped
@@ -1029,7 +1072,7 @@ static void test_settings_reset_only_when_idle(void) {
   motion_cmd::processPendingCommands();
 
   TEST_ASSERT_FALSE(fake::saw("settings::resetToDefaults"));
-  TEST_ASSERT_TRUE(fake::logContains("Reset ignored in state"));
+  TEST_ASSERT_TRUE(fake::logContains("Reset refused: not allowed in the current state"));
 
   g_motion.runState = IDLE;
   motion_cmd::requestResetSettings();
@@ -1094,6 +1137,8 @@ int main(void) {
   RUN_TEST(test_batch_start_arms_the_batch_when_referenced);
   RUN_TEST(test_batch_start_refusals_are_reported);
   RUN_TEST(test_toggle_run_while_stopping_is_reported);
+  RUN_TEST(test_toggle_run_uncalibrated_names_the_refusal);
+  RUN_TEST(test_toggle_run_unreferenced_names_the_refusal);
   RUN_TEST(test_toggle_run_out_of_running_stops_and_disarms_the_batch);
   RUN_TEST(test_settings_reset_only_when_idle);
   RUN_TEST(test_motion_init_order);

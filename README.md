@@ -27,6 +27,8 @@ Support my work: https://buymeacoffee.com/kl.design
 
 The stall detection and jam protection features are designed to detect brass getting stuck in the machine — nothing more. They will **not** detect or protect your fingers and hands. They were never designed for that. And even for brass jams, they can fail, be misconfigured, or react too slowly. **Do not rely on software to protect your body.**
 
+**The Emergency Stop button is the only thing on this machine that protects people.** It is a normally-closed switch wired in series on the incoming DC rail, upstream of everything — so pressing it cuts power to the stepper driver *and* to the controller itself. It does not depend on the firmware running, responding, or being on the right screen. Fit it, wire it as shown in [docs/wiring.md](docs/wiring.md#power), test it before you first run the machine, and keep it within reach whenever the machine is powered.
+
 **LIABILITY DISCLAIMER:** This project is provided as-is with absolutely no warranty of any kind. The author(s) accept no responsibility or liability for any injury, damage, or loss resulting from building, modifying, or operating this machine. You build and use it entirely at your own risk.
 
 ---
@@ -56,7 +58,16 @@ The stall detection and jam protection features are designed to detect brass get
 - **Work zone blanking** — skips SG monitoring near the DOWN endpoint where primer seating resistance is normal
 - **Accel/decel blanking** — position-based and time-based SG ignore windows during speed transitions
 - **Automatic backoff** — on jam detection, motor stops and backs off in the opposite direction before showing the jam screen
-- **Jam recovery screen** — one-button return-home using the same proven sensorless homing as calibration
+- **Jam recovery screen** — one-button return-home using the same proven sensorless homing as calibration; the same button cancels a home in progress
+
+### After an Emergency Stop
+Pressing the E-stop cuts the whole DC rail, so the controller reboots along with the motor. On restart the stepper's position counter reads 0 while the carriage is wherever it stopped, so the firmware restores your calibration but marks the axis **unreferenced**:
+
+- The main screen shows **POSITION UNCONFIRMED**, and the web dashboard says the same
+- **RUN and Start Batch are refused** until you press **Return Home**, which re-establishes the reference against the UP hard stop
+- Your calibration, offsets, StallGuard trips and counters are *not* lost
+
+This is expected after every E-stop — it is the machine refusing to drive to stored positions it can no longer locate, not a fault.
 
 ### Batch Run
 - **Set a target count** (1–9999) and the machine stops automatically when done
