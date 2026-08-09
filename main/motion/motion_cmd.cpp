@@ -145,6 +145,7 @@ void processPendingCommands() {
     const autolee::Refusal r = autolee::gateToggleRun(in);
     if (r != autolee::Refusal::None) {
       logRefusal("Motion", "Run/stop", r);
+      break;  // a refusal changes no state, so the remaining taps would refuse identically
     } else if (autolee::canStart(in.state)) {
       startRunBetweenEndpoints();
       ui_update_run_button();
