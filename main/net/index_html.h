@@ -52,15 +52,15 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 .log{background:#000;border-radius:8px;padding:8px;font-family:'Courier New',monospace;font-size:.7em;color:#0f0;height:400px;overflow-y:auto}
 .log .ll{white-space:pre-wrap;word-break:break-all}
 .log .ll-D{color:var(--muted)}.log .ll-W{color:#FFD37C}.log .ll-E{color:#FF6666}
-.page{display:none}.page.active{display:block}
+.page{display:none;outline:none}.page.active{display:block}
 .nav-footer{margin-top:16px;padding:14px 0;text-align:center;border-top:1px solid var(--border)}
 .nav-footer .nav-row{margin-bottom:8px}.nav-footer .nav-row:last-child{margin-bottom:0}
 /* Real <button>s styled as links, so the nav is in the tab order and answers Enter/Space. */
-.nav-footer button{background:none;border:none;padding:0;font-family:inherit;color:var(--accent);font-size:.85em;font-weight:600;margin:0 10px;cursor:pointer}
-.nav-footer button:hover{opacity:.7}
+.nav-footer button,.back-link{background:none;border:none;padding:0;font-family:inherit;color:var(--accent);font-size:.85em;font-weight:600;cursor:pointer}
+.nav-footer button{margin:0 10px}
+.nav-footer button:hover,.back-link:hover{opacity:.7}
 .nav-footer button.active{color:var(--green)}
-.back-link{display:inline-block;background:none;border:none;padding:0;font-family:inherit;color:var(--accent);font-size:.85em;font-weight:600;cursor:pointer;margin-bottom:12px}
-.back-link:hover{opacity:.7}
+.back-link{display:inline-block;margin-bottom:12px}
 /* Refusal toast. Fixed to the viewport, not the page: the control that was
    refused may be anywhere on a long page, and the message has to be seen. */
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);width:max-content;max-width:min(92vw,420px);background:#42160f;border:1px solid #7a2b1d;color:#ffd9d2;padding:10px 14px;border-radius:10px;font-size:.85em;font-weight:600;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20}
@@ -405,6 +405,32 @@ es.onmessage=e=>{markSignal();try{upd(JSON.parse(e.data))}catch(x){}};
 es.addEventListener('heartbeat',markSignal);
 es.addEventListener('log',e=>{markSignal();try{const d=JSON.parse(e.data);addLogLines(d.log)}catch(x){}});
 es.onerror=()=>{es.close();markDead();setTimeout(sse,3000)}}
+
+// ---- nav footer -----------------------------------------------------------
+// Built once from NAV_ROWS into every page's empty .nav-footer div, so the
+// page list lives in exactly one place. Runs before the SSE bootstrap so an
+// exception there cannot leave the dashboard without navigation.
+const NAV_ROWS=[[['pageMain','Main'],['pageConfig','Configuration'],['pageWifi','WiFi']],
+                [['pageLog','Log'],['pageDiag','Diag'],['pageFW','Firmware']]];
+function buildNavFooters(){
+  const active=document.querySelector('.page.active').id;
+  document.querySelectorAll('.nav-footer').forEach(f=>{
+    NAV_ROWS.forEach(row=>{
+      const div=document.createElement('div');
+      div.className='nav-row';
+      row.forEach(([id,label])=>{
+        const b=document.createElement('button');
+        b.dataset.page=id;
+        b.textContent=label;
+        b.onclick=()=>showPage(id);
+        b.classList.toggle('active',id===active);
+        div.appendChild(b);
+      });
+      f.appendChild(div);
+    });
+  });
+}
+buildNavFooters();
 sse();
 
 // Lines arrive pre-formatted by webLogLevel() (main/globals.cpp) as
@@ -479,37 +505,18 @@ function setServerLogLevel(level){
 
 function showPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  const pg=document.getElementById(id);
+  pg.classList.add('active');
   document.querySelectorAll('.nav-footer button').forEach(b=>b.classList.toggle('active',b.dataset.page===id));
+  // Hiding the old page removed the focused nav button from rendering, which
+  // dropped keyboard focus to <body>; refocus into the page just shown.
+  pg.setAttribute('tabindex','-1');
+  pg.focus({preventScroll:true});
   window.scrollTo(0,0);
   if(id==='pageDiag')loadDiag();
   if(id==='pageWifi')loadWifiScan();
   if(id==='pageLog'){loadLogs();loadServerLogLevel()}
 }
-
-// ---- nav footer -----------------------------------------------------------
-// Built once from NAV_ROWS into every page's empty .nav-footer div, so the
-// page list lives in exactly one place.
-const NAV_ROWS=[[['pageMain','Main'],['pageConfig','Configuration'],['pageWifi','WiFi']],
-                [['pageLog','Log'],['pageDiag','Diag'],['pageFW','Firmware']]];
-function buildNavFooters(){
-  document.querySelectorAll('.nav-footer').forEach(f=>{
-    NAV_ROWS.forEach(row=>{
-      const div=document.createElement('div');
-      div.className='nav-row';
-      row.forEach(([id,label])=>{
-        const b=document.createElement('button');
-        b.dataset.page=id;
-        b.textContent=label;
-        b.onclick=()=>showPage(id);
-        b.classList.toggle('active',id==='pageMain');
-        div.appendChild(b);
-      });
-      f.appendChild(div);
-    });
-  });
-}
-buildNavFooters();
 
 function fmtMs(ms){
   if(ms<1000)return ms+'ms';
