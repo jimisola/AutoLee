@@ -717,17 +717,11 @@ static void on_calibrate(lv_event_t *e) {
 }
 
 // ==========================================================================
-//  Two-tap arm - the panel's confirmation gate for destructive buttons
+//  Two-tap arm - confirmation gate for destructive buttons (docs/UX.md)
 // ==========================================================================
-// docs/UX.md decides WHICH actions get this gate (classes 1 and 2:
-// irreversible loss of a physical measurement, or loss of access); this is the
-// gate itself. There is no modal-dialog pattern anywhere in this UI, and a
-// whole extra confirm SCREEN per rarely-used action would be a lot of
-// machinery plus another navigation dead-end on a 172x320 display. So the
-// button arms itself instead: the first tap turns it amber and relabels it
-// "Sure? Tap", the second tap within UI_CONFIRM_ARM_MS commits, and the
-// timeout disarms it. A single stray tap can therefore never destroy anything,
-// and the operator is told what the next tap will do.
+// First tap turns the button amber ("Sure? Tap"), a second within
+// UI_CONFIRM_ARM_MS commits, the timeout disarms - so a stray tap never
+// destroys anything, without the machinery of a confirm screen on 172x320.
 struct ConfirmArm {
   lv_obj_t *btn;         // assigned when the button is created
   lv_timer_t *timer;     // non-null == armed
@@ -813,9 +807,7 @@ void ui_web_password_reset_finished(bool ok) {
   lvgl_port_unlock();
 }
 
-// "Reset WiFi" costs access (docs/UX.md class 2): recovering means standing at
-// the machine re-joining the setup AP, so it must survive a stray tap - it
-// used to fire on the first one.
+// "Reset WiFi" costs access, so it two-tap arms (docs/UX.md class 2).
 static void on_reset_wifi(lv_event_t *e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
   if (!confirm_tap(arm_reset_wifi)) return;
@@ -923,9 +915,8 @@ static void build_main_screen() {
   lv_obj_set_style_text_font(counter_label, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_set_style_text_color(counter_label, lv_color_hex(0x00FF00), LV_PART_MAIN);
   lv_obj_align(counter_label, LV_ALIGN_CENTER, 0, 8);
-  // Deliberately NOT tappable: the counter used to reset on a long-press, a
-  // hidden gesture with no affordance and no confirmation. docs/UX.md class 3
-  // forbids exactly that - Reset Count is the visible button under Settings.
+  // Deliberately not tappable - no hidden long-press reset (docs/UX.md class
+  // 3); Reset Count is the visible Settings button.
 
   lbl_batch_remain = lv_label_create(mc);
   lv_label_set_text(lbl_batch_remain, "");

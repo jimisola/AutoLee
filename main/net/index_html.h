@@ -861,11 +861,9 @@ function saveWebPassword(){
 
 function upFW(f){
   if(!f)return;
-  // Clear the picker before anything else so cancelling and re-selecting the
-  // same file still fires its change event.
+  // Clear the picker so cancelling and re-picking the same file fires change again.
   document.getElementById('fw').value='';
-  // docs/UX.md class 4: anything that moves or reboots the press confirms, and
-  // says so - the OTA handler stops a running press before flashing.
+  // docs/UX.md class 4: confirm, and say a running press is stopped.
   if(!confirm('Install "'+f.name+'"?\n\nA running press is stopped first, and AutoLee reboots into the new firmware when the upload completes.'))return;
   const ua=document.getElementById('ua'),pb=document.getElementById('pb'),pf=document.getElementById('pf'),st=document.getElementById('otaS');
   ua.classList.add('on');ua.textContent=f.name;pb.style.display='block';pf.style.width='0%';
