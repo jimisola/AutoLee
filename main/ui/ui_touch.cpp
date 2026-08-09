@@ -833,11 +833,22 @@ void ui_web_password_reset_finished(bool ok) {
   lvgl_port_unlock();
 }
 
+// The counter is capped for display only - motion.cpp keeps counting past
+// COUNTER_MAX, and the web dashboard shows the true figure. A bare "9999" here
+// therefore diverges from the web permanently once the cap is reached, with
+// nothing to say which one is wrong; the "+" marks it as saturated instead.
+static void set_counter_label(long c) {
+  if (!counter_label) return;
+  if (c < COUNTER_MAX)
+    lv_label_set_text_fmt(counter_label, "%ld", c);
+  else
+    lv_label_set_text_fmt(counter_label, "%ld+", (long)COUNTER_MAX);
+}
+
 static void counter_timer_cb(lv_timer_t *t) {
   LV_UNUSED(t);
   const MotionState ms = motion_state::snapshot();
-  long shown = ms.counter < COUNTER_MAX ? ms.counter : COUNTER_MAX;
-  if (counter_label) lv_label_set_text_fmt(counter_label, "%ld", shown);
+  set_counter_label(ms.counter);
   if (main_scr && lv_scr_act() == main_scr) {
     ui_update_main_warning();
     ui_update_batch_remain();
@@ -914,10 +925,7 @@ static void build_main_screen() {
   lv_obj_align_to(main_warn, lbl_speed_val, LV_ALIGN_OUT_BOTTOM_MID, 0, 4);
 
   counter_label = lv_label_create(mc);
-  {
-    const long c = motion_state::snapshot().counter;
-    lv_label_set_text_fmt(counter_label, "%ld", c < COUNTER_MAX ? c : COUNTER_MAX);
-  }
+  set_counter_label(motion_state::snapshot().counter);
   lv_obj_set_style_text_font(counter_label, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_set_style_text_color(counter_label, lv_color_hex(0x00FF00), LV_PART_MAIN);
   lv_obj_align(counter_label, LV_ALIGN_CENTER, 0, 8);

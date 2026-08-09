@@ -38,6 +38,11 @@ details summary:hover{opacity:.8}
 details[open] summary{margin-bottom:8px}
 .jam-alert{display:none;background:#2a1111;border:1px solid #442222;border-radius:10px;padding:12px;margin-top:10px;text-align:center}
 .pw-alert{display:none;background:#3A2B12;border:1px solid #5c431d;border-radius:10px;padding:12px;margin-bottom:10px;text-align:center}
+.conn-alert{display:none;background:#2a1111;border:1px solid #442222;border-radius:10px;padding:12px;margin-bottom:10px;text-align:center}
+/* Applied to .wrap while the event stream is not live. Dims every value that
+   comes from the device so a frozen page cannot be mistaken for a live one -
+   the banner alone is easy to scroll past, the greyed-out numbers are not. */
+.stale .counter,.stale .badge,.stale .sr .v,.stale #logBox{opacity:.35}
 input[type=text],input[type=password],select{width:100%;padding:10px;margin-bottom:6px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:#fff;font-size:.9em}
 .upload{border:2px dashed #444;border-radius:8px;padding:16px;text-align:center;color:var(--muted);cursor:pointer;font-size:.85em}
 .upload:hover{border-color:var(--accent)}.upload.on{border-color:var(--green);color:var(--green)}
@@ -79,6 +84,17 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 <div class="pw-alert" id="sgOffAlert" style="display:none">
 <div style="color:#FFD37C;font-weight:700;margin-bottom:4px">&#9888; JAM DETECTION DISABLED</div>
 <div style="color:#aaa;font-size:.8em">This profile's StallGuard trip is 0, so runs will not stop on a jam. Raise SG on the Config page to re-enable it.</div>
+</div>
+
+<!-- Shown whenever the SSE stream is not delivering. Everything on this page
+     except the Diag block is rendered from that stream, so without this the
+     dashboard goes on displaying the last values it happened to receive - a
+     press that has since jammed still reads IDLE, and the counter sits still.
+     See the liveness watchdog in the script for why onerror alone is not
+     enough to detect this. -->
+<div class="conn-alert" id="connAlert">
+<div style="color:#FF4444;font-weight:700;margin-bottom:4px">&#9888; CONNECTION LOST</div>
+<div style="color:#aaa;font-size:.8em">These values are frozen at the last update and are <b>not live</b>. Reconnecting&hellip;</div>
 </div>
 
 <!-- ==================== MAIN PAGE ==================== -->
@@ -146,7 +162,9 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 <div class="sec">
 <h2>Motor Current</h2>
 <div class="slider-row">
-<input type="range" id="mcSlider" min="1000" max="4500" step="100" value="2500" oninput="setCurrent(this.value)">
+<!-- oninput updates the label only; onchange (drag release, or one arrow
+     keypress) is what commits. See showCurrent()/setCurrent(). -->
+<input type="range" id="mcSlider" min="1000" max="4500" step="100" value="2500" oninput="showCurrent(this.value)" onchange="setCurrent(this.value)">
 <span id="mcv">2500</span>
 </div>
 <div class="hint">Run current in mA (1000–4500). Higher = more torque, more heat.</div>
@@ -413,15 +431,47 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 </div>
 
 <script>
-let es;
-function sse(){es=new EventSource('/api/v1/events');es.onmessage=e=>{try{upd(JSON.parse(e.data))}catch(x){}};
-es.addEventListener('log',e=>{try{const d=JSON.parse(e.data);addLogLines(d.log)}catch(x){}});
-es.onerror=()=>{es.close();setTimeout(sse,3000)}}
+// ---- SSE liveness ---------------------------------------------------------
+// broadcastState() sends a full state message only when the state actually
+// changed, plus a "heartbeat" event every SSE_HEARTBEAT_MS (8 s, config.h) when
+// it did not - so on an idle machine silence is normal and both events have to
+// count as signs of life.
+//
+// es.onerror is not sufficient on its own: it fires on a socket that resets, but
+// a connection that stops delivering without resetting (WiFi roam, NAT/proxy
+// idle timeout, the device rebooting behind a stuck TCP session) never raises
+// it. That is the case that mattered - the page kept rendering the last state it
+// had received, indistinguishable from live, so a press that had since jammed
+// still read IDLE.
+const SSE_STALE_MS=20000;  // > 2x SSE_HEARTBEAT_MS: one dropped heartbeat is
+                           // not a dropout, two in a row is.
+let es,lastSignalMs=Date.now(),connLive=true;
+function renderConn(){
+  document.getElementById('connAlert').style.display=connLive?'none':'block';
+  document.querySelector('.wrap').classList.toggle('stale',!connLive);
+}
+function markSignal(){lastSignalMs=Date.now();if(!connLive){connLive=true;renderConn()}}
+function markDead(){if(connLive){connLive=false;renderConn()}}
+setInterval(()=>{if(Date.now()-lastSignalMs>SSE_STALE_MS)markDead()},2000);
+
+function sse(){es=new EventSource('/api/v1/events');
+es.onopen=()=>{markSignal();
+  // The stream pushes state on change only, so after a reconnect an idle
+  // machine could stay silent for minutes. Pull the current state once so the
+  // page is correct the moment the banner clears, not merely un-dimmed.
+  fetch('/api/v1/state').then(r=>r.json()).then(upd).catch(()=>{})};
+es.onmessage=e=>{markSignal();try{upd(JSON.parse(e.data))}catch(x){}};
+es.addEventListener('heartbeat',markSignal);
+es.addEventListener('log',e=>{markSignal();try{const d=JSON.parse(e.data);addLogLines(d.log)}catch(x){}});
+es.onerror=()=>{es.close();markDead();setTimeout(sse,3000)}}
 sse();
 
-// Lines are pre-tagged by the firmware as "HH:MM:SS L message" (L = I/W/E) -
-// kept client-side (capped to match the firmware's own ring size) so the
-// level filter can re-render without losing history the DOM already dropped.
+// Lines arrive pre-formatted by webLogLevel() (main/globals.cpp) as
+//   "H:MM:SS.mmm L [Category] message"
+// with L one of D/I/W/E - millisecond resolution and a category field, which
+// lineLevel()'s regex below has to match exactly. Kept client-side (capped to
+// match the firmware's own ring size) so the level filter can re-render without
+// losing history the DOM already dropped.
 const LOG_MAX_LINES=500;
 let logLines=[],logFilter='';
 function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
@@ -564,6 +614,12 @@ function buildProfileBtns(profiles,activeIdx){
 }
 
 let sgBuilt=false;
+// Mirrors RUN_SG_TRIP_MIN/MAX in main/config.h (and the "0 - 500" hint the rows
+// render). sgLast[i] is the last value the firmware reported for profile i - the
+// value an invalid entry is reverted to, and the one used to tell a real edit
+// apart from a bare blur. See setSg().
+const SG_MIN=0,SG_MAX=500;
+let sgLast=[];
 function buildSgControls(profiles,activeIdx){
   const c=document.getElementById('sgProfiles');
   if(!c)return;
@@ -571,6 +627,7 @@ function buildSgControls(profiles,activeIdx){
   if(sgBuilt){
     // Just update the display values and highlights
     profiles.forEach((p,i)=>{
+      sgLast[i]=p.sg;
       const isActive=i===activeIdx;
       const lbl=document.getElementById('sgLbl'+i);
       const inp=document.getElementById('sgIn'+i);
@@ -585,6 +642,7 @@ function buildSgControls(profiles,activeIdx){
   // First build
   c.innerHTML='';
   profiles.forEach((p,i)=>{
+    sgLast[i]=p.sg;
     const isActive=i===activeIdx;
     const div=document.createElement('div');
     div.id='sgRow'+i;
@@ -618,7 +676,12 @@ function upd(d){
     document.getElementById('cp').textContent=d.position;
     document.getElementById('wzv').textContent=d.workZone;
   if(d.wifiStatus){document.getElementById('wfStatus').textContent=d.wifiStatus;document.getElementById('wfSSID').textContent=d.wifiSSID;document.getElementById('wfIP').textContent=d.wifiIP}
-  if(d.currentMa){document.getElementById('mcv').textContent=d.currentMa;document.getElementById('mcSlider').value=d.currentMa;document.getElementById('mcWarn').style.display=d.currentMa>4000?'block':'none'}
+  // Don't fight a drag in progress: while the slider holds focus its thumb and
+  // label are being driven by showCurrent(), and echoing the last *committed*
+  // value back would snap both to where the drag started. Same guard the SG
+  // inputs use below; it matters more now that a commit only happens on release.
+  if(d.currentMa){const mcs=document.getElementById('mcSlider');
+    if(document.activeElement!==mcs){mcs.value=d.currentMa;showCurrent(d.currentMa)}}
   if(d.profiles){buildProfileBtns(d.profiles,d.profileIdx);buildSgControls(d.profiles,d.profileIdx)}
   document.getElementById('btv').textContent=d.batchTarget>0?d.batchTarget:'OFF';
   const bts=document.getElementById('btStatus');
@@ -664,12 +727,39 @@ function upd(d){
 }
 
 function toggleRun(){fetch('/api/v1/motion/toggle_run',{method:'POST'})}
-function setSg(p){const v=parseInt(document.getElementById('sgIn'+p).value)||0;fetch('/api/v1/motion/sg_trip?profile='+p+'&value='+v,{method:'POST'})}
+function setSg(p){
+  const inp=document.getElementById('sgIn'+p);
+  const raw=inp.value.trim();
+  // Strict, deliberately not parseInt: parseInt('') and parseInt('abc') are NaN,
+  // and the old `||0` turned that into a perfectly valid request to set SG=0 -
+  // which switches runtime jam detection off for that profile and persists.
+  // Clearing the box and tabbing away was enough to do it, as was the blur that
+  // fires when the tab is backgrounded, and nothing said it had happened.
+  // A typed 0 is still honoured: it is a legitimate setting (RUN_SG_TRIP_MIN),
+  // which is exactly why it must not double as the fallback for garbage.
+  const v=/^[0-9]+$/.test(raw)?parseInt(raw,10):NaN;
+  if(!Number.isInteger(v)||v<SG_MIN||v>SG_MAX){
+    inp.value=sgLast[p]!==undefined?sgLast[p]:'';
+    inp.style.borderColor='var(--red)';
+    setTimeout(()=>{inp.style.borderColor='#444'},1500);
+    return;
+  }
+  // blur fires whether or not anything was edited. Don't spend a request - and a
+  // log line - re-sending the value the firmware already holds.
+  if(v===sgLast[p])return;
+  fetch('/api/v1/motion/sg_trip?profile='+p+'&value='+v,{method:'POST'})}
 function setWz(d){fetch('/api/v1/motion/work_zone?delta='+d,{method:'POST'})}
 function setBatch(d){fetch('/api/v1/motion/batch?delta='+d,{method:'POST'})}
 function doBatch(a){fetch('/api/v1/motion/batch?action='+a,{method:'POST'})}
 function setProfile(i){fetch('/api/v1/motion/profile?idx='+i,{method:'POST'})}
-function setCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none';fetch('/api/v1/motion/current?ma='+v,{method:'POST'})}
+// Split so a drag costs one request instead of ~35. The slider is bound to
+// showCurrent() on oninput (fires continuously while dragging) and setCurrent()
+// on onchange (once, on release). Each committed value is a POST that ends in an
+// rms_current() write to the TMC5160 over the SPI bus pump_task shares with the
+// display, so firing them per pixel was both pointless traffic and pointless
+// contention.
+function showCurrent(v){document.getElementById('mcv').textContent=v;document.getElementById('mcWarn').style.display=v>4000?'block':'none'}
+function setCurrent(v){showCurrent(v);fetch('/api/v1/motion/current?ma='+v,{method:'POST'})}
 function adj(w,d){fetch('/api/v1/motion/endpoint?which='+w+'&delta='+d,{method:'POST'})}
 function doAct(p){fetch(p,{method:'POST'})}
 // One button, two meanings, decided by the state the label already reflects -
