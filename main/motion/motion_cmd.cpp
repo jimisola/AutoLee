@@ -18,14 +18,9 @@ namespace {
 // atomicity guarantees in C++, it only stops the compiler caching the value.
 // These are all lock-free on this target.
 //
-// s_toggleRun is a counter, not a latch like the rest. The RUN/STOP button is
-// one control with two meanings, so two taps landing between pump iterations
-// are a start-then-stop - a latch would coalesce them into a single toggle,
-// i.e. a lone start, and the press would keep running (#15). Counting the taps
-// and replaying them in order preserves the stop. The other flags stay
-// latches deliberately: for them (profile select, current, UI refresh, ...)
-// last-write-wins is the correct semantics, and a stop is idempotent - two
-// coalesced stops are still a stop.
+// s_toggleRun counts taps instead of latching: two taps in one pump window
+// are a start-then-stop, and a latch would coalesce them into a lone start
+// (#15). The rest are genuinely last-write-wins and stay latches.
 std::atomic<uint32_t> s_toggleRun{0};
 std::atomic<bool> s_stop{false};
 std::atomic<bool> s_calibrate{false};
@@ -138,12 +133,8 @@ void processPendingCommands() {
       logRefusal("Motion", "Return home", r);
   }
 
-  // Drain every queued toggle, in order, not just "was there one". Each
-  // iteration re-reads the state: startRunBetweenEndpoints() and
-  // requestGracefulStop() both apply their FSM transition synchronously, so a
-  // second tap processed here observes the state the first one produced -
-  // start-then-stop lands the press in STOPPING, exactly as if the taps had
-  // straddled two pump iterations.
+  // Replay every queued toggle in order. Start/stop apply their FSM transition
+  // synchronously, so each iteration sees the state the previous one produced.
   for (uint32_t n = s_toggleRun.exchange(0); n > 0; --n) {
     // One button, two meanings: from IDLE this is a start, from RUNNING a stop.
     // gateToggleRun() decides which, and names the refusal for whichever it was
