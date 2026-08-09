@@ -52,14 +52,15 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 .log{background:#000;border-radius:8px;padding:8px;font-family:'Courier New',monospace;font-size:.7em;color:#0f0;height:400px;overflow-y:auto}
 .log .ll{white-space:pre-wrap;word-break:break-all}
 .log .ll-D{color:var(--muted)}.log .ll-W{color:#FFD37C}.log .ll-E{color:#FF6666}
-.page{display:none}.page.active{display:block}
+.page{display:none;outline:none}.page.active{display:block}
 .nav-footer{margin-top:16px;padding:14px 0;text-align:center;border-top:1px solid var(--border)}
 .nav-footer .nav-row{margin-bottom:8px}.nav-footer .nav-row:last-child{margin-bottom:0}
-.nav-footer a{color:var(--accent);text-decoration:none;font-size:.85em;font-weight:600;margin:0 10px;cursor:pointer}
-.nav-footer a:hover{opacity:.7}
-.nav-footer a.active{color:var(--green)}
-.back-link{display:inline-block;color:var(--accent);font-size:.85em;font-weight:600;cursor:pointer;margin-bottom:12px;text-decoration:none}
-.back-link:hover{opacity:.7}
+/* Real <button>s styled as links, so the nav is in the tab order and answers Enter/Space. */
+.nav-footer button,.back-link{background:none;border:none;padding:0;font-family:inherit;color:var(--accent);font-size:.85em;font-weight:600;cursor:pointer}
+.nav-footer button{margin:0 10px}
+.nav-footer button:hover,.back-link:hover{opacity:.7}
+.nav-footer button.active{color:var(--green)}
+.back-link{display:inline-block;margin-bottom:12px}
 /* Refusal toast. Fixed to the viewport, not the page: the control that was
    refused may be anywhere on a long page, and the message has to be seen. */
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);width:max-content;max-width:min(92vw,420px);background:#42160f;border:1px solid #7a2b1d;color:#ffd9d2;padding:10px 14px;border-radius:10px;font-size:.85em;font-weight:600;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s;z-index:20}
@@ -144,25 +145,14 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 <div class="sr"><span class="l">Active</span><span class="v" id="sv">-</span></div>
 </div>
 
-<!-- NAV FOOTER -->
-<div class="nav-footer">
-<div class="nav-row">
-<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
-<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
-</div>
-<div class="nav-row">
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
-<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-</div>
-</div>
+<!-- NAV FOOTER - filled by buildNavFooters() -->
+<div class="nav-footer"></div>
 
 </div><!-- /pageMain -->
 
 <!-- ==================== CONFIGURATION PAGE ==================== -->
 <div id="pageConfig" class="page">
-<a class="back-link" onclick="showPage('pageMain')">&#8592; Back</a>
+<button class="back-link" onclick="showPage('pageMain')">&#8592; Back</button>
 
 <!-- MOTOR CURRENT -->
 <div class="sec">
@@ -228,25 +218,14 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 <button class="btn btn-red btn-sm" onclick="resetSettings()" style="width:100%">Reset Calibration &amp; Tuning</button>
 </div>
 
-<!-- NAV FOOTER -->
-<div class="nav-footer">
-<div class="nav-row">
-<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
-<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
-</div>
-<div class="nav-row">
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
-<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-</div>
-</div>
+<!-- NAV FOOTER - filled by buildNavFooters() -->
+<div class="nav-footer"></div>
 
 </div><!-- /pageConfig -->
 
 <!-- ==================== LOG PAGE ==================== -->
 <div id="pageLog" class="page">
-<a class="back-link" onclick="showPage('pageMain')">&#8592; Back</a>
+<button class="back-link" onclick="showPage('pageMain')">&#8592; Back</button>
 
 <div class="sec">
 <h2>Log</h2>
@@ -272,25 +251,14 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 </div>
 </div>
 
-<!-- NAV FOOTER -->
-<div class="nav-footer">
-<div class="nav-row">
-<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
-<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
-</div>
-<div class="nav-row">
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
-<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-</div>
-</div>
+<!-- NAV FOOTER - filled by buildNavFooters() -->
+<div class="nav-footer"></div>
 
 </div><!-- /pageLog -->
 
 <!-- ==================== FIRMWARE PAGE ==================== -->
 <div id="pageFW" class="page">
-<a class="back-link" onclick="showPage('pageMain')">&#8592; Back</a>
+<button class="back-link" onclick="showPage('pageMain')">&#8592; Back</button>
 
 <div class="sec">
 <h2>Firmware Update (OTA)</h2>
@@ -302,25 +270,14 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <a class="btn btn-dark btn-sm" href="/api/v1/diagnostics/coredump" style="display:block;margin-top:10px;text-align:center;text-decoration:none">Download Core Dump</a>
 </div>
 
-<!-- NAV FOOTER -->
-<div class="nav-footer">
-<div class="nav-row">
-<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
-<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
-</div>
-<div class="nav-row">
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
-<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-</div>
-</div>
+<!-- NAV FOOTER - filled by buildNavFooters() -->
+<div class="nav-footer"></div>
 
 </div><!-- /pageFW -->
 
 <!-- ==================== WIFI PAGE ==================== -->
 <div id="pageWifi" class="page">
-<a class="back-link" onclick="showPage('pageMain')">&#8592; Back</a>
+<button class="back-link" onclick="showPage('pageMain')">&#8592; Back</button>
 
 <div class="sec">
 <h2>Connection</h2>
@@ -357,25 +314,14 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <div id="wpMsg" class="hint" style="margin-top:6px"></div>
 </div>
 
-<!-- NAV FOOTER -->
-<div class="nav-footer">
-<div class="nav-row">
-<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
-<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
-</div>
-<div class="nav-row">
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
-<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-</div>
-</div>
+<!-- NAV FOOTER - filled by buildNavFooters() -->
+<div class="nav-footer"></div>
 
 </div><!-- /pageWifi -->
 
 <!-- ==================== DIAGNOSTICS PAGE ==================== -->
 <div id="pageDiag" class="page">
-<a class="back-link" onclick="showPage('pageMain')">&#8592; Back</a>
+<button class="back-link" onclick="showPage('pageMain')">&#8592; Back</button>
 
 <div class="sec">
 <h2>System</h2>
@@ -418,19 +364,8 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <button class="btn btn-dark btn-sm" onclick="loadDiag()" style="width:100%">Refresh</button>
 
-<!-- NAV FOOTER -->
-<div class="nav-footer">
-<div class="nav-row">
-<a data-page="pageMain" onclick="showPage('pageMain')">Main</a>
-<a data-page="pageConfig" onclick="showPage('pageConfig')">Configuration</a>
-<a data-page="pageWifi" onclick="showPage('pageWifi')">WiFi</a>
-</div>
-<div class="nav-row">
-<a data-page="pageLog" onclick="showPage('pageLog')">Log</a>
-<a data-page="pageDiag" onclick="showPage('pageDiag')">Diag</a>
-<a data-page="pageFW" onclick="showPage('pageFW')">Firmware</a>
-</div>
-</div>
+<!-- NAV FOOTER - filled by buildNavFooters() -->
+<div class="nav-footer"></div>
 
 </div><!-- /pageDiag -->
 
@@ -470,6 +405,32 @@ es.onmessage=e=>{markSignal();try{upd(JSON.parse(e.data))}catch(x){}};
 es.addEventListener('heartbeat',markSignal);
 es.addEventListener('log',e=>{markSignal();try{const d=JSON.parse(e.data);addLogLines(d.log)}catch(x){}});
 es.onerror=()=>{es.close();markDead();setTimeout(sse,3000)}}
+
+// ---- nav footer -----------------------------------------------------------
+// Built once from NAV_ROWS into every page's empty .nav-footer div, so the
+// page list lives in exactly one place. Runs before the SSE bootstrap so an
+// exception there cannot leave the dashboard without navigation.
+const NAV_ROWS=[[['pageMain','Main'],['pageConfig','Configuration'],['pageWifi','WiFi']],
+                [['pageLog','Log'],['pageDiag','Diag'],['pageFW','Firmware']]];
+function buildNavFooters(){
+  const active=document.querySelector('.page.active').id;
+  document.querySelectorAll('.nav-footer').forEach(f=>{
+    NAV_ROWS.forEach(row=>{
+      const div=document.createElement('div');
+      div.className='nav-row';
+      row.forEach(([id,label])=>{
+        const b=document.createElement('button');
+        b.dataset.page=id;
+        b.textContent=label;
+        b.onclick=()=>showPage(id);
+        b.classList.toggle('active',id===active);
+        div.appendChild(b);
+      });
+      f.appendChild(div);
+    });
+  });
+}
+buildNavFooters();
 sse();
 
 // Lines arrive pre-formatted by webLogLevel() (main/globals.cpp) as
@@ -544,15 +505,18 @@ function setServerLogLevel(level){
 
 function showPage(id){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page===id));
+  const pg=document.getElementById(id);
+  pg.classList.add('active');
+  document.querySelectorAll('.nav-footer button').forEach(b=>b.classList.toggle('active',b.dataset.page===id));
+  // Hiding the old page removed the focused nav button from rendering, which
+  // dropped keyboard focus to <body>; refocus into the page just shown.
+  pg.setAttribute('tabindex','-1');
+  pg.focus({preventScroll:true});
   window.scrollTo(0,0);
   if(id==='pageDiag')loadDiag();
-  if(id==='pageLog')loadServerLogLevel();
   if(id==='pageWifi')loadWifiScan();
   if(id==='pageLog'){loadLogs();loadServerLogLevel()}
 }
-document.querySelectorAll('.nav-footer a').forEach(a=>a.classList.toggle('active',a.dataset.page==='pageMain'));
 
 function fmtMs(ms){
   if(ms<1000)return ms+'ms';
