@@ -67,6 +67,8 @@ static bool ui_lock(const char *what) {
 // ==========================================================================
 //  LVGL UI HELPERS
 // ==========================================================================
+static void confirm_disarm_all();  // defined with the ConfirmArm helpers below
+
 void go(lv_obj_t *scr) {
   // lv_scr_load touches LVGL internals, so it must hold the port lock. go() is
   // called both from LVGL event callbacks (lock already held - the port mutex
@@ -74,6 +76,9 @@ void go(lv_obj_t *scr) {
   // navigation on the main task (lock NOT held). Without this, that boot-time
   // go(wifi_scr) races the LVGL render task and can freeze the display blank.
   if (!ui_lock("go")) return;
+  // Every navigation disarms every destructive button, so no screen is ever
+  // entered pre-armed - including jam takeovers, which can arrive from anywhere.
+  confirm_disarm_all();
   lv_scr_load(scr);
   lvgl_port_unlock();
 }
@@ -717,55 +722,71 @@ static void on_calibrate(lv_event_t *e) {
 }
 
 // ==========================================================================
-//  "Reset Cal" - destructive, so it needs a confirm step
+//  Two-tap arm - confirmation gate for destructive buttons (docs/UX.md)
 // ==========================================================================
-// There is no modal-dialog pattern anywhere in this UI (the only other
-// destructive buttons, "Reset WiFi" and "Reset Count", fire on the first tap),
-// and a whole extra confirm SCREEN for one rarely-used action would be a lot of
-// machinery plus another navigation dead-end on a 172x320 display. So the
-// button arms itself instead: the first tap turns it amber and relabels it
-// "Sure? Tap", the second tap within UI_CONFIRM_ARM_MS commits, and the
-// timeout disarms it. A single stray tap can therefore never wipe a
-// calibration, and the operator is told what the next tap will do.
-static lv_obj_t *btn_reset_cal = nullptr;
-static lv_timer_t *reset_cal_timer = nullptr;  // non-null == armed
+// First tap turns the button amber ("Sure? Tap"), a second within
+// UI_CONFIRM_ARM_MS commits, the timeout disarms - so a stray tap never
+// destroys anything, without the machinery of a confirm screen on 172x320.
+struct ConfirmArm {
+  lv_obj_t *btn;         // assigned when the button is created
+  lv_timer_t *timer;     // non-null == armed
+  const char *idleText;  // label/colour reverted to on disarm or timeout
+  uint32_t idleColor;
+};
 
-static void reset_cal_show_idle() {
-  if (!btn_reset_cal) return;
-  lv_obj_t *lbl = lv_obj_get_child(btn_reset_cal, 0);
-  if (lbl) lv_label_set_text(lbl, "Reset Cal");
-  lv_obj_set_style_bg_color(btn_reset_cal, lv_color_hex(0xB42318), LV_PART_MAIN);
+static ConfirmArm arm_reset_cal{nullptr, nullptr, "Reset Cal", 0xB42318};
+static ConfirmArm arm_reset_pwd{nullptr, nullptr, "Reset Pwd", 0xB42318};
+static ConfirmArm arm_reset_wifi{nullptr, nullptr, "Reset WiFi", 0xB42318};
+
+static void confirm_set_label(ConfirmArm &a, const char *txt, uint32_t color) {
+  if (!a.btn) return;
+  lv_obj_t *lbl = lv_obj_get_child(a.btn, 0);
+  if (lbl) lv_label_set_text(lbl, txt);
+  lv_obj_set_style_bg_color(a.btn, lv_color_hex(color), LV_PART_MAIN);
 }
 
 // The arming timer is one-shot: LVGL deletes it right after this returns, so
 // only clear the handle here - deleting it again would be a double free.
-static void reset_cal_timeout_cb(lv_timer_t *t) {
-  LV_UNUSED(t);
-  reset_cal_timer = nullptr;
-  reset_cal_show_idle();
+static void confirm_timeout_cb(lv_timer_t *t) {
+  ConfirmArm *a = static_cast<ConfirmArm *>(t->user_data);
+  a->timer = nullptr;
+  confirm_set_label(*a, a->idleText, a->idleColor);
 }
 
-static void reset_cal_disarm() {
-  if (reset_cal_timer) {
-    lv_timer_del(reset_cal_timer);
-    reset_cal_timer = nullptr;
+static void confirm_disarm(ConfirmArm &a) {
+  if (a.timer) {
+    lv_timer_del(a.timer);
+    a.timer = nullptr;
   }
-  reset_cal_show_idle();
+  confirm_set_label(a, a.idleText, a.idleColor);
+}
+
+// One tap of an armed button. Returns true when this tap is the confirming
+// second tap (leaving the label to the caller); arms and returns false
+// otherwise.
+static bool confirm_tap(ConfirmArm &a) {
+  if (!a.timer) {  // first tap: arm, change nothing else
+    a.timer = lv_timer_create(confirm_timeout_cb, UI_CONFIRM_ARM_MS, &a);
+    if (!a.timer) return false;  // no timer, no arm: "Sure? Tap" could never revert
+    lv_timer_set_repeat_count(a.timer, 1);
+    confirm_set_label(a, "Sure? Tap", 0xB4540A);
+    return false;
+  }
+  lv_timer_del(a.timer);
+  a.timer = nullptr;
+  return true;
+}
+
+static void confirm_disarm_all() {
+  confirm_disarm(arm_reset_cal);
+  confirm_disarm(arm_reset_pwd);
+  confirm_disarm(arm_reset_wifi);
 }
 
 static void on_reset_cal(lv_event_t *e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-  if (!reset_cal_timer) {  // first tap: arm, change nothing else
-    if (btn_reset_cal) {
-      lv_obj_t *lbl = lv_obj_get_child(btn_reset_cal, 0);
-      if (lbl) lv_label_set_text(lbl, "Sure? Tap");
-      lv_obj_set_style_bg_color(btn_reset_cal, lv_color_hex(0xB4540A), LV_PART_MAIN);
-    }
-    reset_cal_timer = lv_timer_create(reset_cal_timeout_cb, UI_CONFIRM_ARM_MS, nullptr);
-    if (reset_cal_timer) lv_timer_set_repeat_count(reset_cal_timer, 1);
-    return;
-  }
-  reset_cal_disarm();
+  if (!confirm_tap(arm_reset_cal)) return;
+  confirm_disarm(arm_reset_cal);
   // Deferred to pump_task like every other state-changing button: the reset
   // erases NVS and re-programs the TMC5160 over the SPI bus shared with this
   // display. pump_task also re-checks that the machine is IDLE before applying
@@ -773,64 +794,41 @@ static void on_reset_cal(lv_event_t *e) {
   motion_cmd::requestResetSettings();
 }
 
-// ==========================================================================
-//  "Reset Pwd" - forgotten-password recovery, same two-tap confirm
-// ==========================================================================
-// The escape hatch for an operator locked out of the web UI. Lives here, on the
-// LCD, because pressing a button on the panel is the strongest proof of
-// physical presence the device has - stronger than the setup AP, whose key can
-// be read from across the room. See webPasswordResetTick() in web_server.cpp
-// for what it restores and why that is safe.
-static lv_obj_t *btn_reset_pwd = nullptr;
-static lv_timer_t *reset_pwd_timer = nullptr;  // non-null == armed
-
-static void reset_pwd_set_label(const char *txt, uint32_t color) {
-  if (!btn_reset_pwd) return;
-  lv_obj_t *lbl = lv_obj_get_child(btn_reset_pwd, 0);
-  if (lbl) lv_label_set_text(lbl, txt);
-  lv_obj_set_style_bg_color(btn_reset_pwd, lv_color_hex(color), LV_PART_MAIN);
-}
-
-static void reset_pwd_timeout_cb(lv_timer_t *t) {
-  LV_UNUSED(t);
-  reset_pwd_timer = nullptr;
-  reset_pwd_set_label("Reset Pwd", 0xB42318);
-}
-
-static void reset_pwd_disarm() {
-  if (reset_pwd_timer) {
-    lv_timer_del(reset_pwd_timer);
-    reset_pwd_timer = nullptr;
-  }
-  reset_pwd_set_label("Reset Pwd", 0xB42318);
-}
-
+// "Reset Pwd" is the forgotten-password recovery: the escape hatch for an
+// operator locked out of the web UI. Lives here, on the LCD, because pressing
+// a button on the panel is the strongest proof of physical presence the device
+// has - stronger than the setup AP, whose key can be read from across the
+// room. See webPasswordResetTick() in web_server.cpp for what it restores and
+// why that is safe.
 static void on_reset_pwd(lv_event_t *e) {
   if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-  if (!reset_pwd_timer) {  // first tap: arm only
-    reset_pwd_set_label("Sure? Tap", 0xB4540A);
-    reset_pwd_timer = lv_timer_create(reset_pwd_timeout_cb, UI_CONFIRM_ARM_MS, nullptr);
-    if (reset_pwd_timer) lv_timer_set_repeat_count(reset_pwd_timer, 1);
-    return;
-  }
-  if (reset_pwd_timer) {
-    lv_timer_del(reset_pwd_timer);
-    reset_pwd_timer = nullptr;
-  }
+  if (!confirm_tap(arm_reset_pwd)) return;
   // No optimistic "done" here - the label stays neutral until sse_task reports
   // the NVS write actually landed (ui_web_password_reset_finished). Telling an
   // operator their password is back to the default when the write failed would
   // send them off to log in with a credential the device does not have.
-  reset_pwd_set_label("Resetting...", 0x2A2A2A);
+  confirm_set_label(arm_reset_pwd, "Resetting...", 0x2A2A2A);
   requestWebPasswordReset();
 }
 
 // The reset itself is a one-shot: once it reports, leave the outcome on screen
-// until the operator navigates away (build_config_screen's Back disarms/clears).
+// until the operator navigates away (go() disarms/clears).
 void ui_web_password_reset_finished(bool ok) {
   if (!ui_lock("ui_web_password_reset_finished")) return;
-  reset_pwd_set_label(ok ? "Pwd = autolee" : "Reset FAILED", ok ? 0x1F6FEB : 0xB42318);
+  confirm_set_label(arm_reset_pwd, ok ? "Pwd = autolee" : "Reset FAILED", ok ? 0x1F6FEB : 0xB42318);
   lvgl_port_unlock();
+}
+
+// "Reset WiFi" costs access, so it two-tap arms (docs/UX.md class 2).
+static void on_reset_wifi(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  if (!confirm_tap(arm_reset_wifi)) return;
+  confirm_disarm(arm_reset_wifi);
+  // Live reset, no reboot: reset_task clears the credentials and brings the
+  // setup AP up on the running WiFi driver. Runs on its own task, so this LVGL
+  // callback returns immediately; the WiFi screen's status updates via
+  // ui_update_wifi_label() when the task finishes.
+  wifi_mgr::requestResetToSetupAp();
 }
 
 // The counter is capped for display only - motion.cpp keeps counting past
@@ -894,8 +892,8 @@ static void counter_timer_cb(lv_timer_t *t) {
 // referenced navigation targets (the screen pointers, e.g. main_scr,
 // config_scr - already file-scope extern globals in globals.h, shared with
 // motion.cpp/web_server.cpp) or widgets already promoted to file-scope
-// statics for other reasons (btn_calibrate, btn_reset_cal, profile_btns[],
-// btn_wifi_reset/skip/back, btn_run_global). No callback reached into a
+// statics for other reasons (btn_calibrate, the ConfirmArm buttons,
+// profile_btns[], btn_wifi_reset/skip/back, btn_run_global). No callback reached into a
 // button handle local to a *different* screen's construction block, so each
 // screen's event wiring moves inline, right after that screen's widgets are
 // created - no new promotions were needed beyond what was already global.
@@ -929,23 +927,8 @@ static void build_main_screen() {
   lv_obj_set_style_text_font(counter_label, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_set_style_text_color(counter_label, lv_color_hex(0x00FF00), LV_PART_MAIN);
   lv_obj_align(counter_label, LV_ALIGN_CENTER, 0, 8);
-  lv_obj_add_flag(counter_label, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(
-      counter_label,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        {
-          motion_state::Guard g;
-          g_motion.counter = 0;
-        }
-        lv_label_set_text(counter_label, "0");
-        // Original flashed the label red for 200ms as reset feedback via
-        // a blocking delay() + manual lv_timer_handler() call - unsafe
-        // here (this callback already runs inside esp_lvgl_port's
-        // lv_timer_handler(), so re-entering it is undefined behavior).
-        // Simplified to an immediate reset; no flash.
-      },
-      LV_EVENT_LONG_PRESSED, nullptr);
+  // Deliberately not tappable - no hidden long-press reset (docs/UX.md class
+  // 3); Reset Count is the visible Settings button.
 
   lbl_batch_remain = lv_label_create(mc);
   lv_label_set_text(lbl_batch_remain, "");
@@ -1010,12 +993,6 @@ static void build_settings_screen() {
       b_config,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        // Never enter the screen with either destructive button pre-armed, or
-        // still showing the outcome of a previous password reset. Back does the
-        // same on the way out, but Back is not the only way off this screen -
-        // a jam takes the display over from anywhere.
-        reset_cal_disarm();
-        reset_pwd_disarm();
         go(config_scr);
       },
       LV_EVENT_CLICKED, nullptr);
@@ -1056,10 +1033,10 @@ static void build_config_screen() {
   // Last on the (scrollable) Config screen, deliberately out of the way of
   // normal operation: it discards the calibration + tuning. Two-tap confirm,
   // see on_reset_cal().
-  btn_reset_cal = make_btn(cfgc, "Reset Cal", 140, 44, 0xB42318, &lv_font_montserrat_20);
+  arm_reset_cal.btn = make_btn(cfgc, "Reset Cal", 140, 44, 0xB42318, &lv_font_montserrat_20);
   // Alongside Reset Cal, for the same reason: destructive, rarely used, and the
   // screen scrolls so it costs nothing above the fold. Two-tap confirm.
-  btn_reset_pwd = make_btn(cfgc, "Reset Pwd", 140, 44, 0xB42318, &lv_font_montserrat_20);
+  arm_reset_pwd.btn = make_btn(cfgc, "Reset Pwd", 140, 44, 0xB42318, &lv_font_montserrat_20);
   lv_obj_t *b_back_cfg = make_btn(cfgn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_cfg, LV_ALIGN_CENTER, 0, 0);
 
@@ -1081,14 +1058,12 @@ static void build_config_screen() {
         go(wifi_scr);
       },
       LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(btn_reset_cal, on_reset_cal, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(btn_reset_pwd, on_reset_pwd, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(arm_reset_cal.btn, on_reset_cal, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(arm_reset_pwd.btn, on_reset_pwd, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(
       b_back_cfg,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        reset_cal_disarm();  // leaving the screen cancels a pending confirm
-        reset_pwd_disarm();  // and clears any lingering reset outcome
         go(settings_scr);
       },
       LV_EVENT_CLICKED, nullptr);
@@ -1250,6 +1225,7 @@ static void build_wifi_screen() {
   lv_obj_center(lbl_wifi_status);
   lv_obj_t *b_wifi_reset = make_btn(wc, "Reset WiFi", 140, 44, 0xB42318, &lv_font_montserrat_20);
   btn_wifi_reset = b_wifi_reset;  // for visibility toggling in ui_update_wifi_label
+  arm_reset_wifi.btn = b_wifi_reset;
   lv_obj_t *b_back_w = make_btn(wn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
   lv_obj_align(b_back_w, LV_ALIGN_CENTER, 0, 0);
   btn_wifi_back = b_back_w;  // hidden in AP-setup mode; Skip takes its spot in the nav bar
@@ -1269,17 +1245,7 @@ static void build_wifi_screen() {
         go(main_scr);  // leave setup; device stays in AP mode, configurable later
       },
       LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(
-      b_wifi_reset,
-      [](lv_event_t *e) {
-        LV_UNUSED(e);
-        // Live reset, no reboot: reset_task clears the credentials and brings
-        // the setup AP up on the running WiFi driver. Runs on its own task, so
-        // this LVGL callback returns immediately; the WiFi screen's status
-        // updates via ui_update_wifi_label() when the task finishes.
-        wifi_mgr::requestResetToSetupAp();
-      },
-      LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(b_wifi_reset, on_reset_wifi, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(
       b_back_w,
       [](lv_event_t *e) {
