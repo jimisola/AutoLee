@@ -20,7 +20,9 @@ rules and the motion FSM (read this before touching motion or concurrency),
 command is gated twice, why abort bypasses the command queue, and how the event stream
 distinguishes "quiet" from "dead" (read this before touching the control API),
 [`docs/PLAN.md`](docs/PLAN.md) for the phased migration checklist (this is an active,
-in-progress port) and [`docs/adr/0001-build-tooling-and-platform.md`](docs/adr/0001-build-tooling-and-platform.md)
+in-progress port), [`docs/UX.md`](docs/UX.md) for which destructive actions get which
+confirmation gate (read this before adding any reset/destructive control to either UI)
+and [`docs/adr/0001-build-tooling-and-platform.md`](docs/adr/0001-build-tooling-and-platform.md)
 for why ESP-IDF was chosen.
 
 ## Build, flash, test
