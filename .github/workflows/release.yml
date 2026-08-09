@@ -128,7 +128,8 @@ jobs:
         env:
           REQUESTED: ${{ inputs.version }}
           FORCE: ${{ inputs.force }}
-          # git-cliff calls the GitHub API even for --bumped-version; unauthenticated it rate-limits and panics.
+          # cliff.toml's template reads commit.remote.* (the "by @user in #N" attribution), which makes
+          # git-cliff call the GitHub API even for --bumped-version; unauthenticated it rate-limits and panics.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
