@@ -859,8 +859,9 @@ function saveWebPassword(){
     else{m.style.color='#FF4444';r.text().then(t=>m.textContent='Failed: '+t)}})
   .catch(()=>{m.style.color='#FF4444';m.textContent='Request failed.'})}
 
+let otaBusy=false;
 function upFW(f){
-  if(!f)return;
+  if(!f||otaBusy)return;
   // Clear the picker so cancelling and re-picking the same file fires change again.
   document.getElementById('fw').value='';
   // docs/UX.md class 4: confirm, and say a running press is stopped.
@@ -871,8 +872,9 @@ function upFW(f){
   const x=new XMLHttpRequest();x.open('POST','/api/v1/system/ota');
   x.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);pf.style.width=p+'%';st.textContent='Uploading... '+p+'%'}};
   x.onload=()=>{if(x.status===200){pf.style.width='100%';st.textContent='Success! Rebooting...';st.style.color='#00FF00';setTimeout(()=>location.reload(),5000)}
-  else{st.textContent='Error: '+x.responseText;st.style.color='#FF4444'}};
-  x.onerror=()=>{st.textContent='Upload failed';st.style.color='#FF4444'};
+  else{otaBusy=false;st.textContent='Error: '+x.responseText;st.style.color='#FF4444'}};
+  x.onerror=()=>{otaBusy=false;st.textContent='Upload failed';st.style.color='#FF4444'};
+  otaBusy=true;
   const fd=new FormData();fd.append('firmware',f);x.send(fd)}
 
 const uae=document.getElementById('ua');

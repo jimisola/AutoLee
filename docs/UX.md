@@ -26,9 +26,9 @@ are cheap precisely because their state is re-derivable.
 
 - **Two-tap arm** (panel): `ConfirmArm` in `main/ui/ui_touch.cpp`. First tap
   turns the button amber and relabels it "Sure? Tap"; a second tap within
-  `UI_CONFIRM_ARM_MS` (config.h) commits; the timeout reverts it. Screens
-  disarm on entry *and* exit, so a button is never pre-armed — Back is not the
-  only way off a screen (a jam takes the display over from anywhere).
+  `UI_CONFIRM_ARM_MS` (config.h) commits; the timeout reverts it. Every
+  navigation (`go()`) disarms every armed button, so no screen is ever entered
+  pre-armed — including jam takeovers, which seize the display from anywhere.
 - **`confirm()`** (web): native dialog, free, keyboard-accessible. The text
   states the consequence and the recovery path, not just "are you sure".
 

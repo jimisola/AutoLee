@@ -67,6 +67,8 @@ static bool ui_lock(const char *what) {
 // ==========================================================================
 //  LVGL UI HELPERS
 // ==========================================================================
+static void confirm_disarm_all();  // defined with the ConfirmArm helpers below
+
 void go(lv_obj_t *scr) {
   // lv_scr_load touches LVGL internals, so it must hold the port lock. go() is
   // called both from LVGL event callbacks (lock already held - the port mutex
@@ -74,6 +76,9 @@ void go(lv_obj_t *scr) {
   // navigation on the main task (lock NOT held). Without this, that boot-time
   // go(wifi_scr) races the LVGL render task and can freeze the display blank.
   if (!ui_lock("go")) return;
+  // Every navigation disarms every destructive button, so no screen is ever
+  // entered pre-armed - including jam takeovers, which can arrive from anywhere.
+  confirm_disarm_all();
   lv_scr_load(scr);
   lvgl_port_unlock();
 }
@@ -761,14 +766,21 @@ static void confirm_disarm(ConfirmArm &a) {
 // otherwise.
 static bool confirm_tap(ConfirmArm &a) {
   if (!a.timer) {  // first tap: arm, change nothing else
-    confirm_set_label(a, "Sure? Tap", 0xB4540A);
     a.timer = lv_timer_create(confirm_timeout_cb, UI_CONFIRM_ARM_MS, &a);
-    if (a.timer) lv_timer_set_repeat_count(a.timer, 1);
+    if (!a.timer) return false;  // no timer, no arm: "Sure? Tap" could never revert
+    lv_timer_set_repeat_count(a.timer, 1);
+    confirm_set_label(a, "Sure? Tap", 0xB4540A);
     return false;
   }
   lv_timer_del(a.timer);
   a.timer = nullptr;
   return true;
+}
+
+static void confirm_disarm_all() {
+  confirm_disarm(arm_reset_cal);
+  confirm_disarm(arm_reset_pwd);
+  confirm_disarm(arm_reset_wifi);
 }
 
 static void on_reset_cal(lv_event_t *e) {
@@ -800,7 +812,7 @@ static void on_reset_pwd(lv_event_t *e) {
 }
 
 // The reset itself is a one-shot: once it reports, leave the outcome on screen
-// until the operator navigates away (build_config_screen's Back disarms/clears).
+// until the operator navigates away (go() disarms/clears).
 void ui_web_password_reset_finished(bool ok) {
   if (!ui_lock("ui_web_password_reset_finished")) return;
   confirm_set_label(arm_reset_pwd, ok ? "Pwd = autolee" : "Reset FAILED", ok ? 0x1F6FEB : 0xB42318);
@@ -981,12 +993,6 @@ static void build_settings_screen() {
       b_config,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        // Never enter the screen with either destructive button pre-armed, or
-        // still showing the outcome of a previous password reset. Back does the
-        // same on the way out, but Back is not the only way off this screen -
-        // a jam takes the display over from anywhere.
-        confirm_disarm(arm_reset_cal);
-        confirm_disarm(arm_reset_pwd);
         go(config_scr);
       },
       LV_EVENT_CLICKED, nullptr);
@@ -1048,8 +1054,6 @@ static void build_config_screen() {
       b_wifi,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        // Same rule as entering Config: never show the screen pre-armed.
-        confirm_disarm(arm_reset_wifi);
         ui_update_wifi_label();
         go(wifi_scr);
       },
@@ -1060,8 +1064,6 @@ static void build_config_screen() {
       b_back_cfg,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        confirm_disarm(arm_reset_cal);  // leaving the screen cancels a pending confirm
-        confirm_disarm(arm_reset_pwd);  // and clears any lingering reset outcome
         go(settings_scr);
       },
       LV_EVENT_CLICKED, nullptr);
@@ -1248,7 +1250,6 @@ static void build_wifi_screen() {
       b_back_w,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        confirm_disarm(arm_reset_wifi);  // leaving the screen cancels a pending confirm
         go(config_scr);
       },
       LV_EVENT_CLICKED, nullptr);
