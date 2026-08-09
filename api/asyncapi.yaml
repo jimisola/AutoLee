@@ -1,7 +1,7 @@
 asyncapi: 3.1.0
 info:
   title: AutoLee event stream (SSE)
-  version: "1.0"
+  version: "2.0.0"
   description: >
     Server-Sent Events pushed by the AutoLee firmware on `GET /api/v1/events`. Three event
     types share the channel: the default `message` event carries the full device
@@ -11,6 +11,8 @@ info:
     carries newly appended log lines; the named `heartbeat` event is sent at a fixed
     ~8 s cadence whenever no `message` went out in that window, so a client can tell
     "still connected, nothing changed" apart from a dead connection.
+    Versioned in lockstep with openapi.yaml and with the firmware release
+    itself - see the versioning note there.
   license:
     name: CC BY-NC 4.0
     url: https://creativecommons.org/licenses/by-nc/4.0/

@@ -1,12 +1,32 @@
 openapi: 3.1.0
 info:
   title: AutoLee HTTP API
-  version: "1.0"
+  version: "2.0.0"
   description: >
     REST control surface served by the AutoLee firmware's on-device web server.
     All mutating endpoints are POST; the canonical device state is returned by
     `GET /api/v1/state` and pushed continuously over Server-Sent Events at `/api/v1/events`
     (see asyncapi.yaml). Parameters are passed as query parameters.
+
+    Errors: a refused request returns `application/json` shaped as
+    `{"error": "<slug>", "message": "<sentence>"}` (`ApiError`). 400 means the
+    request is malformed - a missing, non-integer or unrecognised parameter.
+    409 means it is well-formed but the press cannot do it right now
+    (`wrong_state`, `not_calibrated`, `position_unreferenced`,
+    `no_batch_target`). Up to and including firmware 1.0.1 these routes answered
+    200 to everything, including requests they dropped on the floor; a client
+    written against those builds that only checked for a 2xx will start seeing
+    failures it was previously blind to, which is the point.
+
+    Versioning: `info.version` above is the **firmware release** this document
+    describes, not a separately-evolving document version - the two are kept
+    equal deliberately, so "which spec matches the box on my bench" needs no
+    lookup table. `GET /api/v1/state` reports the same string as `version`
+    (derived from the git tag; see CONTRIBUTING.md). It is the one
+    hand-maintained version string in the repo, and RELEASING.md carries the
+    step that keeps it honest. 200 on a deferred motion command means "queued and not already
+    refusable", never "done" - the motion task re-checks and stays
+    authoritative, so watch `GET /api/v1/state` for the effect.
 
     Authentication: every state-changing endpoint (all POSTs, including the OTA
     upload) requires HTTP Digest auth **once the device has joined a WiFi network
@@ -77,6 +97,7 @@ paths:
       operationId: toggleRun
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "409": { $ref: "#/components/responses/Refused" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/profile:
@@ -91,6 +112,7 @@ paths:
           schema: { type: integer, enum: [0, 1, 2] }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadParameter" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/sg_trip:
@@ -99,11 +121,12 @@ paths:
       tags: [Motion]
       operationId: setSgTrip
       parameters:
-        - { name: value, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 1023 } }
-        - { name: delta, in: query, required: false, schema: { type: integer } }
+        - { name: value, in: query, required: false, description: "Absolute trip. 0 disables jam detection for that profile - a legitimate setting, and reported in the state payload's `sgTrip`. Mutually exclusive with `delta`.", schema: { type: integer, minimum: 0, maximum: 500 } }
+        - { name: delta, in: query, required: false, description: "Relative adjustment, saturating at 0 and 500. Mutually exclusive with `value`.", schema: { type: integer } }
         - { name: profile, in: query, required: false, description: "Target profile (defaults to active)", schema: { type: integer, enum: [0, 1, 2] } }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadParameter" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/current:
@@ -118,6 +141,7 @@ paths:
           schema: { type: integer, minimum: 1000, maximum: 4500 }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadParameter" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/work_zone:
@@ -129,6 +153,7 @@ paths:
         - { name: delta, in: query, required: true, schema: { type: integer } }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadParameter" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/endpoint:
@@ -141,6 +166,8 @@ paths:
         - { name: delta, in: query, required: true, schema: { type: integer } }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadParameter" }
+        "409": { $ref: "#/components/responses/Refused" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/batch:
@@ -149,10 +176,12 @@ paths:
       tags: [Motion]
       operationId: batch
       parameters:
-        - { name: delta, in: query, required: false, schema: { type: integer } }
+        - { name: delta, in: query, required: false, description: "Adjust the batch target by this many pieces, saturating at 0 and 9999. May be combined with `action=start` - the delta is applied first, and the start is gated against the resulting target.", schema: { type: integer } }
         - { name: action, in: query, required: false, schema: { type: string, enum: [start, clear] } }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "400": { $ref: "#/components/responses/BadParameter" }
+        "409": { $ref: "#/components/responses/Refused" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/calibrate:
@@ -161,11 +190,13 @@ paths:
       description: >
         Runs the StallGuard calibration that discovers the UP and DOWN hard stops
         and stores the raw endpoints. Deferred to the motion task and re-checked
-        there; the response is 200 as soon as the request is queued.
+        there; 200 means the request was queued and was not already refusable,
+        not that calibration succeeded. 409 if the press is not idle.
       tags: [Motion]
       operationId: calibrate
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "409": { $ref: "#/components/responses/Refused" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/return_home:
@@ -173,12 +204,14 @@ paths:
       summary: Creep to the UP hard stop and re-reference the axis
       description: >
         Homes the press against the UP hard stop and clears the stale-position
-        flag. Deferred to the motion task and re-checked there; the response is
-        200 as soon as the request is queued.
+        flag. Legal from IDLE and from STALLED (it is the jam-recovery action)
+        and does not require a calibration. Deferred to the motion task and
+        re-checked there; 200 means queued, not homed.
       tags: [Motion]
       operationId: returnHome
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "409": { $ref: "#/components/responses/Refused" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/motion/abort:
@@ -233,12 +266,13 @@ paths:
         current, work zone, active profile and counter), leaving the device
         uncalibrated. It does NOT touch the WiFi credentials, the AP key or the
         web password. Destructive - confirm in the UI first. Deferred to the
-        motion task, where it is applied only while the machine is IDLE and is
-        silently ignored otherwise (the response is 200 either way).
+        motion task, where it is applied only while the machine is IDLE; asking
+        for it in any other state is refused with 409 rather than dropped.
       tags: [Settings]
       operationId: resetSettings
       responses:
         "200": { $ref: "#/components/responses/Ok" }
+        "409": { $ref: "#/components/responses/Refused" }
         "403": { $ref: "#/components/responses/DefaultPasswordActive" }
 
   /api/v1/wifi/save:
@@ -570,11 +604,57 @@ components:
         Required for all POST endpoints. Digest rather than Basic because the
         device serves plain HTTP - Basic would put the password on the wire in
         reversible base64 on every request.
+
+  schemas:
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [error, message]
+      description: >
+        Uniform error body for every refused request. `error` is a stable
+        machine-readable token - the values are produced by
+        `autolee::refusalSlug()` in `lib/autolee_logic/command_gate.h` and are
+        pinned by `host_test/test_command_gate`, so treat them as part of the
+        contract. `message` is a human sentence and may be reworded.
+      properties:
+        error:
+          type: string
+          enum:
+            - bad_parameter
+            - wrong_state
+            - not_calibrated
+            - position_unreferenced
+            - no_batch_target
+            - default_password
+        message: { type: string }
+
   responses:
     Ok:
       description: >
         Accepted. The updated state is pushed to all clients over `/api/v1/events`
         (and is readable via `GET /api/v1/state`).
+    BadParameter:
+      description: >
+        Refused: the request itself is malformed - a required query parameter is
+        missing, is not an integer, or carries a value outside the documented
+        set. These endpoints previously answered 200 and silently did nothing.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    Refused:
+      description: >
+        Refused: the request is well-formed but the press cannot carry it out
+        from its current state. `error` is one of `wrong_state`,
+        `not_calibrated`, `position_unreferenced` or `no_batch_target`.
+
+        This check is advisory: the command is deferred to the motion task,
+        which re-checks the same rule when it applies it and remains
+        authoritative. A 200 therefore means "queued, and not already refusable"
+        - not "done". Watch `GET /api/v1/state` (or the SSE stream) for the
+        effect, and the log for a late refusal.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
     DefaultPasswordActive:
       description: >
         Refused: the web/API password is still the factory default. Every
@@ -582,10 +662,4 @@ components:
         until a real password is set (see `defaultPassword` in the state schema).
       content:
         application/json:
-          schema:
-            type: object
-            additionalProperties: false
-            required: [error, message]
-            properties:
-              error: { type: string, enum: [default_password] }
-              message: { type: string }
+          schema: { $ref: "#/components/schemas/ApiError" }
