@@ -27,7 +27,7 @@ flowchart TB
         DRV["drivers/<br/>stepper (RMT+PCNT) · tmc5160<br/>display_touch · axs5106l_touch"]
     end
 
-    CORE["lib/autolee_logic/<br/><b>pure, host-tested logic</b><br/>endpoint math · SG filter/blanking<br/>stall FSM · batch · log ring · state JSON"]
+    CORE["lib/autolee_logic/<br/><b>pure, host-tested logic</b><br/>endpoint math · SG filter/blanking<br/>stall FSM · motor FSM · command gates<br/>batch · log ring · state JSON"]
     HW["Hardware<br/>TMC5160 · NEMA 23 · JD9853 LCD"]
 
     BROWSER -->|HTTP| NET
@@ -182,18 +182,44 @@ stateDiagram-v2
     [*] --> IDLE
     IDLE --> RUNNING: Start
     IDLE --> CALIBRATING: Calibrate
+    IDLE --> HOMING: ReturnHome
     RUNNING --> STOPPING: GracefulStop
     RUNNING --> STALLED: Jam detected
     STOPPING --> IDLE: ReachedHome / StopTimeout
     CALIBRATING --> IDLE: CalibrationDone
+    CALIBRATING --> IDLE: Abort
     STALLED --> HOMING: ReturnHome
     HOMING --> IDLE: HomeDone
+    HOMING --> IDLE: Abort
 
     note right of STALLED
         Cannot Start from here —
-        must home first.
+        must home first. Abort is
+        refused here too, so it can
+        never skip the recovery.
+    end note
+
+    note left of IDLE
+        ReturnHome from IDLE is the
+        only way to re-reference the
+        axis after a reboot.
     end note
 ```
+
+Two of those edges are easy to misread:
+
+- **`IDLE --> HOMING`** is not redundant with the jam-recovery path. A reboot
+  restores the endpoints from NVS but *not* the position reference — the
+  stepper's counter comes up at 0 wherever the carriage happens to sit — so a
+  creep-home from `IDLE` is the only thing that re-establishes ground truth
+  against the UP hard stop. `startRunBetweenEndpoints()` refuses to run until it
+  has (`MotionState::positionReferenceStale`).
+- **`Abort`** exists because calibration and creep-home block `pump_task` for
+  their whole duration and were otherwise uninterruptible. It is accepted from
+  `CALIBRATING` and `HOMING` only — never from `RUNNING`, where a run must
+  decelerate through `STOPPING`, and never from `STALLED`. See
+  [FLOWS.md §2](FLOWS.md#2-cancelling-a-calibration-or-a-creep-home) for the
+  unwind, which is the safety-relevant half.
 
 The transition table is encoded in `lib/autolee_logic/motor_fsm.h` and is
 host-tested exhaustively (every invalid `(state, event)` pair must be rejected).
@@ -208,6 +234,18 @@ makes the entry point a logged no-op *before* it drives the TMC or the stepper.
 `motionEventAllowed()`) rather than re-hardcoding which states each command is
 legal from, so "cannot Start from Stalled" is enforced by the tested code, in one
 place.
+
+The table is not the whole gate, though. A `Start` is also refused when the press
+was never calibrated, or when a restored calibration has left the axis
+unreferenced, and a batch `Start` is refused with no target set — none of which
+the FSM knows about. Those rules live in
+[`lib/autolee_logic/command_gate.h`](../lib/autolee_logic/command_gate.h), as
+pure functions of a `MotionState` snapshot, so the HTTP layer can consult them to
+answer a caller **and** `pump_task` can re-evaluate them when it actually applies
+the command. The second evaluation stays authoritative: state can change in
+between, so the first is only ever the absence of an already-known refusal, never
+permission. [FLOWS.md §1](FLOWS.md#1-a-control-command-end-to-end) walks the whole
+path, including which failures become `400` and which become `409`.
 
 ### Jam detection
 
@@ -246,6 +284,14 @@ grouping is navigational, not a module boundary the compiler enforces.
 | Digest auth on all writes | Nobody on the network can start the press or flash firmware | ✅ on hardware |
 | Brownout detection | Clean reset when the rail sags | ⚙️ needs the press's PSU under load |
 | Jam detection / controlled stop | Brass jams only — **never** a guard for hands | ⚙️ needs the motor rig |
+| Refusal reporting on control routes | A command the machine cannot carry out is answered `400`/`409` instead of a silent `200 ok` | ✅ on hardware (bare board) |
+| Operator abort of a blocking search | A calibration or creep-home can be cancelled; the unwind leaves the axis unreferenced rather than half-calibrated | ✅ on hardware (bare board) |
+| Settings-blob version migration | An upgrade carries the calibration forward, or fails safe to defaults — never a partially-trusted blob | ✅ on hardware (v2 → v3) |
+
+"✅ on hardware (bare board)" means verified on an ESP32-C6 with **no TMC5160 and
+no motor attached** — the request/response contract, the state machine and the
+unwind paths are exercised, the mechanics are not. Anything that depends on the
+motor actually turning is still ⚙️.
 
 Configuration lives in `sdkconfig.defaults`; see
 [adr/0001-build-tooling-and-platform.md](adr/0001-build-tooling-and-platform.md)
@@ -255,6 +301,7 @@ for why ESP-IDF was chosen and what each option concretely buys.
 
 ## See also
 
+- [FLOWS.md](FLOWS.md) — sequence diagrams: how a control command, an abort and the event stream actually behave over time
 - [PLAN.md](PLAN.md) — phased migration checklist and what remains unverified
 - [wiring.md](wiring.md) · Bill of Materials: [24V](24V/bill-of-materials.md) · [36V](36V/bill-of-materials.md)
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) — build, test, and release workflow
