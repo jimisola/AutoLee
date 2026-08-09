@@ -20,7 +20,10 @@ void ui_jam_recovery_finished(bool homed);
 // been written (or failed to write) - the button must not claim success before
 // the NVS write happened. See webPasswordResetTick() in web_server.cpp.
 void ui_web_password_reset_finished(bool ok);
-void setRunButtonState(bool running);
+// Re-renders the RUN/STOP/STOPPING button from the current motion state. Takes
+// no argument on purpose - see the implementation for what went wrong when each
+// call site decided for itself what the button should say.
+void ui_update_run_button();
 void ui_update_main_warning();
 void ui_update_tuning_numbers();
 void ui_update_endpoint_edit_values();

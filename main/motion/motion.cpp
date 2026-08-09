@@ -313,7 +313,10 @@ void handleMotion() {
           if (complete) {
             webLog("Motion", "Batch complete: %ld/%ld", (long)doneCount, (long)doneTarget);
             requestGracefulStop();
-            setRunButtonState(false);
+            // After requestGracefulStop(), so the button renders the STOPPING
+            // the press is actually in rather than a green RUN it will not
+            // accept for another STOP_TIMEOUT_MS worth of decel.
+            ui_update_run_button();
             break;
           }
         }
@@ -523,7 +526,7 @@ void safeCreepHome() {
 
   webLog("Motion", "Creep home: done pos=%ld", (long)stepper::getCurrentPosition());
 
-  setRunButtonState(false);
+  ui_update_run_button();
   ui_update_main_warning();
   ui_update_tuning_numbers();
   ui_update_endpoint_edit_values();

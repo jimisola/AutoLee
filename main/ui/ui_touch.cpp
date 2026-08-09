@@ -509,19 +509,59 @@ void ui_update_wifi_label() {
   lvgl_port_unlock();
 }
 
-void setRunButtonState(bool running) {
-  if (!ui_lock("setRunButtonState")) return;
+// Renders one of three states, read from the motion state rather than passed in
+// by the caller. This used to take a `bool running` that every call site worked
+// out for itself, which went wrong in two separate ways:
+//
+//   - A caller could pass a value that disagreed with runState. The batch-start
+//     path passed a hardcoded `true` even when startRunBetweenEndpoints() had
+//     refused the start, leaving a red STOP on a press that was standing still.
+//   - STOPPING rendered as plain green "RUN" while the carriage was still
+//     decelerating toward UP. The tested table (motor_fsm.h) accepts neither
+//     Start nor GracefulStop from STOPPING, so the button advertised "ready to
+//     start", the tap was silently discarded, and the press kept moving.
+//
+// Driving it off the snapshot makes both impossible by construction. Called at
+// the known transition points for an immediate response, and again from the
+// 100ms counter_timer_cb so the button self-corrects on any path that doesn't
+// go through one - the same belt-and-braces the Calibrate button already uses.
+void ui_update_run_button() {
+  const RunState state = motion_state::snapshot().runState;
+  if (!ui_lock("ui_update_run_button")) return;
   if (btn_run_global) {
     lv_obj_t *l = lv_obj_get_child(btn_run_global, 0);
-    if (running) {
-      lv_obj_set_style_bg_color(btn_run_global, lv_color_hex(0xFF0000), LV_PART_MAIN);
-      lv_label_set_text(l, "STOP");
-      lv_obj_set_style_text_color(l, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-    } else {
-      lv_obj_set_style_bg_color(btn_run_global, lv_color_hex(0x00FF00), LV_PART_MAIN);
-      lv_label_set_text(l, "RUN");
-      lv_obj_set_style_text_color(l, lv_color_hex(0x000000), LV_PART_MAIN);
+    uint32_t bg, fg;
+    const char *txt;
+    // Disabled only for STOPPING: it is the one state where a tap has no legal
+    // effect at all, so the button says so instead of swallowing it.
+    bool tappable = true;
+    switch (state) {
+      case RUNNING:
+        bg = 0xFF0000;
+        fg = 0xFFFFFF;
+        txt = "STOP";
+        break;
+      case STOPPING:
+        bg = 0xB4540A;
+        fg = 0xFFFFFF;
+        txt = "STOPPING";
+        tappable = false;
+        break;
+      default:
+        bg = 0x00FF00;
+        fg = 0x000000;
+        txt = "RUN";
+        break;
     }
+    lv_obj_set_style_bg_color(btn_run_global, lv_color_hex(bg), LV_PART_MAIN);
+    if (l) {
+      lv_label_set_text(l, txt);
+      lv_obj_set_style_text_color(l, lv_color_hex(fg), LV_PART_MAIN);
+    }
+    if (tappable)
+      lv_obj_clear_state(btn_run_global, LV_STATE_DISABLED);
+    else
+      lv_obj_add_state(btn_run_global, LV_STATE_DISABLED);
   }
   lvgl_port_unlock();
 }
@@ -783,6 +823,11 @@ static void counter_timer_cb(lv_timer_t *t) {
     ui_update_main_warning();
     ui_update_batch_remain();
   }
+  // Same reasoning as the Calibrate button below: pump_task owns the state, so
+  // the button follows runState here rather than trusting every caller to have
+  // pushed the right appearance. Catches STOPPING -> IDLE, which is reached by
+  // handleMotion() without any explicit UI call.
+  ui_update_run_button();
   // Calibration runs on pump_task now, so the button reflects runState here
   // instead of being driven inline by a blocking handler.
   if (btn_calibrate) {
@@ -925,7 +970,12 @@ static void build_settings_screen() {
       b_config,
       [](lv_event_t *e) {
         LV_UNUSED(e);
-        reset_cal_disarm();  // never enter the screen with Reset Cal pre-armed
+        // Never enter the screen with either destructive button pre-armed, or
+        // still showing the outcome of a previous password reset. Back does the
+        // same on the way out, but Back is not the only way off this screen -
+        // a jam takes the display over from anywhere.
+        reset_cal_disarm();
+        reset_pwd_disarm();
         go(config_scr);
       },
       LV_EVENT_CLICKED, nullptr);
