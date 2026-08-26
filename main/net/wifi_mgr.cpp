@@ -13,8 +13,9 @@
 
 #include "dns_server.h"
 
-#include "config.h"   // DEFAULT_AP_SSID, WIFI_CONNECT_TIMEOUT_MS
-#include "globals.h"  // webLog(), uiRepaintRequested
+#include "config.h"     // DEFAULT_AP_SSID, WIFI_CONNECT_TIMEOUT_MS
+#include "wifi_scan.h"  // autolee::Survey, strongest_per_ssid()
+#include "globals.h"    // webLog(), uiRepaintRequested
 #include "ui_touch.h"
 
 namespace wifi_mgr {
@@ -272,6 +273,11 @@ std::string apPassword() {
 // empty result is a successful scan of a quiet band.
 static bool doScan(std::vector<wifi_ap_record_t> &records) {
   wifi_scan_config_t scan_cfg = {};
+  // Both explicit rather than inherited from the zero-init: show_hidden false
+  // leaves a non-advertising AP out of the radio survey entirely, not merely
+  // out of the list.
+  scan_cfg.show_hidden = true;
+  scan_cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
   if (esp_wifi_scan_start(&scan_cfg, true) != ESP_OK) return false;
   uint16_t count = 0;
   esp_wifi_scan_get_ap_num(&count);
@@ -283,38 +289,49 @@ static bool doScan(std::vector<wifi_ap_record_t> &records) {
   return true;
 }
 
-// Shared post-processing for BOTH pickers (captive portal dropdown, dashboard
-// /api/v1/wifi/scan), so they present the same list: one entry per SSID - the
-// driver returns one record per BSSID, strongest first, so a mesh network
-// shows up once per node otherwise - and hidden networks (empty SSID) dropped,
-// since there is nothing selectable to show and the manual field covers them.
-static bool collectNetworks(std::vector<wifi_ap_record_t> &out) {
+// The survey: every radio the driver saw, one entry per BSSID, hidden SSIDs
+// kept. Both views are derived from this, so a row missing from a view is a
+// property of that view rather than of the scan.
+static bool surveyNetworks(autolee::Survey &out) {
   std::vector<wifi_ap_record_t> records;
   if (!doScan(records)) return false;
+  out.clear();
+  out.reserve(records.size());
   for (const auto &r : records) {
-    const std::string raw(reinterpret_cast<const char *>(r.ssid));
-    if (raw.empty()) continue;
-    bool dup = false;
-    for (const auto &kept : out) {
-      if (raw == reinterpret_cast<const char *>(kept.ssid)) {
-        dup = true;
-        break;
-      }
-    }
-    if (!dup) out.push_back(r);
+    autolee::ApRecord ap;
+    // The driver's ssid field is a fixed buffer, not guaranteed NUL-terminated
+    // when the SSID uses all 32 bytes.
+    ap.ssid.assign(reinterpret_cast<const char *>(r.ssid),
+                   strnlen(reinterpret_cast<const char *>(r.ssid), sizeof(r.ssid)));
+    memcpy(ap.bssid, r.bssid, sizeof(ap.bssid));
+    ap.channel = r.primary;
+    ap.rssi = r.rssi;
+    ap.secure = (r.authmode != WIFI_AUTH_OPEN);
+    out.push_back(std::move(ap));
   }
+  return true;
+}
+
+// Shared post-processing for BOTH pickers (captive portal dropdown, dashboard
+// /api/v1/wifi/scan), so they present the same list. The collapsing rule lives
+// in strongest_per_ssid() where it is unit-tested; it is a property of the
+// picker, not of scanning.
+static bool collectNetworks(autolee::Survey &out) {
+  autolee::Survey survey;
+  if (!surveyNetworks(survey)) return false;
+  out = autolee::strongest_per_ssid(survey);
   return true;
 }
 
 std::string scanNetworksJson() {
   if (s_switching) return "[]";
-  std::vector<wifi_ap_record_t> records;
+  autolee::Survey records;
   if (!collectNetworks(records)) return "[]";
   std::string json = "[";
   bool first = true;
   for (size_t i = 0; i < records.size(); i++) {
     std::string ssid;
-    for (unsigned char c : std::string(reinterpret_cast<char *>(records[i].ssid))) {
+    for (unsigned char c : records[i].ssid) {
       // JSON string escaping: the two mandatory metacharacters plus control
       // bytes; an SSID is arbitrary bytes and " or \ in one must not be able
       // to break the array open.
@@ -335,7 +352,7 @@ std::string scanNetworksJson() {
     if (!first) json += ",";
     first = false;
     json += "{\"ssid\":\"" + ssid + "\",\"rssi\":" + std::to_string(records[i].rssi) +
-            ",\"secure\":" + (records[i].authmode == WIFI_AUTH_OPEN ? "false" : "true") + "}";
+            ",\"secure\":" + (records[i].secure ? "true" : "false") + "}";
   }
   json += "]";
   return json;
@@ -343,7 +360,7 @@ std::string scanNetworksJson() {
 
 static void scan_networks() {
   s_scanned_html = "<option value=''>-- Select WiFi --</option>";
-  std::vector<wifi_ap_record_t> records;
+  autolee::Survey records;
   if (!collectNetworks(records)) {
     s_scanned_html += "<option value=''>Scan failed</option>";
     return;
@@ -354,7 +371,7 @@ static void scan_networks() {
   }
   const size_t count = records.size();
   for (uint16_t i = 0; i < count; i++) {
-    std::string ssid(reinterpret_cast<char *>(records[i].ssid));
+    const std::string &ssid = records[i].ssid;
     // Minimal HTML-escaping. '&' matters and was missing here (an SSID
     // containing it produced broken markup in the dropdown) - fixed upstream in
     // Karl's v1.10.0. Note his fix had to escape '&' *first* because it used
@@ -383,7 +400,7 @@ static void scan_networks() {
           escaped += c;
       }
     }
-    const char *sec = records[i].authmode == WIFI_AUTH_OPEN ? "OPEN" : "SEC";
+    const char *sec = records[i].secure ? "SEC" : "OPEN";
     s_scanned_html += "<option value=\"" + escaped + "\">" + escaped + " (" +
                       std::to_string(records[i].rssi) + " dBm " + sec + ")</option>";
   }
