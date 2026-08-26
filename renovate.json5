@@ -1,0 +1,54 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended"],
+  timezone: "Europe/Stockholm",
+
+  // Only the surfaces Dependabot cannot see. github-actions and pip belong to
+  // .github/dependabot.yml; enabling them here would open every PR twice.
+  enabledManagers: ["custom.regex", "pre-commit"],
+
+  minimumReleaseAge: "3 days",
+  semanticCommits: "enabled",
+  dependencyDashboard: true,
+
+  // The registry's JSON API. yanked_at must be filtered: yanked releases are
+  // still listed and can sort above live ones. created_at -> releaseTimestamp
+  // is what makes minimumReleaseAge work at all; without it the hold above is
+  // silently a no-op.
+  customDatasources: {
+    "esp-component-registry": {
+      defaultRegistryUrlTemplate: "https://components.espressif.com/api/components/{{packageName}}",
+      transformTemplates: [
+        '{"releases": versions[yanked_at = null].{"version": version, "releaseTimestamp": created_at}}',
+      ],
+    },
+  },
+
+  customManagers: [
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^main/idf_component\\.yml$/"],
+      // Anchored on a newline plus exactly two spaces, and the version must
+      // start with a digit: several comment lines in that file contain a
+      // slash, and `idf:` has no namespace. Matches only exact pins, so a
+      // caret regressing into the file goes unwatched rather than misread.
+      matchStrings: [
+        '\\n  (?<depName>[a-z0-9][a-z0-9_.-]*\\/[a-z0-9][a-z0-9_.-]*): "(?<currentValue>[0-9][^"]*)"',
+      ],
+      datasourceTemplate: "custom.esp-component-registry",
+      // Not semver: the registry publishes revision suffixes (esp_lvgl_port
+      // 2.8.0~1) that strict semver refuses to parse, which would drop the
+      // dependency silently.
+      versioningTemplate: "loose",
+    },
+  ],
+
+  packageRules: [
+    {
+      matchDatasources: ["custom.esp-component-registry"],
+      matchPackageNames: ["lvgl/lvgl"],
+      allowedVersions: "<9",
+      description: "LVGL 9 renames the indev/display APIs that axs5106l_touch.cpp and ui_touch.cpp are written against - a port, not an upgrade. See main/idf_component.yml.",
+    },
+  ],
+}
