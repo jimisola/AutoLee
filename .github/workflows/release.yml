@@ -294,6 +294,14 @@ jobs:
     permissions:
       contents: read
 
+  contracts:
+    name: Checks
+    needs: prepare
+    if: ${{ !inputs.dry-run }}
+    uses: ./.github/workflows/contracts.yml
+    permissions:
+      contents: read
+
   # THE APPROVAL GATE. `environment: stable` is what makes this job sit pending
   # until a required reviewer approves it. By that point the summary above shows
   # the version, the previous tag and the notes, and the checks are green.
@@ -305,7 +313,7 @@ jobs:
   # public repositories. See RELEASING.md.
   release:
     name: Tag, build and create the prerelease
-    needs: [prepare, build, lint]
+    needs: [prepare, build, lint, contracts]
     if: ${{ !inputs.dry-run }}
     runs-on: ubuntu-latest
     environment:

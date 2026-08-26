@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   firmware:
-    name: idf.py build (esp32c6)
+    name: firmware build (esp32c6)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
@@ -41,7 +41,7 @@ jobs:
           idf.py build
 
   host-tests:
-    name: Host tests (host_test/, ctest + coverage)
+    name: host tests (ctest + coverage)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0

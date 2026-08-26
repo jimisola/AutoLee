@@ -1,7 +1,8 @@
 name: Lint
 
-# Everything that can be checked without a toolchain: formatting, the API
-# specs, the workflows themselves, and the release-notes config.
+# Everything that can be checked without a toolchain: formatting, the workflows
+# themselves, and the release-notes config. The API specs moved to
+# contracts.yml, with the check that asks whether a PR breaks them.
 #
 # Split out from the old single ci.yml (see build.yml's header for why). These
 # jobs are seconds each and need no ESP-IDF install, so a formatting mistake
@@ -14,7 +15,7 @@ on:
   # Callable so release.yml can gate a release on the same checks that guard
   # main, rather than reimplementing them and letting the two drift.
   workflow_call:
-  # Manual runs: several of these pin an external tool (clang-format, spectral,
+  # Manual runs: several of these pin an external tool (clang-format,
   # git-cliff), so they can go red when that tool changes rather than when this
   # repo does — and then need re-running with no commit to hang it on.
   workflow_dispatch:
@@ -24,7 +25,7 @@ permissions:
 
 jobs:
   pre-commit:
-    name: pre-commit (clang-format, ruff, basic checks)
+    name: code lint (clang-format, ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
@@ -37,29 +38,6 @@ jobs:
         run: |
           pip install -r .github/requirements-ci.txt
           pre-commit run --all-files --show-diff-on-failure
-
-  api:
-    name: API specs (spectral + schema contract)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.13"
-      - name: Lint API specs (spectral)
-        run: npx --yes @stoplight/spectral-cli@6.16.3 lint api/openapi.yaml api/asyncapi.yaml
-      - name: API contract check (state.example.json against the schema)
-        run: |
-          pip install -r .github/requirements-ci.txt
-          python -c "
-          import json, jsonschema
-          schema = json.load(open('api/schemas/state.schema.json'))
-          example = json.load(open('api/schemas/state.example.json'))
-          jsonschema.validate(example, schema)
-          print('state.example.json matches state.schema.json')
-          "
 
   # The workflows lint the firmware; nothing linted the workflows. Both tools
   # here catch a class of mistake that otherwise only shows up as a failed
@@ -77,7 +55,7 @@ jobs:
   # nothing. Nothing updates these automatically — see .github/dependabot.yml
   # for why, and bump them by hand when convenient.
   workflows:
-    name: Lint the workflows themselves (actionlint, zizmor, yamllint)
+    name: workflow lint (actionlint, zizmor, yamllint)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
@@ -134,7 +112,7 @@ jobs:
   # correct in theory and wrong in fact. It lives in this workflow anyway
   # because it needs no ESP-IDF — seconds, not the firmware build.
   release-config:
-    name: Release version mapping (cliff.toml)
+    name: release config validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
