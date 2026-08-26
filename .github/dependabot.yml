@@ -4,8 +4,11 @@
 #
 #   * main/idf_component.yml + dependencies.lock (lvgl, esp_lvgl_port,
 #     arduinojson) are the ESP-IDF Component Manager's format. Dependabot has
-#     no ecosystem for it and neither does Renovate, so component bumps stay
-#     manual: edit the `^x.y.z` constraint, `idf.py reconfigure`, commit the
+#     no ecosystem for it and no custom-manager facility, so it can never see
+#     this file. Renovate has no built-in manager either, but its
+#     customDatasources/customManagers can be pointed at the registry's
+#     /api/components/<ns>/<name> endpoint — not adopted here. So bumps stay
+#     manual: edit the exact version, `idf.py reconfigure`, commit the
 #     regenerated dependencies.lock.
 #   * .pre-commit-config.yaml `rev:` pins — Renovate has a `pre-commit`
 #     manager, Dependabot does not.
