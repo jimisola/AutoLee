@@ -17,3 +17,6 @@ __pycache__/
 
 # OS cruft
 .DS_Store
+
+# Scratch tree that contracts.yml extracts the base specs into.
+.contracts-base/
