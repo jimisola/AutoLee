@@ -79,6 +79,13 @@ jobs:
           # History back to the merge base, not just this PR's commits.
           fetch-depth: 0
 
+      # @asyncapi/cli@6.0.2 requires node >= 24; the runner image ships v22, on
+      # which it errors out - which this job would otherwise read as a breaking
+      # change rather than as a broken tool.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+
       - name: Find the merge base with the base branch
         id: base
         env:
