@@ -1,25 +1,22 @@
-# Dependabot covers exactly one of this repo's dependency surfaces: the
-# SHA-pinned actions in .github/workflows/. That is deliberate, not an
-# oversight — nothing else here has an ecosystem Dependabot understands:
+# Dependabot and Renovate split this repo's dependency surfaces; the split is
+# deliberate, and the two must not overlap or every bump arrives twice.
 #
-#   * main/idf_component.yml + dependencies.lock (lvgl, esp_lvgl_port,
-#     arduinojson) are the ESP-IDF Component Manager's format. Dependabot has
-#     no ecosystem for it and neither does Renovate, so component bumps stay
-#     manual: edit the `^x.y.z` constraint, `idf.py reconfigure`, commit the
-#     regenerated dependencies.lock.
-#   * .pre-commit-config.yaml `rev:` pins — Renovate has a `pre-commit`
-#     manager, Dependabot does not.
-#   * The workflows' Python tooling lives in .github/requirements-ci.txt with
-#     exact pins, so the `pip` ecosystem below keeps it fresh. The remaining
-#     inline pin is `npx @stoplight/spectral-cli@6.16.3`: exact, so CI can no
-#     longer go red with no commit behind it, but still invisible to
-#     Dependabot (it would need a package.json + lockfile).
+# Dependabot (this file): the SHA-pinned actions in .github/workflows/, and the
+# CI Python tooling in .github/requirements-ci.txt.
+#
+# Renovate (renovate.json5): the surfaces Dependabot has no ecosystem for. Its
+# enabledManagers is limited to exactly those, which is what keeps the two
+# apart — do not add github-actions or pip there.
+#
+# What is left for a human to watch, because neither bot can see it:
+#
+#   * The inline `npx @stoplight/spectral-cli@6.16.3` in lint.yml: exact, so CI
+#     cannot go red with no commit behind it, but invisible to both (it would
+#     need a package.json + lockfile).
 #   * The actionlint/zizmor versions pinned in lint.yml's `workflows` job, and
 #     the git-cliff version + checksum defaulted in
-#     .github/actions/setup-git-cliff, are likewise invisible here.
-#
-# So: this file keeps the action SHAs fresh, and the list above is the honest
-# remainder that a human still has to watch.
+#     .github/actions/setup-git-cliff: action inputs, not dependencies, so no
+#     datasource reads them.
 version: 2
 
 updates:
