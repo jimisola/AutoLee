@@ -5,7 +5,10 @@ dependencies:
   # gpio_num_t-typed esp_lcd config members, and the
   # -Werror=missing-field-initializers pragma around DNS_SERVER_CONFIG_SINGLE in
   # wifi_mgr.cpp), so a 5.x build is no longer what CI verifies.
-  idf: ">=6.0"
+  # Bounded below 7 because nothing has been built or run against a 7.x that
+  # does not exist yet: ">=6.0" claimed support for it. Raise the bound when
+  # a 7.x is actually tested, not before.
+  idf: ">=6.0,<7"
   # Exact pins, not carets: nothing watches this file (the Component Manager
   # format has no Dependabot ecosystem, see .github/dependabot.yml), so a caret
   # meant the next manifest edit silently re-resolved to whatever was newest.
