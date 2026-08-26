@@ -132,6 +132,11 @@ jobs:
           base: ".contracts-base/api/openapi.yaml"
           revision: "api/openapi.yaml"
           fail-on: ERR
+          # openapi.yaml carries $ref: "./schemas/state.schema.json". oasdiff
+          # refuses external refs by default and fails to load the spec at all
+          # - which this job would report as a breaking change. Allowed, so the
+          # comparison covers the referenced schema instead of stopping at it.
+          allow-external-refs: true
           github-token: ${{ github.token }}
 
       - name: AsyncAPI - breaking changes (AsyncAPI CLI)
