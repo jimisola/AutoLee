@@ -106,6 +106,15 @@ jobs:
             fi
           done
 
+          # Materialise the base's whole api/ tree. Both specs carry
+          # $ref: "./schemas/state.schema.json"; a copy of one file alone
+          # cannot resolve it, and a git-ref base leaves the tool to guess.
+          # This also diffs each spec against the schema it shipped with
+          # rather than today's.
+          rm -rf "$RUNNER_TEMP/base"
+          mkdir -p "$RUNNER_TEMP/base"
+          git archive "$SHA" api | tar -x -C "$RUNNER_TEMP/base"
+
       # continue-on-error on both diffs so a reviewer sees the whole picture in
       # one run rather than fixing one and discovering the other. The Verdict
       # step below is what actually fails the job.
@@ -115,8 +124,8 @@ jobs:
         continue-on-error: true
         uses: oasdiff/oasdiff-action/breaking@2649ebe137aeb72a95707671204e829f86e091fc # v0.1.13
         with:
-          base: "${{ steps.base.outputs.sha }}:api/openapi.yaml"
-          revision: "HEAD:api/openapi.yaml"
+          base: "${{ runner.temp }}/base/api/openapi.yaml"
+          revision: "api/openapi.yaml"
           fail-on: ERR
           github-token: ${{ github.token }}
 
@@ -124,14 +133,10 @@ jobs:
         id: asyncapi
         if: steps.base.outputs.asyncapi-existed == 'true'
         continue-on-error: true
-        env:
-          BASE_SHA: ${{ steps.base.outputs.sha }}
         run: |
           set -uo pipefail
-          git show "$BASE_SHA:api/asyncapi.yaml" > "$RUNNER_TEMP/asyncapi-base.yaml"
-
           npx --yes @asyncapi/cli@6.0.2 diff \
-            "$RUNNER_TEMP/asyncapi-base.yaml" api/asyncapi.yaml \
+            "$RUNNER_TEMP/base/api/asyncapi.yaml" api/asyncapi.yaml \
             --type breaking
           status=$?
 
@@ -140,7 +145,7 @@ jobs:
           # churns on any edit at all). Failing on it would turn purely
           # additive changes red, so it is surfaced as a warning.
           npx --yes @asyncapi/cli@6.0.2 diff \
-            "$RUNNER_TEMP/asyncapi-base.yaml" api/asyncapi.yaml \
+            "$RUNNER_TEMP/base/api/asyncapi.yaml" api/asyncapi.yaml \
             --type unclassified --format json --no-error \
             --save-output "$RUNNER_TEMP/asyncapi-unclassified.json"
           # Filtered to a single --type the CLI emits a bare array; only
