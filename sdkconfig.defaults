@@ -1,0 +1,74 @@
+# AutoLee - ESP-IDF defaults (see docs/PLAN.md Phase 1 / Phase 6)
+
+CONFIG_IDF_TARGET="esp32c6"
+
+# Flash: 4 MB, matches the WaveShare board (mirrors platformio.ini's min_spiffs layout)
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Size optimization (small OTA app slots)
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# lib/psychic_http (PsychicHttp) compiles its WebSocket support unconditionally
+# even though AutoLee only uses SSE/REST - esp_http_server needs this Kconfig
+# option enabled for httpd_ws_frame_t etc. to be declared.
+CONFIG_HTTPD_WS_SUPPORT=y
+
+# ESP-IDF's default request header budget (512 bytes) is too small for a real
+# browser's Digest-auth retry: the Authorization header alone (username, realm,
+# nonce, response hash, qop, nc, cnonce) is often 300-400 bytes, and a real
+# browser adds its own User-Agent/Accept/Sec-Fetch-*/etc. on top - together
+# routinely over 512. Reproduced on hardware as a raw "Header fields are too
+# long" rejection (HTTP 431) on /api/v1/diagnostics/coredump once it became Digest-gated;
+# curl-based auth testing never hit this because curl sends much leaner
+# headers. Applies to every Digest-gated route, not just this one.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+
+# Socket budget for the captive portal. IDF's default of 10 leaves esp_http_server
+# only 7 usable sockets (it requires max_open_sockets <= CONFIG_LWIP_MAX_SOCKETS - 3),
+# which a phone joining the setup AP can exhaust on its own: several parallel
+# connectivity-check probes plus the page load plus the dashboard's SSE stream.
+# Hitting the ceiling made httpd purge a socket mid-response and serve a
+# half-written setup page. 16 here is what lets web_server.cpp ask for 12 - the
+# two MUST be raised together, or httpd_start() fails with ESP_ERR_INVALID_ARG.
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# Use our own include/lv_conf.h instead of the LVGL component's Kconfig-
+# generated defaults. Misleadingly named: LV_CONF_SKIP=y (the component's
+# own default) means "skip lv_conf.h", not "skip Kconfig" - found the hard
+# way when every LVGL font/color setting silently fell back to Kconfig
+# defaults (only montserrat_14 enabled) despite include/lv_conf.h enabling
+# the others; see managed_components/lvgl__lvgl/src/lv_conf_internal.h.
+CONFIG_LV_CONF_SKIP=n
+
+# --- Phase 6 safety features ---
+
+# OTA rollback: an update that doesn't self-validate reverts to the last-good app
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Task + interrupt watchdog, panic on trip
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+# 8s budget: motion.cpp's blocking calibration/homing polling loops feed the
+# watchdog explicitly (wdt_feed()); the timeout just needs to exceed a single
+# feed gap. Set explicitly - IDF's own default is 5s, which is not enough.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=8
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_INT_WDT_PANIC=y
+
+# Core dump to flash for post-crash diagnosis
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# Brownout detector (tune threshold once bench-verified against the 24V->5V + stepper draw)
+CONFIG_ESP_BROWNOUT_DET=y
+
+# Raises the compile-time ceiling so ESP_LOGD("weblog", ...) isn't compiled
+# out entirely (IDF's default maximum is Info) - webLog()'s own g_logLevel
+# check (main/globals.cpp) is the actual runtime gate; this just makes Debug
+# calls exist at all. The runtime default log level for every OTHER tag
+# stays at Info (CONFIG_LOG_DEFAULT_LEVEL, unchanged) - only "weblog"'s
+# runtime ceiling is explicitly raised, once, in webLogImpl().
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y

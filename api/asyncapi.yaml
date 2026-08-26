@@ -1,0 +1,83 @@
+asyncapi: 3.1.0
+info:
+  title: AutoLee event stream (SSE)
+  version: "2.0.0"
+  description: >
+    Server-Sent Events pushed by the AutoLee firmware on `GET /api/v1/events`. Three event
+    types share the channel: the default `message` event carries the full device
+    state (same schema as `GET /api/v1/state`, see openapi.yaml), sent only when the
+    state actually changed since the last send (checked at most every 250 ms, the
+    server's poll cadence - not every poll produces a send); the named `log` event
+    carries newly appended log lines; the named `heartbeat` event is sent at a fixed
+    ~8 s cadence whenever no `message` went out in that window, so a client can tell
+    "still connected, nothing changed" apart from a dead connection.
+    Versioned in lockstep with openapi.yaml and with the firmware release
+    itself - see the versioning note there.
+  license:
+    name: CC BY-NC 4.0
+    url: https://creativecommons.org/licenses/by-nc/4.0/
+
+servers:
+  device:
+    host: autolee.local
+    protocol: http
+    description: Device on the local network; open an EventSource on /api/v1/events.
+
+channels:
+  events:
+    address: /api/v1/events
+    description: The Server-Sent Events stream.
+    messages:
+      state:
+        $ref: "#/components/messages/state"
+      log:
+        $ref: "#/components/messages/log"
+      heartbeat:
+        $ref: "#/components/messages/heartbeat"
+
+operations:
+  receiveEvents:
+    action: receive
+    channel:
+      $ref: "#/channels/events"
+    summary: Subscribe to device state + log events.
+    messages:
+      - $ref: "#/channels/events/messages/state"
+      - $ref: "#/channels/events/messages/log"
+      - $ref: "#/channels/events/messages/heartbeat"
+
+components:
+  messages:
+    state:
+      name: state
+      title: State snapshot
+      summary: Default (unnamed) SSE 'message' event — full device state, ~every 250 ms.
+      contentType: application/json
+      payload:
+        $ref: "./schemas/state.schema.json"
+    log:
+      name: log
+      title: Log lines
+      summary: Named SSE 'log' event — newly appended log lines.
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [log]
+        properties:
+          log:
+            type: array
+            items:
+              type: string
+    heartbeat:
+      name: heartbeat
+      title: Heartbeat
+      summary: >
+        Named SSE 'heartbeat' event, sent every ~8 s when no state change occurred in that
+        window (state changes reset the heartbeat clock instead of stacking a heartbeat on
+        top). Distinguishes an idle-but-connected client from a dead one without resending
+        the full state on every tick. Payload is a fixed empty object.
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false

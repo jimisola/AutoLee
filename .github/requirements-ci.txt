@@ -1,0 +1,15 @@
+# Pinned CI tooling.
+#
+# Every action in .github/workflows/ is SHA-pinned and the downloaded binaries
+# are checksum-verified; these Python tools were the remaining floating
+# dependency, resolved fresh on each run. Pinning them means a lint or coverage
+# job can only change when this file changes - and Dependabot can see and bump
+# them, which it cannot do for a bare `pip install <name>`.
+#
+# Bump deliberately: gcovr changes can move the coverage number, and pre-commit
+# changes can reformat the tree.
+gcovr==8.6
+jsonschema==4.26.0
+pre-commit==4.6.1
+pytest==9.1.1
+yamllint==1.38.0

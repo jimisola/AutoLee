@@ -1,0 +1,1179 @@
+// ============================================================================
+//  test_motion_seq - host coverage for main/motion/motion.cpp's SEQUENCING
+//  (docs/PLAN.md Phase 8: "fake the stepper::/tmc5160:: seams").
+//
+//  The other suites cover lib/autolee_logic's pure decision helpers. This one
+//  covers the firmware file that calls them: the real motion.cpp is compiled
+//  and linked here against fake stepper::/tmc5160:: bodies (host_test/fakes),
+//  so the ORDER and ARGUMENTS of its hardware calls can be asserted -
+//  jam -> forceStop -> backoff -> STALLED, the calibrate -> hit -> backoff ->
+//  re-zero flow, the graceful-stop timeout, and the homing retry/timeout logic.
+//
+//  Nothing in motion.cpp is modified or reimplemented for these tests.
+// ============================================================================
+#include <string>
+
+#include "unity.h"
+
+#include "fake_hw.h"
+
+#include "config.h"
+#include "motion.h"
+#include "motion_cmd.h"
+#include "motion_state.h"
+
+// --------------------------------------------------------------------------
+//  Harness
+// --------------------------------------------------------------------------
+void setUp(void) {
+  fake::reset();
+  g_motion = MotionState{};
+}
+
+void tearDown(void) {
+  // motion_state.h forbids driving the stepper / touching SPI / logging inside
+  // a Guard critical section. Every test asserts motion.cpp honours that.
+  TEST_ASSERT_FALSE_MESSAGE(fake::sim.hwCallInCritical,
+                            "a stepper/TMC/webLog call happened inside a motion_state::Guard");
+  TEST_ASSERT_EQUAL_INT_MESSAGE(0, fake::sim.criticalDepth, "unbalanced critical section");
+  TEST_ASSERT_FALSE_MESSAGE(fake::sim.tickBudgetExhausted, "fake tick budget exhausted (hang?)");
+}
+
+// One pump_task iteration: handleMotion() then 10 ms of simulated time (the
+// real pump loop's vTaskDelay).
+static void pump(int iterations) {
+  for (int i = 0; i < iterations; i++) {
+    handleMotion();
+    fake::advance_ms(10);
+  }
+}
+
+static void givenCalibrated(long up, long dn, int32_t pos) {
+  g_motion.endpointsCalibrated = true;
+  g_motion.rawUp = up;
+  g_motion.rawDown = dn;
+  g_motion.endpointUp = up;
+  g_motion.endpointDown = dn;
+  g_motion.runState = IDLE;
+  fake::sim.position = pos;
+  fake::sim.physical = pos;
+}
+
+// SG sources
+static uint16_t sg_quiet() {  // above the "sg <= 1" ignore, below the run trip
+  return 5;
+}
+static uint16_t sg_jammed() {
+  return 500;
+}
+static int s_sg_calls;  // for the one-shot high-reading source below
+
+#define ASSERT_BEFORE(a, b)                                                                 \
+  do {                                                                                      \
+    const int ia = fake::indexOf(a), ib = fake::indexOf(b);                                 \
+    TEST_ASSERT_TRUE_MESSAGE(ia >= 0, (std::string("missing ") + a).c_str());               \
+    TEST_ASSERT_TRUE_MESSAGE(ib >= 0, (std::string("missing ") + b).c_str());               \
+    TEST_ASSERT_TRUE_MESSAGE(ia < ib,                                                       \
+                             (std::string(a) + " not before " + b + fake::dump()).c_str()); \
+  } while (0)
+
+// --------------------------------------------------------------------------
+//  Start / run
+// --------------------------------------------------------------------------
+// The TMC must be put into sensorless mode and the target chosen BEFORE the
+// move is issued, and the move must go to the far endpoint.
+static void test_start_enters_sensorless_then_moves(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+
+  startRunBetweenEndpoints();
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT32(20000, g_motion.currentTarget);
+  TEST_ASSERT_TRUE(fake::saw("tmc5160::en_pwm_mode(0)"));  // SpreadCycle, not StealthChop
+  TEST_ASSERT_TRUE(fake::saw("tmc5160::TCOOLTHRS(1048575)"));
+  TEST_ASSERT_TRUE(fake::saw("tmc5160::sgt(-1)"));
+  ASSERT_BEFORE("tmc5160::sgt(-1)", "stepper::moveTo(20000)");
+  ASSERT_BEFORE("stepper::setSpeedInHz(35000)", "stepper::moveTo(20000)");
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::moveTo(20000)"));
+}
+
+// Start is rejected out of STALLED by the tested FSM table - and must not touch
+// the TMC or the stepper on the way out.
+static void test_start_rejected_when_stalled(void) {
+  givenCalibrated(0, 20000, 5000);
+  g_motion.runState = STALLED;
+
+  startRunBetweenEndpoints();
+
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)fake::events.size(), fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("Start ignored"));
+}
+
+// Reaching the DOWN endpoint bumps the cycle counter and flips the target.
+static void test_endpoint_arrival_flips_target_and_counts(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+
+  pump(80);  // 20000 steps at 35 steps/ms == 58 ticks
+
+  TEST_ASSERT_EQUAL_INT32(1, g_motion.counter);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.currentTarget);  // flipped back to UP
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::moveTo(0)"));
+}
+
+// The display counter saturates at COUNTER_MAX, but batch counting must NOT be
+// gated by it (v1.8 bug fixed in this port - see handleMotion()'s comment).
+static void test_counter_saturation_does_not_stall_batch(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  g_motion.counter = COUNTER_MAX;
+  g_motion.batchActive = true;
+  g_motion.batchTarget = 3;
+  startRunBetweenEndpoints();
+
+  pump(80);
+
+  TEST_ASSERT_EQUAL_INT32(COUNTER_MAX, g_motion.counter);
+  TEST_ASSERT_EQUAL_INT32(1, g_motion.batchCount);
+  TEST_ASSERT_TRUE(g_motion.batchActive);
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+}
+
+// A completed batch stops gracefully instead of flipping the target again.
+static void test_batch_completion_requests_graceful_stop(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  g_motion.batchActive = true;
+  g_motion.batchTarget = 1;
+  startRunBetweenEndpoints();
+
+  pump(80);
+
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("Batch complete: 1/1"));
+  // STOPPING, not RUN: the decel move toward UP is still in flight, and the
+  // tested table accepts neither Start nor GracefulStop until it lands - so a
+  // green "RUN" here would advertise a tap that gets silently discarded.
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOPPING)"));
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.currentTarget);  // decel move toward UP
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::moveTo(0)"));
+}
+
+// --------------------------------------------------------------------------
+//  Jam -> forceStop -> backoff -> STALLED
+// --------------------------------------------------------------------------
+static void test_jam_stops_backs_off_and_latches_stalled(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  const int after_start = (int)fake::events.size();
+
+  fake::sg_source = sg_jammed;
+  pump(30);
+
+  TEST_ASSERT_EQUAL_UINT_MESSAGE(STALLED, g_motion.runState, fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("JAM!"));
+  // Stop first, then creep-speed, then back off AWAY from the DOWN endpoint by
+  // exactly RUN_BACKOFF_STEPS, then tell the UI.
+  ASSERT_BEFORE("stepper::forceStop", "stepper::setSpeedInHz(8000)");
+  ASSERT_BEFORE("stepper::setSpeedInHz(8000)", "stepper::move(-1000)");
+  ASSERT_BEFORE("stepper::move(-1000)", "ui::showJamScreen");
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::forceStop"));
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::move(-1000)"));
+  // No further move was commanded after the backoff: the press must never be
+  // driven on into the jam.
+  TEST_ASSERT_EQUAL_INT(0, fake::indexOf("stepper::moveTo(0)", after_start) >= 0 ? 1 : 0);
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::moveTo(20000)"));  // only the initial one
+
+  // ...and handleMotion() is inert from STALLED.
+  const int n = (int)fake::events.size();
+  pump(20);
+  TEST_ASSERT_EQUAL_INT(n, (int)fake::events.size());
+}
+
+// Same jam, heading UP: the backoff must reverse, i.e. +RUN_BACKOFF_STEPS.
+static void test_jam_backoff_direction_reverses_heading_up(void) {
+  givenCalibrated(0, 20000, 20000);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.currentTarget);
+
+  fake::sg_source = sg_jammed;
+  pump(30);
+
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::move(1000)"));
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::move(-1000)"));
+}
+
+// A single high reading must NOT trip a jam (RUN_SG_HIGH_NEEDED == 2).
+static void test_single_high_reading_does_not_jam(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+
+  // Past the accel blanking window (accelBlankMs(35000, 800000) == 123 ms),
+  // outside the work zone, outside the decel window.
+  pump(14);
+  // One high reading = one full read_sg(), i.e. five SG_RESULT samples (the
+  // median-of-5 glitch filter), then back to quiet.
+  s_sg_calls = 0;
+  fake::sg_source = []() -> uint16_t { return (s_sg_calls++ < 5) ? 500 : 5; };
+  pump(6);
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
+  TEST_ASSERT_TRUE(fake::logContains("SG HIGH"));
+}
+
+// Inside the accel blanking window after a direction change, SG is not even
+// read - a high reading there must be ignored entirely.
+static void test_accel_blanking_window_ignores_high_sg(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_jammed;
+  startRunBetweenEndpoints();
+
+  pump(11);  // 110 ms < 123 ms accel blank
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_FALSE(fake::logContains("SG HIGH"));
+}
+
+// Near the DOWN endpoint (the work zone) resistance is normal: no jam, and the
+// stall counter is cleared.
+static void test_work_zone_suppresses_jam_near_down(void) {
+  givenCalibrated(0, 20000, 16000);  // within sgWorkZoneSteps (5500) of DOWN
+  fake::sg_source = sg_jammed;
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_INT32(20000, g_motion.currentTarget);
+
+  pump(15);
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
+  TEST_ASSERT_EQUAL_UINT(0, g_motion.runSGHighCount);
+}
+
+// Inside the deceleration window (and with no prior jam evidence) SG is blanked:
+// the ramp-down itself loads the motor and would false-trigger. The work-zone
+// blank only covers the DOWN endpoint, so this is the UP-bound leg.
+static void test_decel_blanking_suppresses_jam_near_target(void) {
+  givenCalibrated(0, 20000, 20000);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();  // heading UP, target 0
+  // High SG only once inside decelBlankSteps(35000, 800000) == 1265 of the target.
+  fake::sg_source = []() -> uint16_t { return fake::sim.position < 1265 ? 500 : 5; };
+
+  pump(70);  // 20000 steps at 35 steps/ms == 58 ticks, so this reaches UP
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
+  TEST_ASSERT_EQUAL_UINT(0, g_motion.runSGHighCount);
+  TEST_ASSERT_EQUAL_UINT(0, g_motion.runSGLowCount);
+  // It completed the leg and turned around. (The cycle counter only counts
+  // arrivals at DOWN, so it stays at 0 for this UP-bound leg.)
+  TEST_ASSERT_EQUAL_INT32(20000, g_motion.currentTarget);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.counter);
+}
+
+// --------------------------------------------------------------------------
+//  Lifetime health counters (#9). Diagnostics only - nothing in the motion
+//  logic reads them - but they are written from inside the same critical
+//  sections as the events they describe, so they are covered here rather than
+//  taken on trust.
+// --------------------------------------------------------------------------
+static void givenPress(int32_t upStop, int32_t downStop);  // defined with the calibration tests
+
+// A completed UP->DOWN stroke records its duration; the UP-bound leg does not
+// (only arrivals at DOWN close a cycle).
+static void test_successful_stroke_records_cycle_time(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  const uint32_t t0 = fake::millis_now();
+  startRunBetweenEndpoints();
+
+  pump(80);  // 20000 steps at 35 steps/ms == 58 ticks, so exactly one arrival
+
+  TEST_ASSERT_EQUAL_INT32(1, g_motion.counter);
+  const uint32_t elapsed = fake::millis_now() - t0;
+  // The recorded stroke is the time from the move being issued to the arrival
+  // being noticed - non-zero, and bounded by the wall clock of the whole test.
+  TEST_ASSERT_TRUE_MESSAGE(g_motion.totalCycleTimeMs > 0, "no cycle time recorded");
+  TEST_ASSERT_TRUE(g_motion.totalCycleTimeMs <= elapsed);
+  TEST_ASSERT_TRUE(g_motion.totalCycleTimeMs >= 500);  // ~580 ms of travel
+  // One stroke so far, so the longest IS the total.
+  TEST_ASSERT_EQUAL_UINT32(g_motion.totalCycleTimeMs, g_motion.longestCycleMs);
+  // Nothing else moved.
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.stallCount);
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+}
+
+// Two strokes: the total accumulates, the longest is a max (not the latest).
+static void test_cycle_time_accumulates_and_keeps_the_longest(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+
+  pump(80);  // first DOWN arrival
+  const uint32_t first = g_motion.totalCycleTimeMs;
+  TEST_ASSERT_TRUE(first > 0);
+  TEST_ASSERT_EQUAL_UINT32(first, g_motion.longestCycleMs);
+
+  // Slow the carriage down so the NEXT down stroke is clearly the longer one.
+  fake::sim.stepsPerMsOverride = 10;
+  pump(400);  // back up to UP, then down again
+
+  TEST_ASSERT_EQUAL_INT32(2, g_motion.counter);
+  const uint32_t second = g_motion.totalCycleTimeMs - first;
+  TEST_ASSERT_TRUE_MESSAGE(second > first, "the slowed stroke should be the longer one");
+  TEST_ASSERT_EQUAL_UINT32(second, g_motion.longestCycleMs);
+  TEST_ASSERT_EQUAL_UINT32(first + second, g_motion.totalCycleTimeMs);
+
+  // A shorter third stroke must NOT lower the recorded maximum.
+  const uint32_t maxSoFar = g_motion.longestCycleMs;
+  const uint32_t totalSoFar = g_motion.totalCycleTimeMs;
+  fake::sim.stepsPerMsOverride = 0;  // back to full speed
+  pump(200);
+  TEST_ASSERT_EQUAL_INT32(3, g_motion.counter);
+  TEST_ASSERT_EQUAL_UINT32(maxSoFar, g_motion.longestCycleMs);
+  TEST_ASSERT_TRUE(g_motion.totalCycleTimeMs > totalSoFar);
+}
+
+// A jam counts as a stall, and must NOT contribute a cycle time: the stroke
+// never completed, and the jam + backoff sequence is not representative of one.
+static void test_jam_counts_a_stall_and_no_cycle_time(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+
+  fake::sg_source = sg_jammed;
+  pump(30);
+
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.stallCount);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.counter);
+  TEST_ASSERT_EQUAL_UINT32(0, g_motion.totalCycleTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(0, g_motion.longestCycleMs);
+
+  // Latched STALLED, so no further jam can be counted while it stays there.
+  pump(20);
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.stallCount);
+}
+
+// Jam counts are cumulative across runs, and a jam that interrupts a run does
+// not disturb the cycle statistics already recorded.
+static void test_stall_count_accumulates_across_runs(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  pump(80);  // one clean stroke first
+  const uint32_t recorded = g_motion.totalCycleTimeMs;
+  TEST_ASSERT_TRUE(recorded > 0);
+
+  fake::sg_source = sg_jammed;
+  pump(30);
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.stallCount);
+
+  // Recover (STALLED -> IDLE via a home) and jam again.
+  // Park the carriage ABOVE the UP hard stop, and hand SG back to the
+  // hard-stop-aware default, so the recovery home actually finds the stop.
+  // Previously this ran with the carriage below the stop and SG pinned at the
+  // jam value, so safeCreepHome() searched the full CAL_SEARCH_STEPS without a
+  // hit - and the run below only started because a failed home used to leave
+  // positionReferenceStale untouched. It now latches stale on that path, which
+  // is the point of the fix.
+  fake::sim.position = 8000;
+  fake::sg_source = []() -> uint16_t {
+    return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
+  };
+  givenPress(2000, 40000);
+  safeCreepHome();
+  TEST_ASSERT_FALSE(g_motion.positionReferenceStale);
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  fake::sim.hardStops = false;
+  fake::sim.stepsPerMsOverride = 0;
+  fake::sim.position = 0;
+  fake::sim.physical = 0;
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  fake::sg_source = sg_jammed;
+  pump(30);
+
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_UINT16(2, g_motion.stallCount);
+  // The completed stroke's timing is untouched by either jam.
+  TEST_ASSERT_EQUAL_UINT32(recorded, g_motion.totalCycleTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(recorded, g_motion.longestCycleMs);
+}
+
+// Only a calibration that found BOTH hard stops counts.
+static void test_successful_calibration_counts(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 40000);
+
+  TEST_ASSERT_TRUE_MESSAGE(calibrateEndpointsSensorless(), fake::dump().c_str());
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.calibrationCount);
+
+  // A second one accumulates.
+  fake::sim.position = 0;
+  fake::sim.physical = 0;
+  TEST_ASSERT_TRUE(calibrateEndpointsSensorless());
+  TEST_ASSERT_EQUAL_UINT16(2, g_motion.calibrationCount);
+}
+
+static void test_failed_calibration_does_not_count(void) {
+  // No UP stop: the first `return false` arm.
+  g_motion.runState = IDLE;
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+  TEST_ASSERT_TRUE(fake::logContains("Calibration: FAILED (no UP stop found)"));
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+
+  // No DOWN stop: the second `return false` arm.
+  fake::reset();
+  g_motion = MotionState{};
+  g_motion.runState = IDLE;
+  givenPress(-2000, 10000000);
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+  TEST_ASSERT_TRUE(fake::logContains("Calibration: FAILED (no DOWN stop found)"));
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+
+  // Rejected outright by the FSM (not IDLE): nothing ran, nothing counted.
+  fake::reset();
+  g_motion = MotionState{};
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+}
+
+// --------------------------------------------------------------------------
+//  Operator abort of a blocking search
+// --------------------------------------------------------------------------
+// A calibration or a creep-home owns pump_task for the whole sensorless search
+// (tens of seconds on the real machine), so processPendingCommands() never runs
+// and no queued command can reach the press - which is why these were previously
+// impossible to stop. The abort flag is polled inside the search loop itself;
+// the tests below set it part-way through, the way the Cancel button does.
+
+// Trips the abort after N StallGuard reads. read_sg() takes 5 samples per loop
+// iteration, so N=50 is ten iterations in - well before either hard stop below.
+static int s_sgReadsBeforeAbort = 0;
+static uint16_t sg_abort_after_n(void) {
+  if (s_sgReadsBeforeAbort > 0 && --s_sgReadsBeforeAbort == 0) motion_cmd::requestAbort();
+  return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
+}
+
+// Trips the abort only once the carriage has reached the DOWN hard stop, i.e.
+// during the second search, after the UP stop was found and the axis re-zeroed.
+static uint16_t sg_abort_at_down_stop(void) {
+  if (fake::sim.hardStops && fake::sim.physical >= fake::sim.hardStopDown) {
+    motion_cmd::requestAbort();
+  }
+  return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
+}
+
+static void test_calibration_aborted_during_the_up_search(void) {
+  g_motion.runState = IDLE;
+  g_motion.endpointsCalibrated = true;  // an older calibration the operator had
+  givenPress(-2000, 40000);
+  s_sgReadsBeforeAbort = 50;
+  fake::sg_source = sg_abort_after_n;
+
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+
+  // Back to IDLE, not stuck in CALIBRATING - an abort that left the FSM parked
+  // would lock the operator out of every other command.
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  // Entering CALIBRATING cleared the flag; an abort must not put it back.
+  TEST_ASSERT_FALSE(g_motion.endpointsCalibrated);
+  // Nothing re-referenced the axis, so a run must stay refused.
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+  // Specifically the search loop's own line, not the abortable wait that
+  // follows it: the point of this test is that a search in progress can be
+  // interrupted, which is the case that was impossible before.
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Search aborted by operator at pos="),
+                           fake::dump().c_str());
+  // The motor really was stopped, and the run current restored.
+  TEST_ASSERT_FALSE(fake::sim.running);
+  TEST_ASSERT_EQUAL_UINT16(g_motion.runCurrentMa, fake::sim.runCurrentMa);
+  // The flag was consumed, so it cannot cancel the next calibration.
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
+}
+
+// The expensive case: both hard stops may already have been found, but rawDown
+// is only measured after the backoff move. Storing a half-measured DOWN would
+// be worse than storing nothing - DOWN is what decides how deep the ram goes.
+static void test_calibration_aborted_during_the_down_search_stores_nothing(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 40000);
+  fake::sg_source = sg_abort_at_down_stop;
+
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+  TEST_ASSERT_EQUAL_UINT16(0, g_motion.calibrationCount);
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Search aborted by operator at pos="),
+                           fake::dump().c_str());
+  // It really did get past the UP stage - rawUp was found and re-zeroed - and
+  // still stored nothing. rawDown is what a partial calibration would have
+  // corrupted, and it is untouched.
+  TEST_ASSERT_EQUAL_INT32(0, (int32_t)g_motion.rawUp);
+  TEST_ASSERT_EQUAL_INT32(0, (int32_t)g_motion.rawDown);
+}
+
+// The flag is set by another task and consumed only by the search loops, so a
+// request that arrived after a search had already ended would otherwise sit
+// there and cancel the NEXT one before it moved.
+static void test_a_stale_abort_does_not_cancel_the_next_calibration(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 40000);
+  motion_cmd::requestAbort();
+
+  TEST_ASSERT_TRUE_MESSAGE(calibrateEndpointsSensorless(), fake::dump().c_str());
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.calibrationCount);
+  TEST_ASSERT_TRUE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_FALSE(g_motion.positionReferenceStale);
+}
+
+static void test_creep_home_aborted_leaves_the_axis_unreferenced(void) {
+  g_motion.runState = IDLE;
+  fake::sim.position = 8000;
+  givenPress(2000, 40000);
+  s_sgReadsBeforeAbort = 50;
+  fake::sg_source = sg_abort_after_n;
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  // The whole point of a home is to re-reference the axis. It did not get to.
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Creep home: aborted by operator"),
+                           fake::dump().c_str());
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Search aborted by operator at pos="),
+                           fake::dump().c_str());
+  TEST_ASSERT_FALSE(fake::sim.running);
+  TEST_ASSERT_FALSE(motion_cmd::abortRequested());
+}
+
+// Aborting a jam-recovery home must not become a way around the recovery: the
+// press ends IDLE with an unreferenced axis, so a start is still refused.
+static void test_aborted_home_still_refuses_to_start(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.runState = IDLE;
+  fake::sim.position = 8000;
+  givenPress(2000, 40000);
+  s_sgReadsBeforeAbort = 50;
+  fake::sg_source = sg_abort_after_n;
+
+  safeCreepHome();
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);  // refused
+  TEST_ASSERT_TRUE(fake::logContains("Start refused: position reference unconfirmed"));
+}
+
+// --------------------------------------------------------------------------
+//  Graceful stop
+// --------------------------------------------------------------------------
+static void test_graceful_stop_reaches_home_then_idles(void) {
+  givenCalibrated(0, 20000, 20000);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();  // heading UP
+
+  requestGracefulStop();
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+
+  pump(80);
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+}
+
+static void test_graceful_stop_times_out_and_force_stops(void) {
+  givenCalibrated(0, 20000, 20000);
+  fake::sg_source = sg_quiet;
+  fake::sim.stepsPerMsOverride = 1;  // way too slow to arrive within the timeout
+  startRunBetweenEndpoints();
+  requestGracefulStop();
+
+  pump(700);  // 7 s: still STOPPING, still moving
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
+
+  pump(200);  // past STOP_TIMEOUT_MS (8 s)
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::forceStop"));
+}
+
+// From STALLED a stray stop request must not command a fast unguarded move away
+// from the jam - that is safeCreepHome()'s job.
+static void test_graceful_stop_ignored_when_stalled(void) {
+  givenCalibrated(0, 20000, 5000);
+  g_motion.runState = STALLED;
+
+  requestGracefulStop();
+
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)fake::events.size(), fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("Graceful stop ignored"));
+}
+
+// --------------------------------------------------------------------------
+//  Sensorless calibration
+// --------------------------------------------------------------------------
+// Simulated press: hard stops CAL_* steps apart, with the pulse counter free to
+// run past them (PCNT keeps counting while the carriage is stopped), which is
+// exactly what StallGuard sees as a stall.
+static void givenPress(int32_t upStop, int32_t downStop) {
+  fake::sim.hardStops = true;
+  fake::sim.hardStopUp = upStop;
+  fake::sim.hardStopDown = downStop;
+  fake::sim.physical = fake::sim.position;
+  // 10 steps/ms so the ignore/baseline windows (420 ms + 200 ms) elapse before
+  // the carriage reaches a stop - i.e. the baseline is sampled while moving
+  // freely, as on the real press.
+  fake::sim.stepsPerMsOverride = 10;
+}
+
+static void test_calibration_finds_both_stops_and_rezeros(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 40000);
+
+  const bool ok = calibrateEndpointsSensorless();
+
+  TEST_ASSERT_TRUE_MESSAGE(ok, fake::dump().c_str());
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_TRUE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.rawUp);  // re-zeroed at the UP stop
+  TEST_ASSERT_TRUE_MESSAGE(g_motion.rawDown > 0, "DOWN endpoint must be past UP");
+  // Sequence: calibration current/speed -> pre-move down -> UP search ->
+  // back off the stop -> re-zero -> DOWN search -> back off -> run current.
+  ASSERT_BEFORE("tmc5160::rms_current(3200)", "stepper::move(5500)");
+  ASSERT_BEFORE("stepper::move(5500)", "stepper::move(300)");
+  ASSERT_BEFORE("stepper::move(300)", "stepper::setCurrentPosition(0)");
+  ASSERT_BEFORE("stepper::setCurrentPosition(0)", "stepper::move(-300)");
+  ASSERT_BEFORE("stepper::move(-300)", "tmc5160::rms_current(3500)");
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::setCurrentPosition(0)"));
+  // Both searches are aborted with a forceStop the moment the stop is confirmed.
+  TEST_ASSERT_EQUAL_INT(2, fake::countOf("stepper::forceStop"));
+  TEST_ASSERT_TRUE(fake::logContains("MUS: DYN HIT"));
+  // Offsets go live with the calibrated flag; DOWN keeps its default offset.
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.upOffsetSteps);
+  TEST_ASSERT_EQUAL_INT32(DOWN_OFFSET_DEFAULT, g_motion.downOffsetSteps);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.endpointUp);
+  TEST_ASSERT_EQUAL_INT32(g_motion.rawDown + DOWN_OFFSET_DEFAULT, g_motion.endpointDown);
+  // Ends parked at the UP endpoint.
+  TEST_ASSERT_EQUAL_INT32(g_motion.endpointUp, fake::sim.position);
+}
+
+// No mechanical stop anywhere: the search must give up, restore the run
+// current/speed, leave the endpoints INVALID and return to IDLE.
+static void test_calibration_fails_cleanly_without_a_stop(void) {
+  g_motion.runState = IDLE;
+  g_motion.endpointsCalibrated = true;  // must be invalidated
+  // A move still in flight when calibration is requested (e.g. left over from a
+  // timed-out stop) must be force-stopped before the blind search starts.
+  fake::sim.running = true;
+  fake::sim.target = 50000;
+  fake::sim.speedHz = 1000;
+
+  const bool ok = calibrateEndpointsSensorless();
+
+  ASSERT_BEFORE("stepper::forceStop", "stepper::move(5500)");
+  TEST_ASSERT_FALSE(ok);
+  TEST_ASSERT_FALSE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("Calibration: FAILED (no UP stop found)"));
+  ASSERT_BEFORE("stepper::move(-120000)", "tmc5160::rms_current(3500)");
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::setCurrentPosition(0)"));
+  TEST_ASSERT_EQUAL_INT(1,
+                        fake::countOf("stepper::setAcceleration(800000)"));  // RUN_DECEL restored
+}
+
+// The UP stop is found, but nothing stops the carriage on the way DOWN: the
+// second search must fail the same way - endpoints left invalid, back to IDLE.
+static void test_calibration_fails_on_the_down_search(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 10000000);  // effectively no DOWN stop within the search range
+
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+
+  TEST_ASSERT_FALSE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("Calibration: FAILED (no DOWN stop found)"));
+  TEST_ASSERT_TRUE(fake::logContains("MUS: NO STALL DETECTED"));
+  // The UP re-zero already happened; the DOWN back-off must NOT.
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::setCurrentPosition(0)"));
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::move(-300)"));
+  TEST_ASSERT_TRUE(fake::saw("tmc5160::rms_current(3500)"));  // run current restored
+}
+
+static void test_calibration_rejected_while_running(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  const int n = (int)fake::events.size();
+
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_TRUE(g_motion.endpointsCalibrated);  // a good calibration survives
+  TEST_ASSERT_EQUAL_INT(n, (int)fake::events.size());
+  TEST_ASSERT_TRUE(fake::logContains("Calibration ignored"));
+}
+
+// --------------------------------------------------------------------------
+//  Creep home out of a jam
+// --------------------------------------------------------------------------
+static void test_creep_home_finds_stop_rezeros_and_returns_idle(void) {
+  givenCalibrated(0, 20000, 9000);
+  g_motion.runState = STALLED;
+  givenPress(2000, 40000);  // UP stop 7000 steps above where the jam left us
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.rawUp);
+  // Creep current/speed first, search, back off the stop, re-zero, park at UP,
+  // then hand the run current/speed back.
+  ASSERT_BEFORE("tmc5160::rms_current(3200)", "stepper::move(-120000)");
+  ASSERT_BEFORE("stepper::move(-120000)", "stepper::forceStop");
+  ASSERT_BEFORE("stepper::forceStop", "stepper::move(300)");
+  ASSERT_BEFORE("stepper::move(300)", "stepper::setCurrentPosition(0)");
+  ASSERT_BEFORE("stepper::setCurrentPosition(0)", "tmc5160::rms_current(3500)");
+  TEST_ASSERT_TRUE(fake::logContains("Creep home: found stop"));
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(RUN)"));
+  TEST_ASSERT_EQUAL_INT32(g_motion.endpointUp, fake::sim.position);
+}
+
+// A stop hit almost immediately (the press is already against the top): the
+// early-trip window catches it before the dynamic baseline is even sampled.
+static void test_creep_home_early_trip_catches_an_immediate_stop(void) {
+  givenCalibrated(0, 20000, 9000);
+  g_motion.runState = STALLED;
+  givenPress(8800, 40000);           // only 200 steps of travel before the stop
+  fake::sim.stepsPerMsOverride = 4;  // slow enough to stay inside the early window
+
+  safeCreepHome();
+
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("MUS: EARLY HIT"), fake::dump().c_str());
+  TEST_ASSERT_FALSE(fake::logContains("MUS: DYN HIT"));
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.rawUp);
+}
+
+static void test_creep_home_reports_failure_when_no_stop_found(void) {
+  givenCalibrated(0, 20000, 9000);
+  g_motion.runState = STALLED;  // no hard stops configured
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("Creep home: FAILED to find stop!"));
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::setCurrentPosition(0)"));
+  TEST_ASSERT_TRUE(fake::saw("tmc5160::rms_current(3500)"));  // run current restored anyway
+}
+
+// ReturnHome is legal from IDLE as well as STALLED, but not from a state where
+// the press is already moving - that would fight the run in progress.
+static void test_creep_home_ignored_while_running(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  const int n = (int)fake::events.size();
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(n, (int)fake::events.size(), fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("Return home ignored"));
+}
+
+// --------------------------------------------------------------------------
+//  Position reference staleness (settings_store restores calibration, but the
+//  stepper counter always comes up at 0 wherever the carriage physically is)
+// --------------------------------------------------------------------------
+// Calibrated + IDLE is not enough: with the reference unconfirmed, Start must
+// refuse without touching the TMC or the stepper.
+static void test_start_refused_when_position_reference_stale(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.positionReferenceStale = true;
+
+  startRunBetweenEndpoints();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)fake::events.size(), fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("Start refused: position reference unconfirmed"));
+}
+
+// Return Home from IDLE is the way out of that state: a real stall search
+// re-zeroes at the UP hard stop, which re-establishes the reference - and only
+// then does Start work.
+static void test_creep_home_from_idle_clears_stale_reference(void) {
+  givenCalibrated(0, 20000, 9000);  // IDLE, as after a reboot with a restore
+  g_motion.positionReferenceStale = true;
+  givenPress(2000, 40000);
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("Creep home: found stop"));
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.rawUp);
+  TEST_ASSERT_FALSE(g_motion.positionReferenceStale);
+
+  fake::events.clear();
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+}
+
+// A home that never found the stop re-referenced nothing: the flag must survive
+// so Start stays refused.
+static void test_failed_creep_home_keeps_stale_reference(void) {
+  givenCalibrated(0, 20000, 9000);
+  g_motion.positionReferenceStale = true;  // no hard stops configured
+
+  safeCreepHome();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("Creep home: FAILED to find stop!"));
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+
+  fake::events.clear();
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(0, (int)fake::events.size());
+}
+
+// A fresh calibration finds both stops and re-zeroes at UP, so it is not stale
+// by definition.
+static void test_calibration_clears_stale_reference(void) {
+  g_motion.runState = IDLE;
+  g_motion.positionReferenceStale = true;
+  givenPress(-2000, 40000);
+
+  TEST_ASSERT_TRUE_MESSAGE(calibrateEndpointsSensorless(), fake::dump().c_str());
+
+  TEST_ASSERT_TRUE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_FALSE(g_motion.positionReferenceStale);
+}
+
+// --------------------------------------------------------------------------
+//  Misc dispatch
+// --------------------------------------------------------------------------
+static void test_handle_motion_is_inert_in_blocking_states(void) {
+  givenCalibrated(0, 20000, 5000);
+  const RunState blocked[] = {CALIBRATING, STALLED, HOMING};
+  for (RunState s : blocked) {
+    g_motion.runState = s;
+    fake::events.clear();
+    pump(5);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, (int)fake::events.size(), fake::dump().c_str());
+    TEST_ASSERT_EQUAL_UINT(s, g_motion.runState);
+  }
+}
+
+// Uncalibrated: both effective endpoints must stay pinned at 0 whatever the
+// offsets say, so nothing can command a move to a made-up endpoint.
+static void test_effective_endpoints_are_zero_until_calibrated(void) {
+  g_motion.endpointsCalibrated = false;
+  g_motion.rawUp = 0;
+  g_motion.rawDown = 40000;
+  g_motion.upOffsetSteps = 1234;
+  g_motion.downOffsetSteps = -1234;
+
+  recomputeEffectiveEndpoints();
+
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.endpointUp);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.endpointDown);
+  TEST_ASSERT_EQUAL_INT(0, (int)fake::events.size());
+}
+
+static void test_set_active_profile_pushes_new_speed(void) {
+  givenCalibrated(0, 20000, 0);
+
+  setActiveProfile(2);  // Fast
+  TEST_ASSERT_EQUAL_UINT8(2, g_motion.activeProfile);
+  TEST_ASSERT_TRUE(fake::saw("stepper::setSpeedInHz(45000)"));
+
+  fake::events.clear();
+  setActiveProfile(NUM_PROFILES);  // out of range: ignored
+  TEST_ASSERT_EQUAL_UINT8(2, g_motion.activeProfile);
+  TEST_ASSERT_EQUAL_INT(0, (int)fake::events.size());
+}
+
+// --------------------------------------------------------------------------
+//  motion_cmd:: command gates
+//
+//  These drive the deferred-command path the touch UI and every web control
+//  route actually use: request*() sets an atomic flag, then pump_task calls
+//  processPendingCommands(). The gates inside decide whether the request is
+//  legal, and - for a batch - whether it is safe to arm the batch at all.
+// --------------------------------------------------------------------------
+
+// The regression test for the batch-start bug: a restored calibration comes back
+// with the axis unreferenced (settings_store latches positionReferenceStale), so
+// startRunBetweenEndpoints() refuses. The batch must not be armed on the way in,
+// or both UIs report "Running: 0/N" on a press that is standing still, with no
+// way out but a toggle.
+static void test_batch_start_refused_when_position_reference_stale(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.positionReferenceStale = true;
+  g_motion.batchTarget = 5;
+
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("position reference unconfirmed"));
+  // And the run button must never have been flipped to STOP.
+  TEST_ASSERT_FALSE(fake::saw("ui::run_button(STOP)"));
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::moveTo(20000)"));
+}
+
+// The happy path, for contrast: referenced axis, target set, so the batch arms
+// and the run goes out.
+static void test_batch_start_arms_the_batch_when_referenced(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.batchTarget = 5;
+
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_TRUE(g_motion.batchActive);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.batchCount);
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOP)"));
+}
+
+// Each refusal names itself rather than being a silent no-op - on the touch UI
+// "Start Batch" navigates straight back to the main screen, so the log line is
+// the only thing that distinguishes "refused" from "unresponsive".
+//
+// The expected TEXT here is command_gate.h's refusalMessage(), which is also
+// what the HTTP layer puts in the 409 body - so an operator reading the log and
+// a script reading the API see the same sentence for the same condition. Only
+// these strings changed when the gates were consolidated; every state assertion
+// around them is untouched.
+static void test_batch_start_refusals_are_reported(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.batchTarget = 0;  // nothing to run
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("no batch target set"));
+
+  fake::logs.clear();
+  g_motion.batchTarget = 5;
+  g_motion.endpointsCalibrated = false;
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("not calibrated"));
+
+  fake::logs.clear();
+  givenCalibrated(0, 20000, 0);
+  g_motion.batchTarget = 5;
+  g_motion.runState = STALLED;  // must home first
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::logContains("Batch start refused: not allowed in the current state"));
+}
+
+// A tap that lands while the press is decelerating is accepted by neither Start
+// nor GracefulStop. It used to be discarded in complete silence, which reads as
+// an unresponsive machine.
+static void test_toggle_run_while_stopping_is_reported(void) {
+  givenCalibrated(0, 20000, 5000);
+  g_motion.runState = STOPPING;
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("Run/stop refused: not allowed in the current state"));
+}
+
+// The refusal that used to be completely silent. A toggle from IDLE on an
+// uncalibrated press reached startRunBetweenEndpoints(), which returned on its
+// first line with no log at all - so the operator got nothing: no motion, no
+// message, no state change. Routing the toggle through gateToggleRun() names it,
+// and names the RIGHT one: "not calibrated", not the technically-true but
+// useless "wrong state".
+static void test_toggle_run_uncalibrated_names_the_refusal(void) {
+  g_motion = MotionState{};
+  g_motion.runState = IDLE;
+  g_motion.endpointsCalibrated = false;
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_FALSE(fake::sim.running);
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Run/stop refused: the press is not calibrated"),
+                           fake::dump().c_str());
+}
+
+// Same path, the other start gate: calibrated but never re-referenced after a
+// reboot. Reported as the unconfirmed position rather than as "not calibrated",
+// because the fix is different - return home, not recalibrate.
+static void test_toggle_run_unreferenced_names_the_refusal(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.runState = IDLE;
+  g_motion.positionReferenceStale = true;
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_FALSE(fake::sim.running);
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("Run/stop refused: position reference unconfirmed"),
+                           fake::dump().c_str());
+}
+
+// Toggling out of RUNNING stops the run AND disarms the batch, so a stopped
+// batch does not silently resume on the next start.
+static void test_toggle_run_out_of_running_stops_and_disarms_the_batch(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.batchTarget = 5;
+  motion_cmd::requestBatchStart();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_TRUE(g_motion.batchActive);
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOPPING)"));
+}
+
+// The #15 race: two RUN/STOP taps landing inside one pump window are a
+// start-then-stop. The old bool latch coalesced them into a lone start and the
+// press kept running; the counter replays both, so the pass ends in STOPPING.
+static void test_toggle_run_double_tap_in_one_pump_window_ends_stopping(void) {
+  givenCalibrated(0, 20000, 0);
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOPPING)"));
+}
+
+// A refused toggle changes no state, so surplus queued taps are dropped after
+// one logged refusal rather than logging one identical line per tap.
+static void test_queued_toggles_after_a_refusal_log_one_line(void) {
+  g_motion = MotionState{};
+  g_motion.runState = IDLE;  // uncalibrated: every toggle refuses
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::requestToggleRun();
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  int refusals = 0;
+  for (const auto &l : fake::logs)
+    if (l.find("Run/stop refused") != std::string::npos) refusals++;
+  TEST_ASSERT_EQUAL_INT_MESSAGE(1, refusals, fake::dump().c_str());
+}
+
+// A settings reset is gated on the literal IDLE state, not on the motion
+// permission table - so it can never pull the endpoints out from under a run.
+static void test_settings_reset_only_when_idle(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.runState = RUNNING;
+
+  motion_cmd::requestResetSettings();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_FALSE(fake::saw("settings::resetToDefaults"));
+  TEST_ASSERT_TRUE(fake::logContains("Reset refused: not allowed in the current state"));
+
+  g_motion.runState = IDLE;
+  motion_cmd::requestResetSettings();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_TRUE(fake::saw("settings::resetToDefaults"));
+}
+
+// motion_init()'s bring-up order: TMC first (it owns the SPI device), then the
+// stepper, then the run current.
+static void test_motion_init_order(void) {
+  motion_init();
+  // The enable pin (4) is part of the signature: it must actually be passed,
+  // not left as the orphan #define it was before.
+  ASSERT_BEFORE("tmc5160::init(1)", "stepper::init(5,6,4)");
+  ASSERT_BEFORE("stepper::init(5,6,4)", "tmc5160::rms_current(3500)");
+}
+
+int main(void) {
+  UNITY_BEGIN();
+  RUN_TEST(test_start_enters_sensorless_then_moves);
+  RUN_TEST(test_start_rejected_when_stalled);
+  RUN_TEST(test_endpoint_arrival_flips_target_and_counts);
+  RUN_TEST(test_counter_saturation_does_not_stall_batch);
+  RUN_TEST(test_batch_completion_requests_graceful_stop);
+  RUN_TEST(test_jam_stops_backs_off_and_latches_stalled);
+  RUN_TEST(test_jam_backoff_direction_reverses_heading_up);
+  RUN_TEST(test_single_high_reading_does_not_jam);
+  RUN_TEST(test_accel_blanking_window_ignores_high_sg);
+  RUN_TEST(test_work_zone_suppresses_jam_near_down);
+  RUN_TEST(test_decel_blanking_suppresses_jam_near_target);
+  RUN_TEST(test_successful_stroke_records_cycle_time);
+  RUN_TEST(test_cycle_time_accumulates_and_keeps_the_longest);
+  RUN_TEST(test_jam_counts_a_stall_and_no_cycle_time);
+  RUN_TEST(test_stall_count_accumulates_across_runs);
+  RUN_TEST(test_successful_calibration_counts);
+  RUN_TEST(test_failed_calibration_does_not_count);
+  RUN_TEST(test_calibration_aborted_during_the_up_search);
+  RUN_TEST(test_calibration_aborted_during_the_down_search_stores_nothing);
+  RUN_TEST(test_a_stale_abort_does_not_cancel_the_next_calibration);
+  RUN_TEST(test_creep_home_aborted_leaves_the_axis_unreferenced);
+  RUN_TEST(test_aborted_home_still_refuses_to_start);
+  RUN_TEST(test_graceful_stop_reaches_home_then_idles);
+  RUN_TEST(test_graceful_stop_times_out_and_force_stops);
+  RUN_TEST(test_graceful_stop_ignored_when_stalled);
+  RUN_TEST(test_calibration_finds_both_stops_and_rezeros);
+  RUN_TEST(test_calibration_fails_cleanly_without_a_stop);
+  RUN_TEST(test_calibration_fails_on_the_down_search);
+  RUN_TEST(test_calibration_rejected_while_running);
+  RUN_TEST(test_creep_home_finds_stop_rezeros_and_returns_idle);
+  RUN_TEST(test_creep_home_early_trip_catches_an_immediate_stop);
+  RUN_TEST(test_creep_home_reports_failure_when_no_stop_found);
+  RUN_TEST(test_creep_home_ignored_while_running);
+  RUN_TEST(test_start_refused_when_position_reference_stale);
+  RUN_TEST(test_creep_home_from_idle_clears_stale_reference);
+  RUN_TEST(test_failed_creep_home_keeps_stale_reference);
+  RUN_TEST(test_calibration_clears_stale_reference);
+  RUN_TEST(test_handle_motion_is_inert_in_blocking_states);
+  RUN_TEST(test_effective_endpoints_are_zero_until_calibrated);
+  RUN_TEST(test_set_active_profile_pushes_new_speed);
+  RUN_TEST(test_batch_start_refused_when_position_reference_stale);
+  RUN_TEST(test_batch_start_arms_the_batch_when_referenced);
+  RUN_TEST(test_batch_start_refusals_are_reported);
+  RUN_TEST(test_toggle_run_while_stopping_is_reported);
+  RUN_TEST(test_toggle_run_uncalibrated_names_the_refusal);
+  RUN_TEST(test_toggle_run_unreferenced_names_the_refusal);
+  RUN_TEST(test_toggle_run_out_of_running_stops_and_disarms_the_batch);
+  RUN_TEST(test_toggle_run_double_tap_in_one_pump_window_ends_stopping);
+  RUN_TEST(test_queued_toggles_after_a_refusal_log_one_line);
+  RUN_TEST(test_settings_reset_only_when_idle);
+  RUN_TEST(test_motion_init_order);
+  return UNITY_END();
+}

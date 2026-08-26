@@ -1,0 +1,24 @@
+dependencies:
+  # The version this port is built and tested against. Raised from ">=5.3" when
+  # the project moved to 6.0: three things 6.0 changed are now relied on/worked
+  # around in the source (explicit FreeRTOS includes in display_touch.cpp,
+  # gpio_num_t-typed esp_lcd config members, and the
+  # -Werror=missing-field-initializers pragma around DNS_SERVER_CONFIG_SINGLE in
+  # wifi_mgr.cpp), so a 5.x build is no longer what CI verifies.
+  # Bounded below 7 because nothing has been built or run against a 7.x that
+  # does not exist yet: ">=6.0" claimed support for it. Raise the bound when
+  # a 7.x is actually tested, not before.
+  idf: ">=6.0,<7"
+  # Exact pins, not carets: nothing watches this file (the Component Manager
+  # format has no Dependabot ecosystem, see .github/dependabot.yml), so a caret
+  # meant the next manifest edit silently re-resolved to whatever was newest.
+  # Bumping is deliberate: edit the version, idf.py reconfigure, commit the lock.
+  lvgl/lvgl: "8.4.0"
+  espressif/esp_lvgl_port: "2.8.0~1"
+  bblanchon/arduinojson: "7.4.3" # required by lib/psychic_http (PsychicHttp)
+  # No AXS5106L touch component: the ones on the registry (e.g.
+  # mydazy/esp_lcd_touch_axs5106l) hard-require LVGL 9's lv_indev_create()
+  # API, incompatible with the LVGL 8.4 this project (and its still-to-port
+  # ui_touch.cpp) is pinned to. main/axs5106l_touch.cpp ports the I2C
+  # protocol from third_party/esp_lcd_touch_axs5106l/ (the vendored Arduino
+  # driver) directly instead - same chip, same registers, no framework dep.

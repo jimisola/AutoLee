@@ -1,0 +1,51 @@
+# Dependabot and Renovate split this repo's dependency surfaces; the split is
+# deliberate, and the two must not overlap or every bump arrives twice.
+#
+# Dependabot (this file): the SHA-pinned actions in .github/workflows/, and the
+# CI Python tooling in .github/requirements-ci.txt.
+#
+# Renovate (renovate.json5): the surfaces Dependabot has no ecosystem for. Its
+# enabledManagers is limited to exactly those, which is what keeps the two
+# apart — do not add github-actions or pip there.
+#
+# What is left for a human to watch, because neither bot can see it:
+#
+#   * The inline `npx @stoplight/spectral-cli@6.16.3` in lint.yml: exact, so CI
+#     cannot go red with no commit behind it, but invisible to both (it would
+#     need a package.json + lockfile).
+#   * The actionlint/zizmor versions pinned in lint.yml's `workflows` job, and
+#     the git-cliff version + checksum defaulted in
+#     .github/actions/setup-git-cliff: action inputs, not dependencies, so no
+#     datasource reads them.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    # "/" means .github/workflows/ for this ecosystem — not the repo root.
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      # Matches .commitlintrc.yml's type-enum, so check-semantic-pr.yml passes
+      # on Dependabot's own PRs and the squash subject stays conventional.
+      prefix: chore
+      include: scope
+    groups:
+      # One PR a week rather than one per action. These are all first-party
+      # actions pinned by SHA; reviewing them together is the same work.
+      github-actions:
+        patterns:
+          - "*"
+
+  # CI-only Python tooling (gcovr, jsonschema, pre-commit). Bumps here can move
+  # the coverage number or reformat the tree, so they get their own PR rather
+  # than being grouped with the actions.
+  - package-ecosystem: pip
+    directory: "/.github"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope

@@ -1,0 +1,155 @@
+name: Lint
+
+# Everything that can be checked without a toolchain: formatting, the API
+# specs, the workflows themselves, and the release-notes config.
+#
+# Split out from the old single ci.yml (see build.yml's header for why). These
+# jobs are seconds each and need no ESP-IDF install, so a formatting mistake
+# gets its answer back long before the firmware build finishes.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Callable so release.yml can gate a release on the same checks that guard
+  # main, rather than reimplementing them and letting the two drift.
+  workflow_call:
+  # Manual runs: several of these pin an external tool (clang-format, spectral,
+  # git-cliff), so they can go red when that tool changes rather than when this
+  # repo does — and then need re-running with no commit to hang it on.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    name: pre-commit (clang-format, ruff, basic checks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: pre-commit
+        run: |
+          pip install -r .github/requirements-ci.txt
+          pre-commit run --all-files --show-diff-on-failure
+
+  api:
+    name: API specs (spectral + schema contract)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - name: Lint API specs (spectral)
+        run: npx --yes @stoplight/spectral-cli@6.16.3 lint api/openapi.yaml api/asyncapi.yaml
+      - name: API contract check (state.example.json against the schema)
+        run: |
+          pip install -r .github/requirements-ci.txt
+          python -c "
+          import json, jsonschema
+          schema = json.load(open('api/schemas/state.schema.json'))
+          example = json.load(open('api/schemas/state.example.json'))
+          jsonschema.validate(example, schema)
+          print('state.example.json matches state.schema.json')
+          "
+
+  # The workflows lint the firmware; nothing linted the workflows. Both tools
+  # here catch a class of mistake that otherwise only shows up as a failed
+  # release: actionlint parses the expression syntax and the shell inside `run:`
+  # (a typo'd `${{ needs.x.outputs.y }}` silently expands to the empty string
+  # rather than erroring), and zizmor audits for the CI-specific security
+  # footguns — unpinned actions, credentials left in .git/config, untrusted
+  # input interpolated into a shell.
+  #
+  # This matters more now that release.yml is workflow_dispatch-driven: it can
+  # only be exercised by actually running a release, so static checking is most
+  # of the feedback it gets.
+  #
+  # Versions are pinned because an unpinned linter fails PRs that changed
+  # nothing. Nothing updates these automatically — see .github/dependabot.yml
+  # for why, and bump them by hand when convenient.
+  workflows:
+    name: Lint the workflows themselves (actionlint, zizmor, yamllint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Checksum-verified: a GitHub release asset is mutable upstream, so the
+      # tag alone is not a pin.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          sudo mv actionlint /usr/local/bin/
+          rm actionlint.tar.gz
+
+      - name: actionlint
+        run: actionlint .github/workflows/*.yml
+
+      - name: Install zizmor
+        run: pip install zizmor==1.29.0
+
+      # --min-severity medium: the low tier is mostly stylistic and would make
+      # this job advisory in practice. The composite actions are audited too —
+      # they run with the caller's permissions, including the contents: write
+      # the release job holds.
+      - name: zizmor
+        run: zizmor --min-severity medium .github/workflows/ .github/actions/
+
+      # Not in .pre-commit-config.yaml: that config's hooks are the ones worth
+      # running on every commit across the whole tree, and yamllint on the
+      # generated/vendored YAML elsewhere in the repo is noise. Scoped here to
+      # the two directories that are hand-written CI config.
+      - name: Install yamllint
+        run: pip install -r .github/requirements-ci.txt
+
+      - name: yamllint
+        run: |
+          yamllint -d "{extends: relaxed, rules: {line-length: {max: 200}}}" \
+            .github/workflows/ .github/actions/
+
+  # cliff.toml decides the version a release gets when the version input is left
+  # empty, so a wrong answer here ships a wrong release — and it is only
+  # exercised by cutting one. tools/tests/test_cliff_config.py pins the mapping
+  # RELEASING.md documents (plus the tag_pattern and the notes rendering)
+  # against throwaway repos instead, on every PR.
+  #
+  # A test suite rather than a lint: it executes the real git-cliff and asserts
+  # what comes back, since the failure being guarded against is a config that is
+  # correct in theory and wrong in fact. It lives in this workflow anyway
+  # because it needs no ESP-IDF — seconds, not the firmware build.
+  release-config:
+    name: Release version mapping (cliff.toml)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      # Same install the release uses — these tests assert its bump mapping.
+      # Without it the suite skips itself rather than failing, so it has to be
+      # installed here for the job to mean anything.
+      - uses: ./.github/actions/setup-git-cliff
+
+      - name: pytest
+        run: |
+          pip install -r .github/requirements-ci.txt
+          python -m pytest tools/tests -v
