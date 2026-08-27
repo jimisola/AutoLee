@@ -239,6 +239,12 @@ extern "C" void app_main(void) {
              "(calibration, WiFi creds, AP key, web password all reset)",
              esp_err_to_name(ret));
     ESP_ERROR_CHECK(nvs_flash_erase());
+    char detail[176];
+    snprintf(detail, sizeof(detail),
+             "NVS was unreadable (%s) and the whole partition was erased. Calibration, WiFi "
+             "credentials, the setup-AP key and the web password are back to factory.",
+             esp_err_to_name(ret));
+    g_boot_report.add("nvs-erased", detail);
     ret = nvs_flash_init();
   }
   ESP_ERROR_CHECK(ret);
@@ -254,6 +260,17 @@ extern "C" void app_main(void) {
   // endpointsCalibrated=false) on a missing/old/invalid blob - see
   // settings_store.h.
   settings_store::load();
+  // load() falls back to compiled-in defaults and forces endpointsCalibrated
+  // false on a missing, old or invalid blob. On a device that has booted
+  // before, that is a real loss of calibration and not a fresh-device state -
+  // but the two are indistinguishable here, so the wording stays honest about
+  // which it is.
+  if (!g_motion.endpointsCalibrated) {
+    g_boot_report.add("not-calibrated",
+                      "No usable calibration was restored, so the press is uncalibrated. Normal "
+                      "on a new or factory-reset device; otherwise the stored calibration was "
+                      "unreadable.");
+  }
 
   lv_display_t *disp = display_touch_init();
 
@@ -270,6 +287,9 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "LVGL UI built");
   } else {
     ESP_LOGE(TAG, "display_touch_init() failed");
+    g_boot_report.add("display-init-failed",
+                      "The touch display did not initialise. The press still runs and the web "
+                      "UI still works; the on-device screen does not.");
   }
 
   wifi_mgr::start();
@@ -296,6 +316,25 @@ extern "C" void app_main(void) {
     esp_ota_mark_app_valid_cancel_rollback();
     ESP_LOGI(TAG, "OTA: image marked valid (rollback canceled)");
   }
+
+  // A reset the bootloader performed because the previous image failed its
+  // self-check. The image now running is not the one that was last flashed,
+  // which is worth saying out loud rather than leaving someone to wonder why
+  // their change is missing.
+  if (esp_reset_reason() == ESP_RST_SW && running &&
+      esp_ota_get_state_partition(running, &state) == ESP_OK && state == ESP_OTA_IMG_VALID) {
+    const esp_partition_t *boot = esp_ota_get_boot_partition();
+    if (boot && running != boot) {
+      g_boot_report.add("ota-rolled-back",
+                        "The firmware that was flashed did not pass its startup self-check, so "
+                        "the previous image was restored. This is not the build you flashed.");
+    }
+  }
+
+  // Startup is done: everything that can report a problem has run. Nothing may
+  // be added after this, which is what lets the UI promise the list is stable
+  // until the next restart.
+  g_boot_report.freeze();
 
   xTaskCreate(pump_task, "pump", 8192, nullptr, 5, &g_pump_task_handle);
   // 6144, not 4096: sse_task calls buildStateJSON(), whose state buffer grew to

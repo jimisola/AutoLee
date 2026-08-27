@@ -152,3 +152,5 @@ void webLogLevel(LogLevel level, const char *category, const char *fmt, ...) {
   webLogImpl(level, category, fmt, args);
   va_end(args);
 }
+
+autolee::BootReport g_boot_report;

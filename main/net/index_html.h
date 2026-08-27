@@ -371,6 +371,13 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 
 <button class="btn btn-dark btn-sm" onclick="loadDiag()" style="width:100%">Refresh</button>
 
+<div class="sec">
+<h2>Startup Issues</h2>
+<div class="hint" style="margin-bottom:8px">Problems the device hit while starting up. Anything affected is skipped, so it is missing from the rest of the UI rather than shown as broken. They are reported here because they happen before the device can push anything to a browser, and <b>the list does not change until it restarts</b>.</div>
+<div id="suBody"><div class="sr"><span class="l">Loading&hellip;</span></div></div>
+<button class="btn btn-dark btn-sm" onclick="loadStartup()" style="width:100%;margin-top:8px">Check again</button>
+</div>
+
 <!-- NAV FOOTER - filled by buildNavFooters() -->
 <div class="nav-footer"></div>
 
@@ -520,7 +527,7 @@ function showPage(id){
   pg.setAttribute('tabindex','-1');
   pg.focus({preventScroll:true});
   window.scrollTo(0,0);
-  if(id==='pageDiag')loadDiag();
+  if(id==='pageDiag'){loadDiag();loadStartup()}
   if(id==='pageWifi')loadWifiScan();
   if(id==='pageLog'){loadLogs();loadServerLogLevel()}
 }
@@ -534,6 +541,26 @@ function fmtMs(ms){
   const h=Math.floor(m/60);
   return h+'h '+(m%60)+'m';
 }
+
+// Separate from loadDiag(): the startup report is frozen at boot, so a failure
+// to reach it must not blank the live diagnostics beside it, and vice versa.
+function loadStartup(){
+  var b=document.getElementById('suBody');
+  fetch('/api/v1/diagnostics/startup').then(r=>r.json()).then(d=>{
+    var h='';
+    if(!d.issues||!d.issues.length){
+      // An explicit sentence, not an empty box: a panel showing nothing is
+      // indistinguishable from a panel that failed to load.
+      h='<div class="sr"><span class="l">The device reported no problems at startup.</span></div>';
+    }else{
+      for(var i=0;i<d.issues.length;i++){var it=d.issues[i];
+        h+='<div class="sr" style="align-items:flex-start"><span class="l" style="flex:0 0 auto;font-weight:600">'+escHtml(it.code)+'</span></div>'+
+           '<div class="hint" style="margin:-4px 0 8px 0">'+escHtml(it.detail)+'</div>';}
+    }
+    if(d.dropped>0)h+='<div class="hint" style="margin-top:6px"><b>'+d.dropped+' further issue(s) did not fit and were not recorded.</b></div>';
+    if(d.frozen===false)h+='<div class="hint" style="margin-top:6px">Startup has not finished; this list may still grow.</div>';
+    b.innerHTML=h;
+  }).catch(()=>{b.innerHTML='<div class="sr"><span class="l">Could not read the startup report.</span></div>'});}
 
 function loadDiag(){
   fetch('/api/v1/diagnostics/info').then(r=>r.json()).then(d=>{
