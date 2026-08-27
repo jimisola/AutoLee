@@ -1197,6 +1197,22 @@ void setupWebServer() {
     return res->send(200, "application/json", buf);
   });
 
+  // Problems recorded during startup, before this server existed to report
+  // them. Read-only and unauthenticated like the rest of diagnostics: it says
+  // what went wrong, never anything secret, and it is most needed exactly when
+  // the device is in a state nobody can log into.
+  server.on("/api/v1/diagnostics/startup", HTTP_GET, [](PsychicRequest *req, PsychicResponse *res) {
+    (void)req;
+    char buf[4096];
+    const int n = g_boot_report.toJson(buf, sizeof(buf));
+    if (n < 0 || (size_t)n >= sizeof(buf)) {
+      // Truncation here would be malformed JSON. The capacity makes
+      // this unreachable; say so rather than serve half a document.
+      return res->send(500, "application/json", "{\"error\":\"startup report did not fit\"}");
+    }
+    return res->send(200, "application/json", buf);
+  });
+
   // Streams the raw `coredump` partition as a file download so it's
   // retrievable over the network instead of only via `idf.py coredump-info`
   // over USB serial. esp_core_dump_image_check() validates the stored
