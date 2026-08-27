@@ -20,6 +20,13 @@ void ui_jam_recovery_finished(bool homed);
 // been written (or failed to write) - the button must not claim success before
 // the NVS write happened. See webPasswordResetTick() in web_server.cpp.
 void ui_web_password_reset_finished(bool ok);
+// Puts a refused command's reason on the panel, over whatever screen is active,
+// for UI_REFUSAL_BANNER_MS. `warn` picks the amber (operator must act) vs blue
+// (transient) styling; `what` and `why` are the command name and
+// autolee::refusalMessage(). Called from pump_task's logRefusal() - see
+// main/motion/motion_cmd.cpp.
+void ui_show_refusal(const char *what, const char *why, bool warn);
+
 // Re-renders the RUN/STOP/STOPPING button from the current motion state. Takes
 // no argument on purpose - see the implementation for what went wrong when each
 // call site decided for itself what the button should say.

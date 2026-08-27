@@ -175,6 +175,11 @@ static constexpr int SCR_W = 172, SCR_H = 320, NAV_H = 60, CONTENT_H = SCR_H - N
 // stray/curious tap must never wipe a calibration on its own.
 static constexpr uint32_t UI_CONFIRM_ARM_MS = 5000;
 
+// How long the panel's refusal banner stays up after a refused command. Long
+// enough to read a wrapped sentence at arm's length, short enough that a stale
+// reason is not still on screen once the operator has acted on it.
+static constexpr uint32_t UI_REFUSAL_BANNER_MS = 6000;
+
 // ==========================================================================
 //  LOG RING BUFFER
 // ==========================================================================

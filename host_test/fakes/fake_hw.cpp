@@ -357,6 +357,12 @@ void ui_update_batch_val() {
 void ui_update_batch_remain() {
   fake::rec("ui::update_batch_remain");
 }
+// Records what the panel's refusal banner would say. The point of #52 is that a
+// refusal has to reach the operator standing at the press, so the reason itself
+// is part of the trace, not just the fact that something was drawn.
+void ui_show_refusal(const char *what, const char *why, bool warn) {
+  fake::rec("ui::refusal(%s: %s, warn=%d)", what, why, (int)warn);
+}
 
 // Real LogRing (header-only pure logic, no ESP-IDF dependency) rather than a
 // fake: motion_cmd's log-clear path asserts on its observable effect.

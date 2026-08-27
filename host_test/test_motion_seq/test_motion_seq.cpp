@@ -1076,6 +1076,37 @@ static void test_toggle_run_double_tap_in_one_pump_window_ends_stopping(void) {
   TEST_ASSERT_TRUE(fake::saw("ui::run_button(STOPPING)"));
 }
 
+// #52: the refusal has to reach the panel, not only the web log. On the bench an
+// uncalibrated RUN tap left a green, enabled button and no message anywhere the
+// operator could see, so a working safety gate was indistinguishable from a dead
+// button. The banner carries the same sentence the log and the 409 body do.
+//
+// `warn` splits the two kinds apart: something the operator must go and fix
+// (calibrate) versus a transient wrong-state tap. Every gated command routes
+// through the same logRefusal(), so Return Home is checked here as the proof
+// that this is not special-cased for RUN.
+static void test_refusals_reach_the_touch_panel(void) {
+  g_motion = MotionState{};
+  g_motion.runState = IDLE;
+  g_motion.endpointsCalibrated = false;
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_TRUE_MESSAGE(
+      fake::saw("ui::refusal(Run/stop: the press is not calibrated - run a calibration first, "
+                "warn=1)"),
+      fake::dump().c_str());
+
+  fake::reset();
+  givenCalibrated(0, 20000, 0);
+  g_motion.runState = RUNNING;  // no ReturnHome transition from here
+  motion_cmd::requestReturnHome();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_TRUE_MESSAGE(
+      fake::saw("ui::refusal(Return home: not allowed in the current state, warn=0)"),
+      fake::dump().c_str());
+}
+
 // A refused toggle changes no state, so surplus queued taps are dropped after
 // one logged refusal rather than logging one identical line per tap.
 static void test_queued_toggles_after_a_refusal_log_one_line(void) {
@@ -1172,6 +1203,7 @@ int main(void) {
   RUN_TEST(test_toggle_run_unreferenced_names_the_refusal);
   RUN_TEST(test_toggle_run_out_of_running_stops_and_disarms_the_batch);
   RUN_TEST(test_toggle_run_double_tap_in_one_pump_window_ends_stopping);
+  RUN_TEST(test_refusals_reach_the_touch_panel);
   RUN_TEST(test_queued_toggles_after_a_refusal_log_one_line);
   RUN_TEST(test_settings_reset_only_when_idle);
   RUN_TEST(test_motion_init_order);
