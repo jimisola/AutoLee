@@ -8,6 +8,10 @@
 #include <cstdint>
 
 static const char *DEFAULT_AP_SSID = "AutoLee-Setup";
+// mDNS name, advertised as <MDNS_HOSTNAME>.local once joined to a network.
+// Two rigs on one LAN collide; ESP-IDF appends a suffix rather than failing,
+// so the advertised name is read back rather than assumed.
+static const char *MDNS_HOSTNAME = "autolee";
 
 // Credential limits, matching the fixed-size fields in ESP-IDF's wifi_config_t
 // (ssid[32], password[64]). Anything longer cannot be stored without silent

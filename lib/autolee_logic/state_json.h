@@ -47,6 +47,7 @@ struct DeviceState {
   const char *wifiStatus;
   const char *wifiSSID;
   const char *wifiIP;
+  const char *wifiHostname;  // "<name>.local", or "" when not advertised
   long batchTarget, batchCount;
   bool batchActive;
 };
@@ -88,6 +89,7 @@ inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
       "{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u},"
       "{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u}],"
       "\"wifiStatus\":\"%s\",\"wifiSSID\":\"%s\",\"wifiIP\":\"%s\","
+      "\"wifiHostname\":\"%s\","
       "\"batchTarget\":%ld,\"batchCount\":%ld,\"batchActive\":%s}",
       s.version, s.state, s.defaultPassword ? "true" : "false", s.counter, (unsigned long)s.speed,
       s.calibrated ? "true" : "false", s.positionStale ? "true" : "false", s.rawUp, s.rawDown,
@@ -96,7 +98,7 @@ inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
       (unsigned long)s.profiles[0].hz, s.profiles[0].sg, s.profiles[1].name,
       (unsigned long)s.profiles[1].hz, s.profiles[1].sg, s.profiles[2].name,
       (unsigned long)s.profiles[2].hz, s.profiles[2].sg, s.wifiStatus, ssidEscaped, s.wifiIP,
-      s.batchTarget, s.batchCount, s.batchActive ? "true" : "false");
+      s.wifiHostname, s.batchTarget, s.batchCount, s.batchActive ? "true" : "false");
 }
 
 }  // namespace autolee

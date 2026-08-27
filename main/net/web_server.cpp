@@ -306,6 +306,9 @@ static std::string buildStateJSON() {
   std::string wfSSID = (wifi_mgr::isConnected() || wifi_mgr::isApMode()) ? wifi_mgr::ssid() : "-";
   std::string wfIP =
       (wifi_mgr::isConnected() || wifi_mgr::isApMode()) ? wifi_mgr::ipAddress() : "-";
+  // "" rather than "-" when there is none: this one is consumed by the UI as a
+  // link, and an empty string is the absence of a link. "-" would render as one.
+  std::string wfHost = wifi_mgr::mdnsHostname();
 
   const char *stateStr = ms.runState == RUNNING       ? "RUNNING"
                          : ms.runState == STOPPING    ? "STOPPING"
@@ -340,6 +343,7 @@ static std::string buildStateJSON() {
   st.wifiStatus = wfStat;
   st.wifiSSID = wfSSID.c_str();
   st.wifiIP = wfIP.c_str();
+  st.wifiHostname = wfHost.c_str();
   st.batchTarget = ms.batchTarget;
   st.batchCount = ms.batchCount;
   st.batchActive = ms.batchActive;

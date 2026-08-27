@@ -10,7 +10,7 @@
     "rawUp", "rawDown", "endpointUp", "endpointDown",
     "upOffset", "downOffset", "position", "sgTrip", "workZone", "currentMa",
     "profileIdx", "profileName", "profiles",
-    "wifiStatus", "wifiSSID", "wifiIP",
+    "wifiStatus", "wifiSSID", "wifiIP", "wifiHostname",
     "batchTarget", "batchCount", "batchActive"
   ],
   "properties": {
@@ -60,6 +60,10 @@
     "wifiStatus": { "type": "string" },
     "wifiSSID": { "type": "string" },
     "wifiIP": { "type": "string" },
+    "wifiHostname": {
+      "type": "string",
+      "description": "mDNS name the device advertises, e.g. \"autolee.local\". Empty string when it advertises none - on the setup AP, or if mDNS failed to start. Always present, never null. A convenience on top of wifiIP and never a replacement: mDNS does not resolve everywhere, so wifiIP stays the address of record."
+    },
     "batchTarget": { "type": "integer", "minimum": 0 },
     "batchCount": { "type": "integer", "minimum": 0 },
     "batchActive": { "type": "boolean" }
