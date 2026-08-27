@@ -76,8 +76,8 @@
     {
       matchDatasources: ["custom.esp-component-registry"],
       matchPackageNames: ["lvgl/lvgl"],
-      allowedVersions: "<9",
-      description: "LVGL 9 renames the indev/display APIs that axs5106l_touch.cpp and ui_touch.cpp are written against - a port, not an upgrade. See main/idf_component.yml.",
+      allowedVersions: "<10",
+      description: "The 8->9 port is done. The cap stays one major wide: LVGL 10 would be the same class of change, and it should arrive as a decision rather than as a routine-looking bump.",
     },
   ],
 }

@@ -103,7 +103,7 @@ void ui_force_full_repaint() {
   // scheduler are quiet again. Treat this as a targeted workaround with a known
   // symptom and an unknown cause, not as a fix for the underlying race.
   if (!ui_lock("repaint")) return;
-  lv_obj_t *act = lv_scr_act();
+  lv_obj_t *act = lv_screen_active();
   if (act) lv_obj_invalidate(act);
   lvgl_port_unlock();
 }
@@ -119,7 +119,7 @@ void ui_log_heartbeat() {
     ESP_LOGW("ui", "heartbeat: LVGL LOCK BUSY - tick=%lu bl=%d", (unsigned long)tick, bl);
     return;
   }
-  lv_obj_t *act = lv_scr_act();
+  lv_obj_t *act = lv_screen_active();
   // Child count separates "a screen is loaded but empty" - which renders as
   // flat black, since style_screen() paints the background black - from "the
   // screen has its widgets and they are simply not reaching the panel".
@@ -143,7 +143,7 @@ static lv_obj_t *make_content(lv_obj_t *scr) {
   lv_obj_set_style_bg_opa(c, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(c, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(c, 10, LV_PART_MAIN);
-  lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_flex_flow(c, LV_FLEX_FLOW_COLUMN);
   lv_obj_set_flex_align(c, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
   lv_obj_set_style_pad_row(c, 10, LV_PART_MAIN);
@@ -157,7 +157,7 @@ static lv_obj_t *make_content_free(lv_obj_t *scr) {
   lv_obj_set_style_bg_opa(c, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(c, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(c, 0, LV_PART_MAIN);
-  lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
   return c;
 }
 
@@ -169,7 +169,7 @@ static lv_obj_t *make_nav(lv_obj_t *scr) {
   lv_obj_set_style_bg_opa(n, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(n, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(n, 10, LV_PART_MAIN);
-  lv_obj_clear_flag(n, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(n, LV_OBJ_FLAG_SCROLLABLE);
   return n;
 }
 
@@ -183,7 +183,7 @@ static lv_obj_t *make_title(lv_obj_t *p, const char *txt) {
 
 static lv_obj_t *make_btn(lv_obj_t *p, const char *txt, int w, int h, uint32_t bg,
                           const lv_font_t *f) {
-  lv_obj_t *b = lv_btn_create(p);
+  lv_obj_t *b = lv_button_create(p);
   lv_obj_set_size(b, w, h);
   lv_obj_set_style_bg_color(b, lv_color_hex(bg), LV_PART_MAIN);
   lv_obj_t *l = lv_label_create(b);
@@ -196,7 +196,7 @@ static lv_obj_t *make_btn(lv_obj_t *p, const char *txt, int w, int h, uint32_t b
 
 static lv_obj_t *make_btn_multiline(lv_obj_t *p, const char *txt, int w, int h, uint32_t bg,
                                     const lv_font_t *f) {
-  lv_obj_t *b = lv_btn_create(p);
+  lv_obj_t *b = lv_button_create(p);
   lv_obj_set_size(b, w, h);
   lv_obj_set_style_bg_color(b, lv_color_hex(bg), LV_PART_MAIN);
   lv_obj_t *l = lv_label_create(b);
@@ -218,7 +218,7 @@ static lv_obj_t *make_card(lv_obj_t *p, int w, int h) {
   lv_obj_set_style_radius(c, 10, LV_PART_MAIN);
   lv_obj_set_style_border_width(c, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(c, 10, LV_PART_MAIN);
-  lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
   return c;
 }
 
@@ -244,7 +244,7 @@ void ui_jam_recovery_finished(bool homed) {
     lv_label_set_text(jam_status_lbl, homed ? "Homed - returning to main"
                                             : "Home FAILED - recalibrate before running");
   }
-  if (homed && jam_scr && main_scr && lv_scr_act() == jam_scr) go(main_scr);
+  if (homed && jam_scr && main_scr && lv_screen_active() == jam_scr) go(main_scr);
   lvgl_port_unlock();
 }
 
@@ -296,14 +296,14 @@ void ui_update_main_warning() {
   if (main_warn) {
     if (!calibrated) {
       if (main_warn_lbl) lv_label_set_text(main_warn_lbl, "NOT CALIBRATED");
-      lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
-      lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
     } else if (stale) {
       if (main_warn_lbl) lv_label_set_text(main_warn_lbl, "TAP: RETURN HOME");
       lv_obj_add_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
-      lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
     } else {
-      lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
     }
   }
@@ -318,7 +318,7 @@ static void ui_create_main_warning(lv_obj_t *parent) {
   lv_obj_set_style_bg_color(main_warn, lv_color_hex(0x3A2B12), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(main_warn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_pad_all(main_warn, 0, LV_PART_MAIN);
-  lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_SCROLLABLE);
   main_warn_lbl = lv_label_create(main_warn);
   lv_label_set_text(main_warn_lbl, "NOT CALIBRATED");
   lv_obj_set_style_text_font(main_warn_lbl, &lv_font_montserrat_12, LV_PART_MAIN);
@@ -330,14 +330,14 @@ static void ui_create_main_warning(lv_obj_t *parent) {
   lv_obj_add_event_cb(main_warn, onMainWarnReturnHome, LV_EVENT_CLICKED, nullptr);
   const MotionState ms = motion_state::snapshot();
   if (!ms.endpointsCalibrated) {
-    lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
   } else if (ms.positionReferenceStale) {
     lv_label_set_text(main_warn_lbl, "TAP: RETURN HOME");
     lv_obj_add_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
   } else {
-    lv_obj_clear_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
   }
 }
@@ -430,7 +430,7 @@ void ui_update_batch_remain() {
       int32_t remain = ms.batchTarget - ms.batchCount;
       if (remain < 0) remain = 0;
       lv_label_set_text_fmt(lbl_batch_remain, "Batch: %ld left", remain);
-      lv_obj_clear_flag(lbl_batch_remain, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(lbl_batch_remain, LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_add_flag(lbl_batch_remain, LV_OBJ_FLAG_HIDDEN);
     }
@@ -463,7 +463,7 @@ void ui_update_wifi_label() {
       std::string payload = "WIFI:T:WPA;S:" + qrEscape(DEFAULT_AP_SSID) +
                             ";P:" + qrEscape(wifi_mgr::apPassword()) + ";;";
       lv_qrcode_update(wifi_qr, payload.c_str(), payload.length());
-      lv_obj_clear_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
       // The URL line is the fallback for when the captive portal doesn't pop
       // by itself - which happens often enough to matter (a phone that has
       // already "seen" this AP, a browser that suppresses the CNA, or plain
@@ -476,7 +476,7 @@ void ui_update_wifi_label() {
       // Two steps, so they read as two groups rather than one list of three.
       lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s\n\nhttp://%s", DEFAULT_AP_SSID,
                             wifi_mgr::apPassword().c_str(), wifi_mgr::ipAddress().c_str());
-      lv_obj_clear_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_add_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
       lv_obj_add_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
@@ -489,7 +489,7 @@ void ui_update_wifi_label() {
     if (apSetup) {
       if (card) lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
     } else {
-      if (card) lv_obj_clear_flag(card, LV_OBJ_FLAG_HIDDEN);
+      if (card) lv_obj_remove_flag(card, LV_OBJ_FLAG_HIDDEN);
       if (wifi_mgr::isConnected()) {
         lv_label_set_text_fmt(lbl_wifi_status, "%s\nIP: %s", wifi_mgr::ssid().c_str(),
                               wifi_mgr::ipAddress().c_str());
@@ -504,14 +504,14 @@ void ui_update_wifi_label() {
     if (apSetup)
       lv_obj_add_flag(btn_wifi_reset, LV_OBJ_FLAG_HIDDEN);
     else
-      lv_obj_clear_flag(btn_wifi_reset, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(btn_wifi_reset, LV_OBJ_FLAG_HIDDEN);
   }
 
   // Skip is only meaningful on the auto-shown AP-setup screen; it replaces the
   // nav Back there (showing both is redundant), so they toggle inversely.
   if (btn_wifi_skip) {
     if (apSetup)
-      lv_obj_clear_flag(btn_wifi_skip, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(btn_wifi_skip, LV_OBJ_FLAG_HIDDEN);
     else
       lv_obj_add_flag(btn_wifi_skip, LV_OBJ_FLAG_HIDDEN);
   }
@@ -519,7 +519,7 @@ void ui_update_wifi_label() {
     if (apSetup)
       lv_obj_add_flag(btn_wifi_back, LV_OBJ_FLAG_HIDDEN);
     else
-      lv_obj_clear_flag(btn_wifi_back, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_remove_flag(btn_wifi_back, LV_OBJ_FLAG_HIDDEN);
   }
   lvgl_port_unlock();
 }
@@ -574,7 +574,7 @@ void ui_update_run_button() {
       lv_obj_set_style_text_color(l, lv_color_hex(fg), LV_PART_MAIN);
     }
     if (tappable)
-      lv_obj_clear_state(btn_run_global, LV_STATE_DISABLED);
+      lv_obj_remove_state(btn_run_global, LV_STATE_DISABLED);
     else
       lv_obj_add_state(btn_run_global, LV_STATE_DISABLED);
   }
@@ -637,7 +637,7 @@ static void build_endpoint_screen(lv_obj_t *scr, const char *titleTxt, bool isUp
   lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(grid, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(grid, 0, LV_PART_MAIN);
-  lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
   const int bw = 48, bh = 44, gap = 3;
   const int x0 = 0, x1 = bw + gap, x2 = 2 * (bw + gap), y0 = 0, y1 = bh + gap;
@@ -748,7 +748,8 @@ static void confirm_set_label(ConfirmArm &a, const char *txt, uint32_t color) {
 // The arming timer is one-shot: LVGL deletes it right after this returns, so
 // only clear the handle here - deleting it again would be a double free.
 static void confirm_timeout_cb(lv_timer_t *t) {
-  ConfirmArm *a = static_cast<ConfirmArm *>(t->user_data);
+  // lv_timer_t is opaque in LVGL 9 - user_data comes from the accessor.
+  ConfirmArm *a = static_cast<ConfirmArm *>(lv_timer_get_user_data(t));
   a->timer = nullptr;
   confirm_set_label(*a, a->idleText, a->idleColor);
 }
@@ -847,7 +848,7 @@ static void counter_timer_cb(lv_timer_t *t) {
   LV_UNUSED(t);
   const MotionState ms = motion_state::snapshot();
   set_counter_label(ms.counter);
-  if (main_scr && lv_scr_act() == main_scr) {
+  if (main_scr && lv_screen_active() == main_scr) {
     ui_update_main_warning();
     ui_update_batch_remain();
   }
@@ -866,7 +867,7 @@ static void counter_timer_cb(lv_timer_t *t) {
     if (lbl) lv_label_set_text(lbl, busy ? "Cancel Cal" : "Calibrate");
     lv_obj_set_style_bg_color(btn_calibrate, lv_color_hex(busy ? 0xB42318 : 0x444444),
                               LV_PART_MAIN);
-    lv_obj_clear_state(btn_calibrate, LV_STATE_DISABLED);
+    lv_obj_remove_state(btn_calibrate, LV_STATE_DISABLED);
   }
   // Same one-button pattern on the jam screen: Return Home becomes the cancel
   // for the home it started. Driven from here rather than from
@@ -898,7 +899,7 @@ static void counter_timer_cb(lv_timer_t *t) {
 // screen's event wiring moves inline, right after that screen's widgets are
 // created - no new promotions were needed beyond what was already global.
 static void build_main_screen() {
-  main_scr = lv_scr_act();
+  main_scr = lv_screen_active();
   style_screen(main_scr);
   lv_obj_t *mc = make_content_free(main_scr);
   lv_obj_t *mn = make_nav(main_scr);
@@ -1203,7 +1204,11 @@ static void build_wifi_screen() {
   // children collapse - only the QR+key+Skip (AP mode) OR the status card +
   // reset button (connected mode) are visible at a time; visibility is set in
   // ui_update_wifi_label(). Created before the card so it flows above it.
-  wifi_qr = lv_qrcode_create(wc, 112, lv_color_hex(0x000000), lv_color_hex(0xFFFFFF));
+  // LVGL 9 splits the old four-argument constructor into a create plus setters.
+  wifi_qr = lv_qrcode_create(wc);
+  lv_qrcode_set_size(wifi_qr, 112);
+  lv_qrcode_set_dark_color(wifi_qr, lv_color_hex(0x000000));
+  lv_qrcode_set_light_color(wifi_qr, lv_color_hex(0xFFFFFF));
   lv_obj_set_style_border_color(wifi_qr, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
   lv_obj_set_style_border_width(wifi_qr, 4, LV_PART_MAIN);  // quiet zone for scanners
   lv_obj_add_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
@@ -1323,7 +1328,7 @@ static void build_stall_screen() {
   lv_obj_set_style_bg_opa(sg_grid, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(sg_grid, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(sg_grid, 0, LV_PART_MAIN);
-  lv_obj_clear_flag(sg_grid, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(sg_grid, LV_OBJ_FLAG_SCROLLABLE);
 
   const int sgbw = 70, sgbh = 44, sggap = 4;
   lv_obj_t *sgM5 = make_btn(sg_grid, "-5", sgbw, sgbh, 0x3A3A3A, &lv_font_montserrat_18);
@@ -1397,7 +1402,7 @@ static void build_batch_screen() {
   lv_obj_set_style_bg_opa(br_grid, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(br_grid, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(br_grid, 0, LV_PART_MAIN);
-  lv_obj_clear_flag(br_grid, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(br_grid, LV_OBJ_FLAG_SCROLLABLE);
 
   const int bbw = 48, bbh = 40, bgap = 3;
   lv_obj_t *brM100 = make_btn(br_grid, "-100", bbw, bbh, 0x3A3A3A, &lv_font_montserrat_14);
