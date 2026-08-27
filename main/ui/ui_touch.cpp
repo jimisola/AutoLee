@@ -574,7 +574,7 @@ void ui_update_run_button() {
       lv_obj_set_style_text_color(l, lv_color_hex(fg), LV_PART_MAIN);
     }
     if (tappable)
-      lv_obj_clear_state(btn_run_global, LV_STATE_DISABLED);
+      lv_obj_remove_state(btn_run_global, LV_STATE_DISABLED);
     else
       lv_obj_add_state(btn_run_global, LV_STATE_DISABLED);
   }
@@ -867,7 +867,7 @@ static void counter_timer_cb(lv_timer_t *t) {
     if (lbl) lv_label_set_text(lbl, busy ? "Cancel Cal" : "Calibrate");
     lv_obj_set_style_bg_color(btn_calibrate, lv_color_hex(busy ? 0xB42318 : 0x444444),
                               LV_PART_MAIN);
-    lv_obj_clear_state(btn_calibrate, LV_STATE_DISABLED);
+    lv_obj_remove_state(btn_calibrate, LV_STATE_DISABLED);
   }
   // Same one-button pattern on the jam screen: Return Home becomes the cancel
   // for the home it started. Driven from here rather than from
