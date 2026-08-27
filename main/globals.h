@@ -53,6 +53,7 @@ extern TaskHandle_t g_pump_task_handle;
 // NVS outside the versioned settings blob - same pattern as the web
 // password, not a calibration/tuning value.
 #include "log_ring.h"
+#include "boot_report.h"
 extern autolee::LogRing<LOG_LINES, LOG_LINE_LEN> g_log;
 extern uint32_t logSentSerial;  // last serial# broadcast over SSE
 enum class LogLevel : uint8_t { Debug, Info, Warn, Error };
@@ -74,6 +75,10 @@ extern lv_obj_t *profile_btns[NUM_PROFILES];
 extern lv_obj_t *lbl_profile_info;
 extern lv_obj_t *lbl_ep_up, *lbl_ep_dn, *lbl_travel;
 extern lv_obj_t *lbl_up_eff, *lbl_dn_eff;
+// Problems hit during startup, before the web server existed to report them.
+// Frozen at the end of app_main(); see lib/autolee_logic/boot_report.h.
+extern autolee::BootReport g_boot_report;
+
 extern lv_obj_t *lbl_ep_up_val, *lbl_ep_dn_val;
 extern lv_obj_t *lbl_wifi_status;
 extern lv_obj_t *wifi_qr;         // WiFi-join QR code, shown in AP-setup mode

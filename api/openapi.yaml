@@ -459,6 +459,60 @@ paths:
                       otaCount: { type: integer, minimum: 0, description: "Successful OTA updates (counted once the new image is set to boot)" }
                       resetCount: { type: integer, minimum: 0, description: "Boots, counted at startup and written to flash immediately so a reset loop is visible" }
 
+  /api/v1/diagnostics/startup:
+    get:
+      summary: Problems recorded while the device was starting up
+      description: >
+        Failures that happened before this server existed, so they could not be pushed to a
+        browser or onto the SSE stream. A boot record rather than a running log: it is frozen
+        when startup finishes and **does not change until the device restarts**, so polling it
+        is pointless. Read-only and unauthenticated like the rest of `/diagnostics` - it
+        reports what went wrong and never anything secret, and it matters most exactly when the
+        device is in a state nobody can log in to. An empty `issues` array means the device
+        reported no problems at startup, which is the normal case.
+      tags: [Diagnostics]
+      operationId: getStartupReport
+      responses:
+        "200":
+          description: The startup report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [frozen, dropped, issues]
+                properties:
+                  frozen:
+                    type: boolean
+                    description: >
+                      True once startup finished. False only if the report is read mid-boot,
+                      in which case it may still grow.
+                  dropped:
+                    type: integer
+                    minimum: 0
+                    description: >
+                      Issues that did not fit the fixed capacity. Non-zero means the list below
+                      is incomplete - reported rather than hidden, so a truncated report can
+                      never read as a complete one.
+                  issues:
+                    type: array
+                    items:
+                      type: object
+                      required: [code, detail]
+                      properties:
+                        code:
+                          type: string
+                          description: >
+                            Stable identifier, e.g. `nvs-erased`, `not-calibrated`,
+                            `display-init-failed`, `ota-rolled-back`. New codes may be added;
+                            treat an unknown one as displayable rather than an error.
+                        detail:
+                          type: string
+                          description: Human-readable specifics for this boot.
+              example:
+                frozen: true
+                dropped: 0
+                issues: []
+
   /api/v1/diagnostics/coredump:
     get:
       summary: Download the stored core dump, if any

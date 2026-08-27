@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <cstdio>
 
+#include "json_escape.h"  // jsonEscape() - SSIDs are attacker-influenceable
+
 namespace autolee {
 
 struct ProfileView {
@@ -50,25 +52,6 @@ struct DeviceState {
   long batchTarget, batchCount;
   bool batchActive;
 };
-
-// SSIDs are attacker-influenceable (a nearby AP or a manually-typed SSID can
-// contain '"' or '\'), unlike every other string field here (firmware
-// constants or machine-generated values) - escape it so it can never break
-// the JSON. Max WiFi SSID length is 32 bytes; sized for the worst case
-// (every byte escaped) plus NUL.
-inline void jsonEscape(const char *in, char *out, size_t outSize) {
-  size_t o = 0;
-  for (size_t i = 0; in[i] != '\0' && o + 2 < outSize; i++) {
-    char c = in[i];
-    // Drop raw control characters outright: they'd need \uXXXX escapes to be
-    // valid JSON, and no legitimate SSID contains them (upstream v1.10.0 does
-    // the same).
-    if ((unsigned char)c < 0x20) continue;
-    if (c == '"' || c == '\\') out[o++] = '\\';
-    out[o++] = c;
-  }
-  out[o] = '\0';
-}
 
 // Serialize into `out` (size `n`). Returns the snprintf return value (number of
 // chars that would have been written). The format mirrors the firmware exactly.
