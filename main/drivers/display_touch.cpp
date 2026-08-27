@@ -18,7 +18,7 @@
 
 #include "config.h"  // SCR_W, SCR_H, ROTATION, GFX_BL, Touch_* pins
 
-static void touchpad_read_cb(lv_indev_drv_t *, lv_indev_data_t *data) {
+static void touchpad_read_cb(lv_indev_t *, lv_indev_data_t *data) {
   axs5106l_touch_data_t t;
   axs5106l_touch_read();
   if (axs5106l_touch_get_coordinates(&t)) {
@@ -189,7 +189,7 @@ bool display_touch_panel_reinit(void) {
   jd9853_send_init_sequence(s_io_handle);  // ends with DISPON itself
   // The init sequence resets addressing state and may leave DDRAM stale -
   // repaint everything so what is displayed is current.
-  if (s_disp) lv_obj_invalidate(lv_scr_act());
+  if (s_disp) lv_obj_invalidate(lv_screen_active());
   lvgl_port_unlock();
   return true;
 }
@@ -224,6 +224,12 @@ lv_display_t *display_touch_init(void) {
   disp_cfg.rotation.mirror_x = false;
   disp_cfg.rotation.mirror_y = false;
   disp_cfg.flags.buff_dma = true;
+  // The JD9853 takes RGB565 big-endian. Under LVGL 8 this was LV_COLOR_16_SWAP
+  // in lv_conf.h; LVGL 9 removed that option, so the swap moves here. Without
+  // it every colour renders byte-swapped - and plausibly, not obviously: dark
+  // grey 0x2A2A2A comes out green, which reads as a theme choice rather than a
+  // fault.
+  disp_cfg.flags.swap_bytes = true;
 
   lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);
   if (!disp) {
@@ -237,12 +243,12 @@ lv_display_t *display_touch_init(void) {
   axs5106l_touch_init(i2c_bus, (gpio_num_t)Touch_RST, (gpio_num_t)Touch_INT, ROTATION, SCR_W,
                       SCR_H);
 
-  static lv_indev_drv_t indev_drv;  // static: LVGL keeps a pointer to this past return
-  lv_indev_drv_init(&indev_drv);
-  indev_drv.type = LV_INDEV_TYPE_POINTER;
-  indev_drv.read_cb = touchpad_read_cb;
-  indev_drv.disp = disp;
-  lv_indev_drv_register(&indev_drv);
+  // LVGL 9 owns the indev object; there is no caller-provided driver struct to
+  // keep alive, which is what the `static lv_indev_drv_t` here used to be for.
+  lv_indev_t *indev = lv_indev_create();
+  lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+  lv_indev_set_read_cb(indev, touchpad_read_cb);
+  lv_indev_set_display(indev, disp);
   ESP_LOGI(TAG, "AXS5106L touch ready");
 
   gpio_set_level((gpio_num_t)GFX_BL, 1);
