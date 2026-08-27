@@ -186,10 +186,20 @@ static void startMdns() {
 }
 
 std::string mdnsHostname() {
-  // Deliberately empty unless joined to a real network as a station. On the
-  // setup AP the client is already talking to a fixed, known address, and
-  // mDNS over softAP is not dependable enough to print as the way in.
-  if (!s_mdns_started || !s_connected || s_ap_mode) return "";
+  // Reported in AP mode too, though it resolves there by a different route:
+  // the captive portal's DNS server (lib/dns_server) answers EVERY query with
+  // the AP's own address, so autolee.local reaches the setup page whether or
+  // not mDNS is advertising on the softAP interface. On a joined network it is
+  // real mDNS. One name works in both modes, by two mechanisms.
+  //
+  // Worth knowing when reading this: in AP mode the name is not special - any
+  // hostname would resolve. It is printed because it is the one someone can
+  // retype without squinting at a 172x320 panel, not because the device is
+  // uniquely answering for it there.
+  //
+  // Never the only thing shown. mDNS does not resolve everywhere once joined
+  // to a real network, so the numeric address stays beside it.
+  if (!s_mdns_started || (!s_connected && !s_ap_mode)) return "";
   return std::string(MDNS_HOSTNAME) + ".local";
 }
 
