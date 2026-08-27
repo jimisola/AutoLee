@@ -1161,28 +1161,39 @@ void setupWebServer() {
             ? (uint32_t)uxTaskGetStackHighWaterMark(g_pump_task_handle) * sizeof(StackType_t)
             : 0;
 
-    char buf[1280];
-    snprintf(buf, sizeof(buf),
-             "{\"version\":\"%s\",\"idfVersion\":\"%s\",\"compileDate\":\"%s\","
-             "\"compileTime\":\"%s\",\"elfSha256\":\"%s\",\"resetReason\":\"%s\","
-             "\"freeHeap\":%u,\"minFreeHeap\":%u,\"largestFreeBlock\":%u,"
-             "\"uptimeMs\":%llu,"
-             "\"runningPartition\":\"%s\",\"coredumpPresent\":%s,"
-             "\"flashSizeBytes\":%lu,\"cpuFreqMhz\":%d,\"wifiRssi\":%s,"
-             "\"pumpStackHighWaterMark\":%lu,\"settingsVersion\":%u,"
-             "\"health\":{\"cycleCount\":%lu,\"stallCount\":%u,\"totalCycleTimeMs\":%lu,"
-             "\"avgCycleMs\":%lu,\"longestCycleMs\":%lu,\"calibrationCount\":%u,"
-             "\"otaCount\":%u,\"resetCount\":%u}}",
-             desc->version, desc->idf_ver, desc->date, desc->time, sha,
-             resetReasonStr(esp_reset_reason()), (unsigned)esp_get_free_heap_size(),
-             (unsigned)esp_get_minimum_free_heap_size(), (unsigned)largestFreeBlock,
-             (unsigned long long)(esp_timer_get_time() / 1000), running ? running->label : "?",
-             coredumpPresent ? "true" : "false", (unsigned long)flashSizeBytes, cpuFreqMhz,
-             wifiRssiJson, (unsigned long)pumpStackHighWaterMarkBytes,
-             (unsigned)settings_store::kVersion, (unsigned long)ms.lifetimeCycles,
-             (unsigned)ms.stallCount, (unsigned long)ms.totalCycleTimeMs, (unsigned long)avgCycleMs,
-             (unsigned long)ms.longestCycleMs, (unsigned)ms.calibrationCount, (unsigned)ms.otaCount,
-             (unsigned)ms.resetCount);
+    char buf[1792];
+    // Checked, unlike before: this payload grew by a fixed ~200-byte build
+    // object, and a silent truncation here is malformed JSON served as 200 OK.
+    const int infoLen = snprintf(
+        buf, sizeof(buf),
+        "{\"version\":\"%s\",\"idfVersion\":\"%s\",\"compileDate\":\"%s\","
+        "\"compileTime\":\"%s\",\"elfSha256\":\"%s\",\"resetReason\":\"%s\","
+        "\"freeHeap\":%u,\"minFreeHeap\":%u,\"largestFreeBlock\":%u,"
+        "\"uptimeMs\":%llu,"
+        "\"runningPartition\":\"%s\",\"coredumpPresent\":%s,"
+        "\"flashSizeBytes\":%lu,\"cpuFreqMhz\":%d,\"wifiRssi\":%s,"
+        "\"pumpStackHighWaterMark\":%lu,\"settingsVersion\":%u,"
+        "\"health\":{\"cycleCount\":%lu,\"stallCount\":%u,\"totalCycleTimeMs\":%lu,"
+        "\"avgCycleMs\":%lu,\"longestCycleMs\":%lu,\"calibrationCount\":%u,"
+        "\"otaCount\":%u,\"resetCount\":%u},"
+        "\"build\":{\"gitBranch\":\"%s\",\"gitCommit\":\"%s\","
+        "\"gitCommitTime\":\"%s\",\"gitCommitCount\":\"%s\","
+        "\"host\":\"%s\",\"webappSha256\":\"%s\"}}",
+        desc->version, desc->idf_ver, desc->date, desc->time, sha,
+        resetReasonStr(esp_reset_reason()), (unsigned)esp_get_free_heap_size(),
+        (unsigned)esp_get_minimum_free_heap_size(), (unsigned)largestFreeBlock,
+        (unsigned long long)(esp_timer_get_time() / 1000), running ? running->label : "?",
+        coredumpPresent ? "true" : "false", (unsigned long)flashSizeBytes, cpuFreqMhz, wifiRssiJson,
+        (unsigned long)pumpStackHighWaterMarkBytes, (unsigned)settings_store::kVersion,
+        (unsigned long)ms.lifetimeCycles, (unsigned)ms.stallCount,
+        (unsigned long)ms.totalCycleTimeMs, (unsigned long)avgCycleMs,
+        (unsigned long)ms.longestCycleMs, (unsigned)ms.calibrationCount, (unsigned)ms.otaCount,
+        (unsigned)ms.resetCount, AUTOLEE_GIT_BRANCH, AUTOLEE_GIT_COMMIT, AUTOLEE_GIT_COMMIT_TIME,
+        AUTOLEE_GIT_COMMIT_COUNT, AUTOLEE_BUILD_HOST, AUTOLEE_WEBAPP_SHA256);
+    if (infoLen < 0 || (size_t)infoLen >= sizeof(buf)) {
+      ESP_LOGE(TAG, "diagnostics/info truncated (%d >= %u)", infoLen, (unsigned)sizeof(buf));
+      return res->send(500, "application/json", "{\"error\":\"diagnostics did not fit\"}");
+    }
     return res->send(200, "application/json", buf);
   });
 
