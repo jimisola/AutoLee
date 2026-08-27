@@ -3,6 +3,14 @@
   extends: ["config:recommended"],
   timezone: "Europe/Stockholm",
 
+  // This repo is a fork (of anticolon/AutoLee), and Renovate skips forks unless
+  // told otherwise. It ran once on the day the fork was created, found no
+  // config, marked the repo disabled, and never scheduled again - so the config
+  // added 42 days later was never read. "auto" would now process it, since a
+  // config file exists, but the whole failure was a default quietly deciding
+  // not to run. Stating it leaves nothing to infer.
+  forkProcessing: "enabled",
+
   // Only the surfaces Dependabot cannot see. github-actions and pip belong to
   // .github/dependabot.yml; enabling them here would open every PR twice.
   enabledManagers: ["custom.regex", "pre-commit"],
