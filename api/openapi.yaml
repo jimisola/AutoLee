@@ -458,6 +458,24 @@ paths:
                       calibrationCount: { type: integer, minimum: 0, description: "Successful sensorless calibrations" }
                       otaCount: { type: integer, minimum: 0, description: "Successful OTA updates (counted once the new image is set to boot)" }
                       resetCount: { type: integer, minimum: 0, description: "Boots, counted at startup and written to flash immediately so a reset loop is visible" }
+                  build:
+                    type: object
+                    description: >
+                      Where this image came from. Deliberately carries nothing the top-level
+                      `version` already says: that field is `git describe --always --tags
+                      --dirty` and remains the single version identifier. These are the facts
+                      it cannot carry. Captured at CMake *configure* time, not per build, so a
+                      rebuild without `idf.py reconfigure` reports the previous commit - the
+                      same staleness `version` already has.
+                    additionalProperties: false
+                    required: [gitBranch, gitCommit, gitCommitTime, gitCommitCount, host, webappSha256]
+                    properties:
+                      gitBranch: { type: string, description: "Branch at configure time, or \"unknown\" in a tarball export or shallow checkout with no git available" }
+                      gitCommit: { type: string, description: "Full 40-character commit id, or \"unknown\"" }
+                      gitCommitTime: { type: string, description: "Commit timestamp, ISO-8601 with offset, or \"unknown\". This is when the code was committed, not when it was built" }
+                      gitCommitCount: { type: string, description: "Commits reachable from HEAD. A string, not an integer, because it is \"unknown\" when git is unavailable" }
+                      host: { type: string, enum: [ci, local, unknown], description: "\"ci\" when built by CI, \"local\" otherwise. The single most useful field when a rig misbehaves and nobody can say what is on it: a release artifact and something flashed off a laptop are otherwise identical" }
+                      webappSha256: { type: string, description: "SHA-256 of the compiled-in web UI source. The page ships inside the firmware image, so a stale one is otherwise invisible - the version moves and the page does not" }
 
   /api/v1/diagnostics/startup:
     get:

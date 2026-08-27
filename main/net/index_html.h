@@ -369,6 +369,17 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <div class="sr"><span class="l">Reset Count</span><span class="v" id="dgResetCount">-</span></div>
 </div>
 
+<div class="sec">
+<h2>Build</h2>
+<div class="sr"><span class="l">Built by</span><span class="v" id="bdHost">-</span></div>
+<div class="sr"><span class="l">Branch</span><span class="v" id="bdBranch">-</span></div>
+<div class="sr"><span class="l">Commit</span><span class="v" id="bdCommit">-</span></div>
+<div class="sr"><span class="l">Committed</span><span class="v" id="bdTime">-</span></div>
+<div class="sr"><span class="l">Commit count</span><span class="v" id="bdCount">-</span></div>
+<div class="sr"><span class="l">Web UI</span><span class="v" id="bdWeb">-</span></div>
+<div class="hint" id="bdStale" style="margin-top:8px;display:none"></div>
+</div>
+
 <button class="btn btn-dark btn-sm" onclick="loadDiag()" style="width:100%">Refresh</button>
 
 <div class="sec">
@@ -580,6 +591,24 @@ function loadDiag(){
     document.getElementById('dgRssi').textContent=d.wifiRssi===null?'-':d.wifiRssi+' dBm';
     document.getElementById('dgStack').textContent=d.pumpStackHighWaterMark+' B';
     document.getElementById('dgSettingsVer').textContent=d.settingsVersion;
+    var b=d.build||{};
+    document.getElementById('bdHost').textContent=b.host==='ci'?'CI':(b.host==='local'?'a local machine':'unknown');
+    document.getElementById('bdBranch').textContent=b.gitBranch||'-';
+    // Short form: the full 40 chars is unreadable in a narrow row and the
+    // first 12 is what anyone actually pastes into `git show`.
+    document.getElementById('bdCommit').textContent=b.gitCommit?b.gitCommit.slice(0,12):'-';
+    document.getElementById('bdCommit').title=b.gitCommit||'';
+    document.getElementById('bdTime').textContent=b.gitCommitTime||'-';
+    document.getElementById('bdCount').textContent=b.gitCommitCount||'-';
+    document.getElementById('bdWeb').textContent=b.webappSha256?b.webappSha256.slice(0,12):'-';
+    document.getElementById('bdWeb').title=b.webappSha256||'';
+    // "-dirty" is git-describe's wording, which means nothing to someone who
+    // does not read it. Say what it implies instead.
+    var st=document.getElementById('bdStale');
+    if(d.version&&d.version.indexOf('-dirty')>=0){
+      st.style.display='';
+      st.innerHTML='<b>Modified build.</b> This image was built from a working tree with uncommitted changes, so the commit above does not fully describe what is running.';
+    }else{st.style.display='none'}
     const h=d.health||{};
     document.getElementById('dgCycles').textContent=h.cycleCount;
     document.getElementById('dgStalls').textContent=h.stallCount;
