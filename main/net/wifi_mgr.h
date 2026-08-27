@@ -24,9 +24,10 @@ bool isApMode();
 // false => no web password required at all (physical presence at the rig is the
 // gate), true => digest auth + force-change-on-first-use apply.
 bool hasEverJoined();
-std::string ipAddress();   // STA or AP IP, whichever is active
-std::string ssid();        // connected STA SSID, or the AP's SSID in AP mode
-std::string apPassword();  // the setup AP's WPA2 key (per-device, persisted in NVS)
+std::string ipAddress();     // STA or AP IP, whichever is active
+std::string ssid();          // connected STA SSID, or the AP's SSID in AP mode
+std::string mdnsHostname();  // "<name>.local" while joined as a station, else ""
+std::string apPassword();    // the setup AP's WPA2 key (per-device, persisted in NVS)
 
 // Returns false (storing nothing) if the SSID is empty or either value exceeds
 // what the WiFi driver's fixed-size config fields can hold - see

@@ -41,6 +41,7 @@ static const char *EXPECTED =
     "{\"name\":\"Normal\",\"hz\":35000,\"sg\":15},"
     "{\"name\":\"Fast\",\"hz\":45000,\"sg\":1}],"
     "\"wifiStatus\":\"Connected\",\"wifiSSID\":\"MyNet\",\"wifiIP\":\"192.168.1.50\","
+    "\"wifiHostname\":\"autolee.local\","
     "\"batchTarget\":100,\"batchCount\":7,\"batchActive\":true}";
 
 static DeviceState sample() {
@@ -70,6 +71,7 @@ static DeviceState sample() {
   s.wifiStatus = "Connected";
   s.wifiSSID = "MyNet";
   s.wifiIP = "192.168.1.50";
+  s.wifiHostname = "autolee.local";
   s.batchTarget = 100;
   s.batchCount = 7;
   s.batchActive = true;

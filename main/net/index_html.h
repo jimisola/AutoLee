@@ -286,6 +286,13 @@ Tap to select .bin<br><span style="font-size:.8em">or drag &amp; drop</span></di
 <div class="sr"><span class="l">IP Address</span><span class="v" id="wfIP">—</span></div>
 </div>
 
+<div class="sec" id="baseUrlSec" style="display:none">
+<h2>Server Base URL</h2>
+<div class="hint" style="margin-bottom:8px">This name stays the same when the IP changes. If it does not resolve — some Windows setups have no mDNS — use the address instead.</div>
+<div class="sr"><span class="l">IP address</span><span class="v" id="buIp">—</span></div>
+<a id="buLink" class="v" href="#" style="display:block;margin-top:6px;word-break:break-all">—</a>
+</div>
+
 <div class="sec">
 <h2>WiFi Settings</h2>
 <div class="hint" style="margin-bottom:8px">Change WiFi credentials (applied live, no reboot)</div>
@@ -645,7 +652,13 @@ function upd(d){
   document.getElementById('sgOffAlert').style.display=d.sgTrip===0?'block':'none';
     document.getElementById('cp').textContent=d.position;
     document.getElementById('wzv').textContent=d.workZone;
-  if(d.wifiStatus){document.getElementById('wfStatus').textContent=d.wifiStatus;document.getElementById('wfSSID').textContent=d.wifiSSID;document.getElementById('wfIP').textContent=d.wifiIP}
+  if(d.wifiStatus){document.getElementById('wfStatus').textContent=d.wifiStatus;document.getElementById('wfSSID').textContent=d.wifiSSID;document.getElementById('wfIP').textContent=d.wifiIP;
+  // Hidden rather than shown empty: no advertised name is the absence of a base
+  // URL, not a base URL that is blank. On the setup AP there is none.
+  var bs=document.getElementById('baseUrlSec');
+  if(d.wifiHostname){var u='http://'+d.wifiHostname+'/',a=document.getElementById('buLink');
+  a.href=u;a.textContent=u;document.getElementById('buIp').textContent=d.wifiIP;bs.style.display=''}
+  else{bs.style.display='none'}}
   // Don't fight a drag in progress: while the slider holds focus its thumb and
   // label are being driven by showCurrent(), and echoing the last *committed*
   // value back would snap both to where the drag started. Same guard the SG

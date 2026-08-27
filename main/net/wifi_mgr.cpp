@@ -7,6 +7,7 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "mdns.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -153,6 +154,43 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
     // must never block on the LVGL lock.
     uiRepaintRequested = true;
   }
+}
+
+// mDNS is started once, at bring-up, rather than from the GOT_IP handler: that
+// handler runs on the WiFi event task and must stay cheap, and mdns_init()
+// allocates and spawns a task of its own. ESP-IDF's mDNS tracks interface
+// up/down internally, so starting it before the first join is correct - it
+// simply has nothing to announce until there is an address.
+static bool s_mdns_started = false;
+
+static void startMdns() {
+  if (s_mdns_started) return;
+  esp_err_t err = mdns_init();
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "mDNS init failed (%s) - the rig stays reachable by IP", esp_err_to_name(err));
+    return;
+  }
+  if (mdns_hostname_set(MDNS_HOSTNAME) != ESP_OK) {
+    ESP_LOGW(TAG, "mDNS hostname could not be set");
+    mdns_free();
+    return;
+  }
+  mdns_instance_name_set("AutoLee press");
+  // The web UI is the only thing worth discovering; the SSE stream lives on
+  // the same server and port.
+  if (mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0) != ESP_OK) {
+    ESP_LOGW(TAG, "mDNS service could not be advertised");
+  }
+  s_mdns_started = true;
+  ESP_LOGI(TAG, "mDNS started as %s.local", MDNS_HOSTNAME);
+}
+
+std::string mdnsHostname() {
+  // Deliberately empty unless joined to a real network as a station. On the
+  // setup AP the client is already talking to a fixed, known address, and
+  // mDNS over softAP is not dependable enough to print as the way in.
+  if (!s_mdns_started || !s_connected || s_ap_mode) return "";
+  return std::string(MDNS_HOSTNAME) + ".local";
 }
 
 bool hasEverJoined() {
@@ -429,6 +467,7 @@ void start() {
   ESP_ERROR_CHECK(esp_event_loop_create_default());
   s_sta_netif = esp_netif_create_default_wifi_sta();
   s_ap_netif = esp_netif_create_default_wifi_ap();
+  startMdns();
 
   wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&init_cfg));
