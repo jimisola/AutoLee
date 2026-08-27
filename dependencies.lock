@@ -35,18 +35,18 @@ dependencies:
       type: idf
     version: 6.0.2
   lvgl/lvgl:
-    component_hash: d7c1ac037ae6e85d94897f807d6e7ba0946a83e720074fc95a4f6241da9f9f53
+    component_hash: 184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae
     dependencies: []
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 8.4.0
+    version: 9.5.0
 direct_dependencies:
 - bblanchon/arduinojson
 - espressif/esp_lvgl_port
 - espressif/mdns
 - idf
 - lvgl/lvgl
-manifest_hash: a8c1725f3e7320d988ca325c714f9174a8ee4b2e56e5cd34eb53a94954729856
+manifest_hash: 651b405ddb5380b8556e12d763e00a62ec023e45608f8e197ec788f7ae9c75ab
 target: esp32c6
 version: 3.0.0

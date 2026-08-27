@@ -13,13 +13,15 @@ dependencies:
   # format has no Dependabot ecosystem, see .github/dependabot.yml), so a caret
   # meant the next manifest edit silently re-resolved to whatever was newest.
   # Bumping is deliberate: edit the version, idf.py reconfigure, commit the lock.
-  lvgl/lvgl: "8.4.0"
+  lvgl/lvgl: "9.5.0"
   espressif/esp_lvgl_port: "2.8.0~1"
   bblanchon/arduinojson: "7.4.3" # required by lib/psychic_http (PsychicHttp)
   espressif/mdns: "1.11.3" # <hostname>.local, so the rig is reachable without its DHCP address
-  # No AXS5106L touch component: the ones on the registry (e.g.
-  # mydazy/esp_lcd_touch_axs5106l) hard-require LVGL 9's lv_indev_create()
-  # API, incompatible with the LVGL 8.4 this project (and its still-to-port
-  # ui_touch.cpp) is pinned to. main/axs5106l_touch.cpp ports the I2C
-  # protocol from third_party/esp_lcd_touch_axs5106l/ (the vendored Arduino
-  # driver) directly instead - same chip, same registers, no framework dep.
+  # Still no AXS5106L touch component, but the reason has changed. It used to be
+  # that the registry ones (e.g. mydazy/esp_lcd_touch_axs5106l) require LVGL 9's
+  # lv_indev_create(), which 8.4 did not have. On 9.x that objection is gone.
+  # main/drivers/axs5106l_touch.cpp stays because it is pure I2C register work
+  # with no LVGL dependency at all - only the indev registration in
+  # display_touch.cpp was ever version-specific, and that is now LVGL 9. Nothing
+  # is gained by swapping a working driver for a dependency; the option is open
+  # if this one ever needs maintenance.
