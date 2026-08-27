@@ -50,16 +50,21 @@ autolee::GateInput gateInput() {
 // Severity follows the refusal, not the call site: a refusal the operator has to
 // do something about (calibrate, home) is a warning wherever it came from, while
 // a transient one - tapping stop on an idle press, starting a batch with no
-// target - is ordinary information. The state is always included; for a
+// target - is ordinary information. The log line always carries the state; for a
 // WrongState refusal it is the whole explanation, and for the others it is
-// context worth having in a support log.
+// context worth having in a support log. The panel banner leaves it out - the
+// press's state is already on screen, and the sentence has 172px to fit in.
 void logRefusal(const char *category, const char *what, autolee::Refusal r) {
-  const LogLevel level =
-      (r == autolee::Refusal::NotCalibrated || r == autolee::Refusal::PositionUnreferenced)
-          ? LogLevel::Warn
-          : LogLevel::Info;
+  const bool actionable =
+      (r == autolee::Refusal::NotCalibrated || r == autolee::Refusal::PositionUnreferenced);
+  const LogLevel level = actionable ? LogLevel::Warn : LogLevel::Info;
   webLogLevel(level, category, "%s refused: %s (state %u)", what, autolee::refusalMessage(r),
               (unsigned)g_motion.runState);
+  // ...and on the panel, which is the surface the person at the press is
+  // actually looking at. Reporting only to the web log made a working safety
+  // gate indistinguishable from a dead button (#52). Every gated command comes
+  // through here, so this covers Calibrate and Return Home too.
+  ui_show_refusal(what, autolee::refusalMessage(r), actionable);
 }
 
 }  // namespace

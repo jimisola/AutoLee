@@ -342,6 +342,83 @@ static void ui_create_main_warning(lv_obj_t *parent) {
   }
 }
 
+// ==========================================================================
+//  REFUSAL BANNER
+// ==========================================================================
+// Why the tap did nothing, on the surface the operator is actually looking at.
+// A refused command used to be reported only through webLogLevel(), i.e. to the
+// web log - so at the machine a working safety gate was indistinguishable from
+// a dead button (#52). RUN deliberately stays enabled and green in a state that
+// would refuse: the tap *is* received, and this is the answer.
+//
+// It lives on the top layer, not on a screen: Run is tapped on the main screen,
+// Calibrate and Reset on Settings/Config, Return Home on the jam screen, and
+// the reason has to appear wherever the tap happened. It is not clickable, so
+// LVGL's hit test falls through to the screen underneath (lv_indev_search_obj()
+// skips objects without LV_OBJ_FLAG_CLICKABLE) and the banner can never swallow
+// the next tap.
+static lv_obj_t *refusal_banner = nullptr;
+static lv_obj_t *refusal_banner_lbl = nullptr;
+static lv_timer_t *refusal_banner_timer = nullptr;
+
+static void refusal_banner_hide_cb(lv_timer_t *t) {
+  // Paused rather than deleted, and created once: a create/delete per refusal
+  // would leave refusal_banner_timer dangling for the next show.
+  lv_timer_pause(t);
+  if (refusal_banner) lv_obj_add_flag(refusal_banner, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void ui_create_refusal_banner() {
+  refusal_banner = lv_obj_create(lv_layer_top());
+  lv_obj_set_size(refusal_banner, SCR_W - 16, LV_SIZE_CONTENT);
+  // Over the main screen's counter and NOT CALIBRATED chip - the two things
+  // there that nobody has to act on. Every control stays visible: RUN in the
+  // nav bar, and Batch Run / Settings below, which matters because "run a
+  // calibration first" is pointing at the Calibrate button inside Settings.
+  // Top-aligned rather than centred so the box grows downward into the counter
+  // as the sentence wraps, instead of creeping up into the chip.
+  lv_obj_align(refusal_banner, LV_ALIGN_TOP_MID, 0, 88);
+  lv_obj_set_style_radius(refusal_banner, 8, LV_PART_MAIN);
+  lv_obj_set_style_border_width(refusal_banner, 0, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(refusal_banner, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(refusal_banner, 6, LV_PART_MAIN);
+  lv_obj_remove_flag(refusal_banner, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_remove_flag(refusal_banner, LV_OBJ_FLAG_CLICKABLE);
+
+  refusal_banner_lbl = lv_label_create(refusal_banner);
+  lv_label_set_long_mode(refusal_banner_lbl, LV_LABEL_LONG_WRAP);
+  lv_label_set_text(refusal_banner_lbl, "");
+  lv_obj_set_width(refusal_banner_lbl, SCR_W - 28);
+  lv_obj_set_style_text_font(refusal_banner_lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+  lv_obj_set_style_text_align(refusal_banner_lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+  lv_obj_add_flag(refusal_banner, LV_OBJ_FLAG_HIDDEN);
+  refusal_banner_timer = lv_timer_create(refusal_banner_hide_cb, UI_REFUSAL_BANNER_MS, nullptr);
+  lv_timer_pause(refusal_banner_timer);
+}
+
+void ui_show_refusal(const char *what, const char *why, bool warn) {
+  if (!ui_lock("ui_show_refusal")) return;
+  if (refusal_banner && refusal_banner_lbl) {
+    // Same amber as the NOT CALIBRATED banner for a refusal the operator has to
+    // clear, a cooler blue for a transient one, so the two read as the same
+    // family of "the press is telling you something".
+    lv_obj_set_style_bg_color(refusal_banner, lv_color_hex(warn ? 0x3A2B12 : 0x16283F),
+                              LV_PART_MAIN);
+    lv_obj_set_style_text_color(refusal_banner_lbl, lv_color_hex(warn ? 0xFFD37C : 0xAFCBFF),
+                                LV_PART_MAIN);
+    lv_label_set_text_fmt(refusal_banner_lbl, "%s refused:\n%s", what, why);
+    lv_obj_remove_flag(refusal_banner, LV_OBJ_FLAG_HIDDEN);
+  }
+  // Restart the window on every refusal: repeated taps keep the reason up
+  // rather than letting the first one's timer close it mid-read.
+  if (refusal_banner_timer) {
+    lv_timer_reset(refusal_banner_timer);
+    lv_timer_resume(refusal_banner_timer);
+  }
+  lvgl_port_unlock();
+}
+
 void ui_update_speed_val() {
   const MotionState ms = motion_state::snapshot();
   if (!ui_lock("ui_update_speed_val")) return;
@@ -563,8 +640,12 @@ void ui_update_run_button() {
     lv_obj_t *l = lv_obj_get_child(btn_run_global, 0);
     uint32_t bg, fg;
     const char *txt;
-    // Disabled only for STOPPING: it is the one state where a tap has no legal
-    // effect at all, so the button says so instead of swallowing it.
+    // Disabled only for STOPPING, which is transient, self-clearing and already
+    // says so on the button - there is nothing for the operator to do about it.
+    // Every other refusable state (uncalibrated, position unreferenced) keeps
+    // RUN enabled on purpose: the tap is accepted, refused, and answered by the
+    // refusal banner. A greyed button with no reason would be barely better
+    // than a green one that does nothing (#52).
     bool tappable = true;
     switch (state) {
       case RUNNING:
@@ -1490,6 +1571,10 @@ void buildUI() {
   build_jam_screen();
   build_stall_screen();
   build_batch_screen();
+
+  // Not a screen: it is on the top layer so a refusal shows wherever the tap
+  // was, and it outlives every go().
+  ui_create_refusal_banner();
 
   lv_timer_create(counter_timer_cb, 100, nullptr);
 

@@ -39,3 +39,31 @@ a long-press of the main-screen counter label: no visible affordance, no
 confirmation, undiscoverable — and a duplicate of the visible Settings →
 Reset Count button. It was removed rather than confirmed. If an action is
 cheap enough to skip confirmation, it still has to look like a control.
+
+## Refused actions
+
+A command the press cannot carry out — no calibration, an unreferenced axis, no
+batch target, wrong state — must say so on the surface the tap came from. Both
+UIs answer with the same sentence, `autolee::refusalMessage()` in
+[`lib/autolee_logic/command_gate.h`](../lib/autolee_logic/command_gate.h).
+
+| Surface | How the reason arrives |
+|---|---|
+| Web | `409` + reason slug on the request, plus the log line |
+| Panel | Refusal banner: the reason over the active screen for `UI_REFUSAL_BANNER_MS` |
+
+### A refusable control stays enabled
+
+Except where the state is transient and self-describing, a control the gate
+would refuse is left tappable and normally coloured. The tap *is* received, and
+the banner answers it. Greying it out instead trades a green button that does
+nothing for a grey button that does nothing — neither says why, and the grey one
+also hides that the panel is alive.
+
+RUN on an uncalibrated press was the case that proved it (#52): the gate was
+working exactly as designed and the operator's question was still "is this
+button broken?".
+
+The one exception is `STOPPING`, where RUN *is* disabled: the state clears
+itself within a stroke and the button already reads "STOPPING", so there is
+nothing for the operator to act on.

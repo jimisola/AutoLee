@@ -285,7 +285,7 @@ grouping is navigational, not a module boundary the compiler enforces.
 | Digest auth on all writes | Nobody on the network can start the press or flash firmware | ✅ on hardware |
 | Brownout detection | Clean reset when the rail sags | ⚙️ needs the press's PSU under load |
 | Jam detection / controlled stop | Brass jams only — **never** a guard for hands | ⚙️ needs the motor rig |
-| Refusal reporting on control routes | A command the machine cannot carry out is answered `400`/`409` instead of a silent `200 ok` | ✅ on hardware (bare board) |
+| Refusal reporting on control routes | A command the machine cannot carry out is answered `400`/`409` instead of a silent `200 ok`, and a refusal reaching `pump_task` names itself on the touch panel instead of leaving a dead-looking button | ✅ on hardware (bare board) |
 | Operator abort of a blocking search | A calibration or creep-home can be cancelled; the unwind leaves the axis unreferenced rather than half-calibrated | ✅ on hardware (bare board) |
 | Settings-blob version migration | An upgrade carries the calibration forward, or fails safe to defaults — never a partially-trusted blob | ✅ on hardware (v2 → v3) |
 

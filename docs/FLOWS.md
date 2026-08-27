@@ -53,7 +53,7 @@ sequenceDiagram
             Pump->>Gate: same rule, re-evaluated
             alt now refusable
                 Gate-->>Pump: refusal
-                Pump->>Pump: webLog(refusal) — no motion
+                Pump->>Pump: webLog + panel banner (refusal) — no motion
             else still allowed
                 Gate-->>Pump: None
                 Pump->>HW: startRunBetweenEndpoints()
@@ -80,6 +80,11 @@ rule lives in one host-tested place rather than being written out twice.
 **What a `200` means here:** *accepted into the queue, and not already
 refusable.* It is not "done". Watch `GET /api/v1/state` — or the SSE stream — for
 the effect, and the log for a late refusal.
+
+A refusal on the `pump_task` side has no request left to answer, so it reports to
+both logs *and* to the touch panel's refusal banner — that is also the only path
+a panel-originated command has, since nothing on the panel goes through HTTP.
+See [`UX.md`](UX.md#refused-actions).
 
 | Code | Meaning | Decided by |
 |---|---|---|
