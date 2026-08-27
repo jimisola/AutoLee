@@ -474,8 +474,19 @@ void ui_update_wifi_label() {
       // Blank line before the URL: SSID and key are what you type into the
       // phone's WiFi dialog, the URL is what you do afterwards in a browser.
       // Two steps, so they read as two groups rather than one list of three.
-      lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s\n\nhttp://%s", DEFAULT_AP_SSID,
-                            wifi_mgr::apPassword().c_str(), wifi_mgr::ipAddress().c_str());
+      // The name first, the address under it. On this screen the name is the
+      // reliable one: the captive portal's DNS redirect answers every query,
+      // so it resolves for anything that joined the AP. The address stays
+      // because it is what still works once the portal is gone.
+      const std::string host = wifi_mgr::mdnsHostname();
+      if (host.empty()) {
+        lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s\n\nhttp://%s", DEFAULT_AP_SSID,
+                              wifi_mgr::apPassword().c_str(), wifi_mgr::ipAddress().c_str());
+      } else {
+        lv_label_set_text_fmt(lbl_wifi_key, "SSID: %s\nKey: %s\n\nhttp://%s\nor http://%s",
+                              DEFAULT_AP_SSID, wifi_mgr::apPassword().c_str(), host.c_str(),
+                              wifi_mgr::ipAddress().c_str());
+      }
       lv_obj_remove_flag(lbl_wifi_key, LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_add_flag(wifi_qr, LV_OBJ_FLAG_HIDDEN);
@@ -491,8 +502,13 @@ void ui_update_wifi_label() {
     } else {
       if (card) lv_obj_remove_flag(card, LV_OBJ_FLAG_HIDDEN);
       if (wifi_mgr::isConnected()) {
-        lv_label_set_text_fmt(lbl_wifi_status, "%s\nIP: %s", wifi_mgr::ssid().c_str(),
-                              wifi_mgr::ipAddress().c_str());
+        // Three labelled lines. The SSID used to be unlabelled, which was
+        // fine when it was the only bare string; with an address and a name
+        // under it, an unlabelled first line reads as part of the same list.
+        const std::string host = wifi_mgr::mdnsHostname();
+        lv_label_set_text_fmt(lbl_wifi_status, "SSID: %s\nIP: %s\nmDNS: %s",
+                              wifi_mgr::ssid().c_str(), wifi_mgr::ipAddress().c_str(),
+                              host.empty() ? "-" : host.c_str());
       } else {
         lv_label_set_text(lbl_wifi_status, "Disconnected");
       }
