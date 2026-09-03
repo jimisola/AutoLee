@@ -80,6 +80,10 @@
       // a decision, not as a PR that looks like the others.
       allowedVersions: "<7",
       description: "ESP-IDF minor/patch tracked; a new major is deliberate, see main/idf_component.yml.",
+      // The version is pinned separately in build.yml and release.yml -
+      // without a group a bump opens one PR per file, and they can land days
+      // apart with the two workflows on different toolchains in between.
+      groupName: "ESP-IDF",
     },
     {
       matchDatasources: ["custom.esp-component-registry"],
