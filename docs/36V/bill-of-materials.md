@@ -21,7 +21,7 @@ you build or operate it. Building the 24V variant instead? See
 
 | # | Component | Specs | Link |
 |---|-----------|-------|------|
-| 1 | WaveShare 1.47" ESP32-C6 | Touchscreen controller & UI | [Amazon.se](https://www.amazon.se/dp/B0F8B845Y6?tag=kldesign-21) · [Amazon.com](https://www.amazon.com/dp/B0FC5SNKH4?tag=kldesign00-20) |
+| 1 | WaveShare 1.47" ESP32-C6 | Touchscreen controller & UI | [Amazon.se](https://www.amazon.se/dp/B0F8B845Y6?tag=kldesign-21) · [Amazon.com](https://www.amazon.com/dp/B0FC5LWVXG?tag=kldesign00-20) |
 | 2 | TMC5160T Plus | Silent stepper driver with StallGuard2 | [Amazon.se](https://www.amazon.se/dp/B0D5HQWW1C?tag=kldesign-21) · [Amazon.com](https://www.amazon.com/dp/B0CHFK7VBL?tag=kldesign00-20) |
 | 3 | Buck Converter | Switchregulator step-down 5–72 V → 5 V, 1.1 A (Electrokit #41036155) — wide input range also covers the 24V build if ever worth unifying | Electrokit #41036155 ² · [Amazon.se](https://www.amazon.se/dp/B0DK6M63YL?tag=kldesign-21) (unverified ³ — adjustable 3.2–46 V→1.25–35 V, 3 A, 10-pack, set to 5 V out) |
 
