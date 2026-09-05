@@ -11,13 +11,35 @@
   // not to run. Stating it leaves nothing to infer.
   forkProcessing: "enabled",
 
-  // Only the surfaces Dependabot cannot see. github-actions and pip belong to
-  // .github/dependabot.yml; enabling them here would open every PR twice.
-  enabledManagers: ["custom.regex", "pre-commit"],
+  // Every dependency surface in the repo. github-actions and pip_requirements
+  // (.github/requirements-ci.txt) moved here from .github/dependabot.yml, which
+  // this change deletes: one mechanism, one automerge policy.
+  //
+  // Still invisible to any bot, because none of these is a dependency
+  // declaration a datasource can read - bump them by hand:
+  //   * the inline `npx @stoplight/spectral-cli@6.16.3` in contracts.yml
+  //   * actionlint/zizmor in lint.yml's `workflows` job
+  //   * the git-cliff version + checksum in .github/actions/setup-git-cliff
+  enabledManagers: ["github-actions", "pip_requirements", "custom.regex", "pre-commit"],
 
   minimumReleaseAge: "3 days",
   semanticCommits: "enabled",
-  dependencyDashboard: true,
+  semanticCommitType: "chore",
+  semanticCommitScope: "{{datasource}}",
+  dependencyDashboard: false,
+  labels: ["dependencies"],
+
+  // Automerge rides GitHub's own auto-merge (platformAutomerge), so the branch
+  // protection on main is what actually decides: the PR lands only once every
+  // required check is green and renovate-approve has approved it. Renovate
+  // never merges past a red check.
+  //
+  // minimumReleaseAge is deliberately NOT a required check. `renovate/
+  // stability-days` never appears on a human PR, so requiring it would block
+  // every one of them forever; the hold is enforced before the PR is opened,
+  // by the default internalChecksFilter: "strict".
+  automergeType: "pr",
+  platformAutomerge: true,
 
   // The registry's JSON API. yanked_at must be filtered: yanked releases are
   // still listed and can sort above live ones. created_at -> releaseTimestamp
@@ -72,6 +94,25 @@
   ],
 
   packageRules: [
+    {
+      matchUpdateTypes: ["minor", "patch", "pin"],
+      automerge: true,
+      description: "Routine bumps land on green CI without a human in the loop.",
+    },
+    {
+      // A major is a port, not a bump - see the ESP-IDF and LVGL caps below for
+      // the two that are capped outright. The longer hold is so a major that
+      // gets yanked in its first week never reaches a PR here at all.
+      matchUpdateTypes: ["major"],
+      automerge: false,
+      minimumReleaseAge: "7 days",
+    },
+    {
+      // A digest bump moves a pinned SHA with no version behind it, so there is
+      // nothing to read to judge what changed.
+      matchUpdateTypes: ["digest"],
+      automerge: false,
+    },
     {
       matchDatasources: ["github-releases"],
       matchPackageNames: ["espressif/esp-idf"],
