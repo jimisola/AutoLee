@@ -14,7 +14,7 @@ dependencies:
   # meant the next manifest edit silently re-resolved to whatever was newest.
   # Bumping is deliberate: edit the version, idf.py reconfigure, commit the lock.
   lvgl/lvgl: "9.5.0"
-  espressif/esp_lvgl_port: "2.8.0~1"
+  espressif/esp_lvgl_port: "2.9.0"
   bblanchon/arduinojson: "7.4.3" # required by lib/psychic_http (PsychicHttp)
   espressif/mdns: "1.12.0" # <hostname>.local, so the rig is reachable without its DHCP address
   # Still no AXS5106L touch component, but the reason has changed. It used to be
