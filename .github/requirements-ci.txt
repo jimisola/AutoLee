@@ -10,6 +10,6 @@
 # changes can reformat the tree.
 gcovr==8.6
 jsonschema==4.26.0
-pre-commit==4.6.1
+pre-commit==4.6.2
 pytest==9.1.1
 yamllint==1.38.0
