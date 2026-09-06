@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: pre-commit
         run: |
           pip install -r .github/requirements-ci.txt
@@ -120,7 +120,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       # Same install the release uses — these tests assert its bump mapping.
       # Without it the suite skips itself rather than failing, so it has to be
