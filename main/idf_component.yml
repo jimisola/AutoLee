@@ -16,7 +16,7 @@ dependencies:
   lvgl/lvgl: "9.5.0"
   espressif/esp_lvgl_port: "2.8.0~1"
   bblanchon/arduinojson: "7.4.3" # required by lib/psychic_http (PsychicHttp)
-  espressif/mdns: "1.11.3" # <hostname>.local, so the rig is reachable without its DHCP address
+  espressif/mdns: "1.12.0" # <hostname>.local, so the rig is reachable without its DHCP address
   # Still no AXS5106L touch component, but the reason has changed. It used to be
   # that the registry ones (e.g. mydazy/esp_lcd_touch_axs5106l) require LVGL 9's
   # lv_indev_create(), which 8.4 did not have. On 9.x that objection is gone.
