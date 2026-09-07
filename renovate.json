@@ -45,6 +45,10 @@
   "automergeType": "pr",
   "platformAutomerge": true,
 
+  // Stated, not inferred: detectVulnerabilityAlerts skips entirely when the key
+  // is absent, and only an explicit false disables it. Same reason as forkProcessing.
+  "vulnerabilityAlerts": { "enabled": true },
+
   // The registry's JSON API. yanked_at must be filtered: yanked releases are
   // still listed and can sort above live ones. created_at -> releaseTimestamp
   // is what makes minimumReleaseAge work at all; without it the hold above is
