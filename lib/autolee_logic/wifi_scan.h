@@ -21,6 +21,7 @@ struct ApRecord {
   uint8_t channel = 0;
   int8_t rssi = 0;
   bool secure = false;
+  std::string security;  // "WPA2", "open", ... - named by the driver mirror, "" if unknown
 
   bool hidden() const { return ssid.empty(); }
 };
@@ -48,6 +49,16 @@ inline Survey strongest_per_ssid(const Survey &survey) {
     }
   }
   return out;
+}
+
+// 0-4 bars. The usual consumer thresholds, so the count matches what a phone
+// standing next to the rig would show.
+inline int signal_bars(int rssi) {
+  if (rssi >= -55) return 4;
+  if (rssi >= -67) return 3;
+  if (rssi >= -75) return 2;
+  if (rssi >= -85) return 1;
+  return 0;
 }
 
 // Lowercase colon-separated BSSID, for diagnostic output.

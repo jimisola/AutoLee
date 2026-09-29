@@ -15,7 +15,7 @@
 #include "dns_server.h"
 
 #include "config.h"     // DEFAULT_AP_SSID, WIFI_CONNECT_TIMEOUT_MS
-#include "wifi_scan.h"  // autolee::Survey, strongest_per_ssid()
+#include "wifi_scan.h"  // autolee::Survey, strongest_per_ssid(), bssid_to_string()
 #include "globals.h"    // webLog(), uiRepaintRequested
 #include "ui_touch.h"
 
@@ -337,6 +337,39 @@ static bool doScan(std::vector<wifi_ap_record_t> &records) {
   return true;
 }
 
+static const char *authName(wifi_auth_mode_t auth) {
+  switch (auth) {
+    case WIFI_AUTH_OPEN:
+      return "open";
+    case WIFI_AUTH_WEP:
+      return "WEP";
+    case WIFI_AUTH_WPA_PSK:
+      return "WPA";
+    case WIFI_AUTH_WPA2_PSK:
+      return "WPA2";
+    case WIFI_AUTH_WPA_WPA2_PSK:
+      return "WPA/WPA2";
+    case WIFI_AUTH_WPA3_PSK:
+      return "WPA3";
+    case WIFI_AUTH_WPA2_WPA3_PSK:
+      return "WPA2/WPA3";
+    case WIFI_AUTH_OWE:
+      return "OWE";
+    case WIFI_AUTH_WAPI_PSK:
+      return "WAPI";
+    case WIFI_AUTH_DPP:
+      return "DPP";
+    case WIFI_AUTH_WPA_ENTERPRISE:
+    case WIFI_AUTH_ENTERPRISE:
+    case WIFI_AUTH_WPA3_ENTERPRISE:
+    case WIFI_AUTH_WPA2_WPA3_ENTERPRISE:
+    case WIFI_AUTH_WPA3_ENT_192:
+      return "enterprise";
+    default:
+      return "";
+  }
+}
+
 // The survey: every radio the driver saw, one entry per BSSID, hidden SSIDs
 // kept. Both views are derived from this, so a row missing from a view is a
 // property of that view rather than of the scan.
@@ -355,6 +388,7 @@ static bool surveyNetworks(autolee::Survey &out) {
     ap.channel = r.primary;
     ap.rssi = r.rssi;
     ap.secure = (r.authmode != WIFI_AUTH_OPEN);
+    ap.security = authName(r.authmode);
     out.push_back(std::move(ap));
   }
   return true;
@@ -404,6 +438,41 @@ std::string scanNetworksJson() {
   }
   json += "]";
   return json;
+}
+
+bool survey(autolee::Survey &out) {
+  if (s_switching) return false;
+  return surveyNetworks(out);
+}
+
+bool staLink(autolee::LinkInfo &out) {
+  wifi_ap_record_t ap = {};
+  if (s_sta_netif == nullptr || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return false;
+
+  out = autolee::LinkInfo{};
+  out.ssid.assign(reinterpret_cast<const char *>(ap.ssid),
+                  strnlen(reinterpret_cast<const char *>(ap.ssid), sizeof(ap.ssid)));
+  memcpy(out.bssid, ap.bssid, sizeof(out.bssid));
+  out.channel = ap.primary;
+  out.rssi = ap.rssi;
+  out.security = authName(ap.authmode);
+
+  char buf[16];
+  esp_netif_ip_info_t ip = {};
+  if (esp_netif_get_ip_info(s_sta_netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+    out.ip = esp_ip4addr_ntoa(&ip.ip, buf, sizeof(buf));
+    out.netmask = esp_ip4addr_ntoa(&ip.netmask, buf, sizeof(buf));
+    out.gateway = esp_ip4addr_ntoa(&ip.gw, buf, sizeof(buf));
+  }
+  esp_netif_dns_info_t dns = {};
+  if (esp_netif_get_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK &&
+      dns.ip.type == ESP_IPADDR_TYPE_V4 && dns.ip.u_addr.ip4.addr != 0) {
+    out.dns = esp_ip4addr_ntoa(&dns.ip.u_addr.ip4, buf, sizeof(buf));
+  }
+  uint8_t mac[6] = {};
+  if (esp_netif_get_mac(s_sta_netif, mac) == ESP_OK) out.mac = autolee::bssid_to_string(mac);
+  out.mdns = mdnsHostname();
+  return true;
 }
 
 static void scan_networks() {
