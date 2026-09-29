@@ -25,6 +25,8 @@
   //   * actionlint/zizmor in lint.yml's `workflows` job
   //   * the git-cliff version + checksum in .github/actions/setup-git-cliff
   "enabledManagers": ["github-actions", "pip_requirements", "custom.regex", "pre-commit"],
+  // The pre-commit manager is disabled by default; enabledManagers alone does not turn it on.
+  "pre-commit": { "enabled": true },
 
   "minimumReleaseAge": "3 days",
   "semanticCommits": "enabled",

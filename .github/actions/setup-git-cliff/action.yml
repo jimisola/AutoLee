@@ -5,11 +5,11 @@ inputs:
   version:
     description: "git-cliff version, without the leading v."
     required: false
-    default: "2.13.1"
+    default: "2.14.2"
   sha256:
     description: "SHA-256 of the x86_64-unknown-linux-gnu tarball. Change with `version`."
     required: false
-    default: "9a1263f24e59a2f508c7b3d3283c9dea94a8bf697f96dbc18cc783cac6284546"
+    default: "24f397c733add5390fdceee3a2088588ab0d5f944ce00d34cb7029b888cf2db4"
 
 runs:
   using: composite
