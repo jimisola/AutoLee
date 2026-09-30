@@ -16,6 +16,7 @@
 #include "stepper.h"
 #include "wifi_mgr.h"
 #include "web_server.h"
+#include "console.h"
 #include "ui_touch.h"
 #include "globals.h"
 #include "settings_store.h"
@@ -293,6 +294,8 @@ extern "C" void app_main(void) {
   }
 
   wifi_mgr::start();
+  // After start(), so the commands find the netifs and driver up.
+  console::start();
   setupWebServer();
 
   // A fresh/unconfigured device boots into the WPA2 setup AP - jump straight to

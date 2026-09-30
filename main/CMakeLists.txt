@@ -10,13 +10,15 @@ idf_component_register(
          "motion/motion.cpp" "motion/motion_cmd.cpp" "motion/motion_state.cpp"
          "net/wifi_mgr.cpp" "net/web_server.cpp"
          "ui/ui_touch.cpp"
+         "console/console.cpp"
          "../lib/tmc_api/TMC5160/TMC5160.c" "../lib/tmc_api/helpers/CRC.c" "../lib/tmc_api/helpers/Functions.c"
-    INCLUDE_DIRS "." "drivers" "motion" "net" "ui"
+    INCLUDE_DIRS "." "drivers" "motion" "net" "ui" "console"
                  "../lib/tmc_api/TMC5160" "../lib/tmc_api/helpers"
     REQUIRES autolee_logic nvs_flash esp_lcd driver esp_timer esp_driver_rmt esp_driver_pcnt
              esp_driver_gpio esp_driver_spi esp_driver_i2c esp_system esp_wifi esp_netif
              esp_event nvs_flash dns_server psychic_http esp_https_server esp_http_server
              app_update esp_partition espcoredump esp_hw_support spi_flash heap
+             esp_driver_usb_serial_jtag
 )
 
 # ---------------------------------------------------------------------------

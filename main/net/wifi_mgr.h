@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <string>
 
+#include "wifi_report.h"  // autolee::LinkInfo
+#include "wifi_scan.h"    // autolee::Survey
+
 // WiFi connection management + captive portal, ported from src/wifi_ota.cpp.
 // ArduinoOTA is dropped (Arduino-only); OTA is via the web UI upload endpoint
 // (see docs/PLAN.md Phase 5) using esp_ota directly.
@@ -69,5 +72,14 @@ void rescanForPortal();
 // Works in STA and APSTA mode. Returns "[]" on scan failure or while a live
 // transition is in flight (scanning would fight the connect).
 std::string scanNetworksJson();
+
+// The full survey, one entry per BSSID with hidden APs kept - the diagnostic
+// view that both pickers above collapse. Same cost and same in-flight refusal
+// as scanNetworksJson(); false on either.
+bool survey(autolee::Survey &out);
+
+// The station link as the driver and netif see it. False when not joined -
+// including while serving the setup AP.
+bool staLink(autolee::LinkInfo &out);
 
 }  // namespace wifi_mgr

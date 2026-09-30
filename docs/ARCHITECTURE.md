@@ -145,6 +145,15 @@ guard (`s_switching`) serializes them — callers get `false` (HTTP maps it to
 409) instead of a second concurrent transition. They touch no motion state and
 no SPI, so they never interact with `pump_task`'s ownership rules.
 
+### Serial console task
+
+`console` (priority 1, `main/console/`) reads lines from the USB serial/JTAG
+port and answers read-only WiFi diagnostics on the same port. It owns the
+USB serial/JTAG driver, and the log's secondary console is switched onto that
+driver so log lines and replies share one TX ring. Parsing and formatting are
+in `lib/autolee_logic/` (`console_command.h`, `wifi_report.h`). Like the web
+scan, `wifi-scan` refuses while a WiFi transition is in flight.
+
 ---
 
 ## 3. Shared SPI bus
