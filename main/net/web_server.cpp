@@ -1501,6 +1501,7 @@ void setupWebServer() {
                 motion_state::Guard g;
                 g_motion.counter = 0;
               }
+              webLog("Counter", "Reset from the web UI");
               return res->send(200, "text/plain", "ok");
             });
 

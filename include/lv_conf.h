@@ -456,7 +456,7 @@
  *-----------*/
 
 /** Enable log module */
-#define LV_USE_LOG 0
+#define LV_USE_LOG 1  /* routed to ESP_LOG by display_touch.cpp */
 #if LV_USE_LOG
     /** Set value to one of the following levels of logging detail:
      *  - LV_LOG_LEVEL_TRACE    Log detailed information.
@@ -465,7 +465,9 @@
      *  - LV_LOG_LEVEL_ERROR    Log only critical issues, when system may fail.
      *  - LV_LOG_LEVEL_USER     Log only custom log messages added by the user.
      *  - LV_LOG_LEVEL_NONE     Do not log anything. */
-    #define LV_LOG_LEVEL LV_LOG_LEVEL_WARN
+    /* ERROR, not WARN: WARN plus file/line cost 34 KB of flash, ERROR alone 12 KB.
+     * An allocation assert logs at ERROR, which is the one that matters. */
+    #define LV_LOG_LEVEL LV_LOG_LEVEL_ERROR
 
     /** - 1: Print log with 'printf';
      *  - 0: User needs to register a callback with `lv_log_register_print_cb()`. */
@@ -478,11 +480,11 @@
 
     /** - 1: Enable printing timestamp;
      *  - 0: Disable printing timestamp. */
-    #define LV_LOG_USE_TIMESTAMP 1
+    #define LV_LOG_USE_TIMESTAMP 0  /* ESP_LOG stamps it */
 
     /** - 1: Print file and line number of the log;
      *  - 0: Do not print file and line number of the log. */
-    #define LV_LOG_USE_FILE_LINE 1
+    #define LV_LOG_USE_FILE_LINE 0
 
     /* Enable/disable LV_LOG_TRACE in modules that produces a huge number of logs. */
     #define LV_LOG_TRACE_MEM        1   /**< Enable/disable trace logs in memory operations. */
@@ -508,7 +510,12 @@
 #define LV_USE_ASSERT_MEM_INTEGRITY 0   /**< Check the integrity of `lv_mem` after critical operations. (Slow) */
 #define LV_USE_ASSERT_OBJ           0   /**< Check the object's type and existence (e.g. not deleted). (Slow) */
 
-/* On assert LVGL halts by default; override via LV_ASSERT_CUSTOM_INCLUDE. */
+/* abort() rather than LVGL's default while(1): a failed assert (e.g. the pool
+ * running out) then panics at once with a core dump, after the LV_LOG line
+ * saying what failed, instead of spinning until the task watchdog fires. */
+#define LV_ASSERT_USE_CUSTOM_INCLUDE 1
+#define LV_ASSERT_CUSTOM_INCLUDE <stdlib.h>
+#define LV_ASSERT_HANDLER abort();
 
 /*-------------
  * Debug

@@ -291,7 +291,21 @@ extern "C" void app_main(void) {
   // has decided AP vs STA, so that go() happens after start() below.
   if (disp) {
     buildUI();
-    ESP_LOGI(TAG, "LVGL UI built");
+    // The pool is fixed at compile time and running out halts the UI, so say
+    // how close the built UI comes to it - a warning at boot, not a black
+    // screen after the next feature adds a few widgets.
+    lv_mem_monitor_t mem = {};
+    if (lvgl_port_lock(1000)) {
+      lv_mem_monitor(&mem);
+      lvgl_port_unlock();
+    }
+    ESP_LOGI(TAG, "LVGL UI built - pool %u%% used, %u B free, largest block %u B",
+             (unsigned)mem.used_pct, (unsigned)mem.free_size, (unsigned)mem.free_biggest_size);
+    if (mem.total_size > 0 && mem.used_pct >= LVGL_POOL_WARN_PCT) {
+      g_boot_report.add("ui-memory-low",
+                        "The touch UI uses most of LVGL's fixed memory pool; running out halts "
+                        "the display. Raise LV_MEM_SIZE in include/lv_conf.h.");
+    }
   } else {
     ESP_LOGE(TAG, "display_touch_init() failed");
     g_boot_report.add("display-init-failed",
