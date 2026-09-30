@@ -541,7 +541,7 @@ paths:
                           type: string
                           description: >
                             Stable identifier, e.g. `nvs-erased`, `not-calibrated`,
-                            `sg-trips-not-set`, `display-init-failed`,
+                            `sg-trips-not-set`, `display-init-failed`, `ui-memory-low`,
                             `ota-rolled-back`. New codes may be added;
                             treat an unknown one as displayable rather than an error.
                         detail:

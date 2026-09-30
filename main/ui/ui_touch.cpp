@@ -1111,15 +1111,28 @@ static void build_settings_screen() {
         go(config_scr);
       },
       LV_EVENT_CLICKED, nullptr);
+  // Class 3 in docs/UX.md: no confirmation, but the tap must visibly land -
+  // the counter it zeroes is on another screen.
   lv_obj_add_event_cb(
       b_reset,
       [](lv_event_t *e) {
-        LV_UNUSED(e);
+        lv_obj_t *btn = static_cast<lv_obj_t *>(lv_event_get_target(e));
         {
           motion_state::Guard g;
           g_motion.counter = 0;
         }
+        webLog("Counter", "Reset from the panel");
         if (counter_label) lv_label_set_text(counter_label, "0");
+        lv_label_set_text(lv_obj_get_child(btn, 0), "Reset!");
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x1A7F37), LV_PART_MAIN);
+        lv_timer_t *t = lv_timer_create(
+            [](lv_timer_t *timer) {
+              lv_obj_t *b = static_cast<lv_obj_t *>(lv_timer_get_user_data(timer));
+              lv_label_set_text(lv_obj_get_child(b, 0), "Reset Count");
+              lv_obj_set_style_bg_color(b, lv_color_hex(0xB42318), LV_PART_MAIN);
+            },
+            UI_RESET_FLASH_MS, btn);
+        if (t) lv_timer_set_repeat_count(t, 1);
       },
       LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(

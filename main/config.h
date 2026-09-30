@@ -117,22 +117,6 @@ static constexpr uint32_t EARLY_MIN_TIME_MS = 50;
 static constexpr int32_t EARLY_MIN_MOVE_STEPS = 200;
 static constexpr uint16_t EARLY_TRIP = CAL_ABS_MIN;
 
-// Return-home: USE SAME SPEED as calibration to avoid decel overshoot
-static constexpr uint32_t HOME_SPEED_HZ = CAL_SPEED_HZ;
-static constexpr uint32_t HOME_ACCEL = CAL_ACCEL;
-static constexpr uint16_t HOME_SG_TRIP = 15;
-static constexpr uint8_t HOME_CONFIRM = 3;
-static constexpr uint32_t HOME_MIN_MS = 200;
-static constexpr int32_t HOME_MIN_MOVE = 600;
-static constexpr int32_t HOME_RELEASE_STEPS = 1200;
-static constexpr uint8_t HOME_MAX_RETRIES = 2;
-static constexpr uint32_t HOME_TIMEOUT_MS = 15000;
-// Position tolerances (steps) for "arrived at the UP endpoint":
-//   - HOME_ARRIVAL_TOL: break the return-home polling loop
-//   - HOME_FINAL_TOL:   accept the final settled position as home
-static constexpr long HOME_ARRIVAL_TOL = 20;
-static constexpr long HOME_FINAL_TOL = 50;
-
 // ==========================================================================
 //  RUNTIME STALL DETECTION
 // ==========================================================================
@@ -178,12 +162,16 @@ static constexpr uint32_t CREEP_HOME_ACCEL = CAL_ACCEL;
 //  DISPLAY / LAYOUT
 // ==========================================================================
 static constexpr int SCR_W = 172, SCR_H = 320, NAV_H = 60, CONTENT_H = SCR_H - NAV_H;
+// Boot-report threshold for LVGL pool use right after the UI is built.
+static constexpr uint8_t LVGL_POOL_WARN_PCT = 85;
 
 // How long the destructive "Reset Cal" button on the Config screen stays armed
 // after the first tap. A second tap inside this window commits; anything else
 // (or the timeout) disarms it - the touch UI has no modal dialog, and a
 // stray/curious tap must never wipe a calibration on its own.
 static constexpr uint32_t UI_CONFIRM_ARM_MS = 5000;
+// How long Reset Count reads "Reset!" after a tap.
+static constexpr uint32_t UI_RESET_FLASH_MS = 1200;
 
 // How long the panel's refusal banner stays up after a refused command. Long
 // enough to read a wrapped sentence at arm's length, short enough that a stale

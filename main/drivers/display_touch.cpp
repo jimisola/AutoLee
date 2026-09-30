@@ -194,6 +194,16 @@ bool display_touch_panel_reinit(void) {
   return true;
 }
 
+// LVGL's own warnings (an allocation that failed, a missing glyph) into the
+// ESP log, where they land in the serial console next to everything else.
+static void lvgl_log_cb(lv_log_level_t level, const char *buf) {
+  if (level >= LV_LOG_LEVEL_ERROR) {
+    ESP_LOGE("lvgl", "%s", buf);
+  } else {
+    ESP_LOGW("lvgl", "%s", buf);
+  }
+}
+
 lv_display_t *display_touch_init(void) {
   gpio_config_t bl_cfg = {};
   bl_cfg.pin_bit_mask = 1ULL << GFX_BL;
@@ -211,6 +221,7 @@ lv_display_t *display_touch_init(void) {
 
   const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
   ESP_ERROR_CHECK(lvgl_port_init(&lvgl_cfg));
+  lv_log_register_print_cb(lvgl_log_cb);
 
   lvgl_port_display_cfg_t disp_cfg = {};
   disp_cfg.io_handle = io_handle;

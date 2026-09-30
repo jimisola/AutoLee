@@ -222,19 +222,30 @@ static bool fas_wait_for_stop(bool abortable = false) {
 // autolee::computeEffectiveEndpoints() is pure math, safe inside the section.
 // Callers must NOT already hold the guard.
 void recomputeEffectiveEndpoints() {
-  motion_state::Guard g;
-  autolee::Endpoints e = autolee::computeEffectiveEndpoints(
-      g_motion.endpointsCalibrated, g_motion.rawUp, g_motion.rawDown, g_motion.upOffsetSteps,
-      g_motion.downOffsetSteps, OFFSET_MIN, OFFSET_MAX, ENDPOINT_GUARD);
-  if (!g_motion.endpointsCalibrated) {
-    g_motion.endpointUp = 0;
-    g_motion.endpointDown = 0;
-    return;
+  int32_t downRequested = 0, downApplied = 0;
+  {
+    motion_state::Guard g;
+    autolee::Endpoints e = autolee::computeEffectiveEndpoints(
+        g_motion.endpointsCalibrated, g_motion.rawUp, g_motion.rawDown, g_motion.upOffsetSteps,
+        g_motion.downOffsetSteps, OFFSET_MIN, OFFSET_MAX, ENDPOINT_GUARD);
+    if (!g_motion.endpointsCalibrated) {
+      g_motion.endpointUp = 0;
+      g_motion.endpointDown = 0;
+      return;
+    }
+    downRequested = autolee::clamp_i32(g_motion.downOffsetSteps, OFFSET_MIN, OFFSET_MAX);
+    downApplied = e.downOffset;
+    g_motion.upOffsetSteps = e.upOffset;
+    g_motion.downOffsetSteps = e.downOffset;
+    g_motion.endpointUp = e.endpointUp;
+    g_motion.endpointDown = e.endpointDown;
   }
-  g_motion.upOffsetSteps = e.upOffset;
-  g_motion.downOffsetSteps = e.downOffset;
-  g_motion.endpointUp = e.endpointUp;
-  g_motion.endpointDown = e.endpointDown;
+  // Otherwise silent: editing UP can push DOWN to keep the endpoint guard.
+  if (downApplied != downRequested) {
+    webLogLevel(LogLevel::Warn, "Motion",
+                "DOWN offset clamped %ld -> %ld to keep %ld steps of travel", (long)downRequested,
+                (long)downApplied, (long)ENDPOINT_GUARD);
+  }
 }
 
 // ==========================================================================
@@ -665,6 +676,8 @@ void handleMotion() {
         break;
       }
       if ((millis() - g_motion.stopEntryMs) > STOP_TIMEOUT_MS) {
+        webLogLevel(LogLevel::Warn, "Motion", "Stop: timed out short of UP at pos=%ld - forced",
+                    pos);
         stepper::forceStop();
         motion_state::Guard g;
         applyMotorEventLocked(autolee::MotorEvent::StopTimeout);
