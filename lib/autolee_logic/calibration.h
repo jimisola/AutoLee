@@ -26,16 +26,14 @@ inline int32_t calIgnoreDist(uint32_t speedHz, uint32_t accel) {
   return (calAccelDist(speedHz, accel) * 8) / 10;
 }
 
-// Early-trip window: catch a stall very close to the start (short move + low SG).
+// Early (absolute) trip: armed after a short minimum time and move, and kept
+// armed until the dynamic trip takes over, so no stretch of the search is blind.
 struct EarlyWindow {
-  uint32_t windowMs;     // EARLY_WINDOW_MS
-  int32_t windowDstMax;  // EARLY_WINDOW_DST_MAX
   uint32_t minTimeMs;    // EARLY_MIN_TIME_MS
   int32_t minMoveSteps;  // EARLY_MIN_MOVE_STEPS
 };
-inline bool earlyArmed(const EarlyWindow &w, uint32_t elapsedMs, int32_t dist) {
-  return elapsedMs <= w.windowMs && dist <= w.windowDstMax && elapsedMs >= w.minTimeMs &&
-         dist >= w.minMoveSteps;
+inline bool earlyArmed(const EarlyWindow &w, uint32_t elapsedMs, int32_t dist, bool dynReady) {
+  return !dynReady && elapsedMs >= w.minTimeMs && dist >= w.minMoveSteps;
 }
 
 // Baseline sampling starts once past the ignore windows.
@@ -48,6 +46,33 @@ inline uint16_t baselineAverage(uint32_t sum, uint16_t cnt) {
   if (cnt == 0) return 0;
   uint32_t avg = sum / cnt;
   return (uint16_t)(avg < 1023 ? avg : 1023);
+}
+
+// No-load baseline accumulator. Sum and count saturate together; letting the
+// sum run on past a capped count skews the average upward.
+class BaselineAccumulator {
+ public:
+  static constexpr uint16_t kMaxSamples = 1000;
+  void reset() {
+    sum_ = 0;
+    cnt_ = 0;
+  }
+  void add(uint16_t sg) {
+    if (cnt_ >= kMaxSamples) return;
+    sum_ += sg;
+    cnt_++;
+  }
+  uint16_t count() const { return cnt_; }
+  uint16_t average() const { return baselineAverage(sum_, cnt_); }
+
+ private:
+  uint32_t sum_ = 0;
+  uint16_t cnt_ = 0;
+};
+
+// Two "stops" closer together than this are a false hit, not a press.
+inline bool travelPlausible(long rawUp, long rawDown, int32_t guard) {
+  return (rawDown - rawUp) >= 2L * guard;
 }
 
 // Consecutive-confirmation counter (the "++confirm >= N ? hit : reset" pattern

@@ -6,8 +6,7 @@ using namespace autolee;
 // Constants mirrored from AutoLee/config.h
 static constexpr uint32_t CAL_SPEED_HZ = 8000;
 static constexpr uint32_t CAL_ACCEL = 25000;
-static const EarlyWindow EW{/*windowMs*/ 300, /*windowDstMax*/ 1200,
-                            /*minTimeMs*/ 50, /*minMoveSteps*/ 200};
+static const EarlyWindow EW{/*minTimeMs*/ 50, /*minMoveSteps*/ 200};
 
 void setUp() {}
 void tearDown() {}
@@ -21,11 +20,18 @@ void test_accel_timing() {
 }
 
 void test_early_window_armed() {
-  TEST_ASSERT_TRUE(earlyArmed(EW, 100, 500));    // inside all bounds
-  TEST_ASSERT_FALSE(earlyArmed(EW, 40, 500));    // too early (<50ms)
-  TEST_ASSERT_FALSE(earlyArmed(EW, 100, 100));   // too little move (<200)
-  TEST_ASSERT_FALSE(earlyArmed(EW, 400, 500));   // past window (>300ms)
-  TEST_ASSERT_FALSE(earlyArmed(EW, 100, 1300));  // past distance cap (>1200)
+  TEST_ASSERT_TRUE(earlyArmed(EW, 100, 500, false));
+  TEST_ASSERT_FALSE(earlyArmed(EW, 40, 500, false));   // too early (<50ms)
+  TEST_ASSERT_FALSE(earlyArmed(EW, 100, 100, false));  // too little move (<200)
+}
+
+// The early trip used to disarm at 300 ms / 1200 steps while the dynamic trip
+// was not ready until ~620 ms at calibration speed: a stop hit in between was
+// seen by neither. It now stays armed until the dynamic trip takes over.
+void test_early_trip_has_no_gap_before_the_dynamic_trip() {
+  TEST_ASSERT_TRUE(earlyArmed(EW, 450, 2000, false));
+  TEST_ASSERT_TRUE(earlyArmed(EW, 600, 3000, false));
+  TEST_ASSERT_FALSE(earlyArmed(EW, 600, 3000, true));
 }
 
 void test_baseline_ready() {
@@ -40,6 +46,24 @@ void test_baseline_average_clamps() {
   TEST_ASSERT_EQUAL_UINT16(0, baselineAverage(0, 0));          // no samples
   TEST_ASSERT_EQUAL_UINT16(50, baselineAverage(500, 10));      // 500/10
   TEST_ASSERT_EQUAL_UINT16(1023, baselineAverage(50000, 10));  // clamped
+}
+
+void test_baseline_sum_and_count_saturate_together() {
+  BaselineAccumulator acc;
+  for (int i = 0; i < BaselineAccumulator::kMaxSamples; i++) acc.add(100);
+  // Past the cap, a run of high readings must not drag the average up.
+  for (int i = 0; i < 500; i++) acc.add(1000);
+  TEST_ASSERT_EQUAL_UINT16(BaselineAccumulator::kMaxSamples, acc.count());
+  TEST_ASSERT_EQUAL_UINT16(100, acc.average());
+  acc.reset();
+  TEST_ASSERT_EQUAL_UINT16(0, acc.count());
+}
+
+void test_travel_shorter_than_two_guards_is_rejected() {
+  TEST_ASSERT_TRUE(travelPlausible(0, 41000, 50));
+  TEST_ASSERT_TRUE(travelPlausible(0, 100, 50));
+  TEST_ASSERT_FALSE(travelPlausible(0, 99, 50));
+  TEST_ASSERT_FALSE(travelPlausible(0, -300, 50));
 }
 
 void test_confirm_counter() {
@@ -58,6 +82,9 @@ int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_accel_timing);
   RUN_TEST(test_early_window_armed);
+  RUN_TEST(test_early_trip_has_no_gap_before_the_dynamic_trip);
+  RUN_TEST(test_baseline_sum_and_count_saturate_together);
+  RUN_TEST(test_travel_shorter_than_two_guards_is_rejected);
   RUN_TEST(test_baseline_ready);
   RUN_TEST(test_baseline_average_clamps);
   RUN_TEST(test_confirm_counter);

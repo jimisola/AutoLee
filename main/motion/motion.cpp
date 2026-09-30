@@ -488,7 +488,7 @@ enum class SearchOutcome : uint8_t {
   NotFound,  // ran the full search distance without a stall
   Aborted,   // operator cancelled; the axis stopped wherever it was
 };
-static SearchOutcome move_until_stall(int dir, long &hit_pos);
+static SearchOutcome move_until_stall(int dir, long &hit_pos, int32_t max_steps = CAL_SEARCH_STEPS);
 
 void safeCreepHome() {
   bool homing;
@@ -586,8 +586,8 @@ void safeCreepHome() {
 // ==========================================================================
 //  SENSORLESS CALIBRATION
 // ==========================================================================
-static SearchOutcome move_until_stall(int dir, long &hit_pos) {
-  const int32_t target = (dir > 0) ? +CAL_SEARCH_STEPS : -CAL_SEARCH_STEPS;
+static SearchOutcome move_until_stall(int dir, long &hit_pos, int32_t max_steps) {
+  const int32_t target = (dir > 0) ? +max_steps : -max_steps;
   const int32_t start_pos = stepper::getCurrentPosition();
   const uint32_t ignore_ms = autolee::calIgnoreMs(CAL_SPEED_HZ, CAL_ACCEL);
   const int32_t ignore_dst = autolee::calIgnoreDist(CAL_SPEED_HZ, CAL_ACCEL);
@@ -603,8 +603,8 @@ static SearchOutcome move_until_stall(int dir, long &hit_pos) {
   delay(5);
 
   bool baseline_started = false;
-  uint32_t base_start_ms = 0, base_sum = 0;
-  uint16_t base_cnt = 0;
+  uint32_t base_start_ms = 0;
+  autolee::BaselineAccumulator baseline_acc;
   bool dyn_ready = false;
   uint16_t dyn_trip = CAL_ABS_MIN;
   // Host-tested ConfirmCounter instead of inline ++/reset counters (#4).
@@ -636,9 +636,8 @@ static SearchOutcome move_until_stall(int dir, long &hit_pos) {
       lastMUSPrint = now;
     }
 
-    if (autolee::earlyArmed(
-            {EARLY_WINDOW_MS, EARLY_WINDOW_DST_MAX, EARLY_MIN_TIME_MS, EARLY_MIN_MOVE_STEPS},
-            elapsed_ms, dist)) {
+    if (autolee::earlyArmed({EARLY_MIN_TIME_MS, EARLY_MIN_MOVE_STEPS}, elapsed_ms, dist,
+                            dyn_ready)) {
       if (confirm_early.feed(sg <= EARLY_TRIP)) {
         webLogLevel(LogLevel::Debug, "Motion", "MUS: EARLY HIT sg=%u pos=%ld", sg,
                     (long)stepper::getCurrentPosition());
@@ -652,17 +651,16 @@ static SearchOutcome move_until_stall(int dir, long &hit_pos) {
     if (!baseline_started && autolee::baselineReady(elapsed_ms, dist, ignore_ms, ignore_dst)) {
       baseline_started = true;
       base_start_ms = now;
-      base_sum = 0;
-      base_cnt = 0;
+      baseline_acc.reset();
       confirm_dyn.reset();
     }
     if (baseline_started && !dyn_ready) {
-      base_sum += sg;
-      if (base_cnt < 1000) base_cnt++;
-      if ((now - base_start_ms) >= 200 && base_cnt > 0) {
-        uint16_t baseline = autolee::baselineAverage(base_sum, base_cnt);
+      baseline_acc.add(sg);
+      if ((now - base_start_ms) >= 200 && baseline_acc.count() > 0) {
+        uint16_t baseline = baseline_acc.average();
         dyn_trip = autolee::dynamicTrip(baseline, CAL_REL_DROP_Q8, CAL_ABS_MIN);
         dyn_ready = true;
+        confirm_early.reset();
         webLogLevel(LogLevel::Debug, "Motion", "MUS: baseline=%u dyn_trip=%u", baseline, dyn_trip);
       }
     }
@@ -747,11 +745,25 @@ bool calibrateEndpointsSensorless() {
     g_motion.positionReferenceStale = true;
   };
 
-  stepper::move(+CAL_PREMOVE_DOWN_STEPS);
-  fas_wait_for_stop(true);
-  if (motion_cmd::abortRequested()) {
-    abandon("aborted by operator", LogLevel::Warn);
-    return false;
+  // Premove DOWN to give the UP search room to accelerate. Stall-guarded:
+  // started with the ram near the bottom, a blind move would drive into the
+  // DOWN stop at calibration current.
+  long premove_hit = 0;
+  switch (move_until_stall(+1, premove_hit, CAL_PREMOVE_DOWN_STEPS)) {
+    case SearchOutcome::Aborted:
+      abandon("aborted by operator", LogLevel::Warn);
+      return false;
+    case SearchOutcome::Found:
+      webLog("Motion", "Calibration: premove hit a stop at %ld - backing off", premove_hit);
+      stepper::move(-CAL_OVERSHOOT_BACKOFF_STEPS);
+      fas_wait_for_stop(true);
+      if (motion_cmd::abortRequested()) {
+        abandon("aborted by operator", LogLevel::Warn);
+        return false;
+      }
+      break;
+    case SearchOutcome::NotFound:
+      break;
   }
 
   long hit_up = 0;
@@ -803,6 +815,12 @@ bool calibrateEndpointsSensorless() {
     return false;
   }
   const long measuredDown = stepper::getCurrentPosition();
+  if (!autolee::travelPlausible(0, measuredDown, ENDPOINT_GUARD)) {
+    webLogLevel(LogLevel::Error, "Motion", "Calibration: travel %ld steps is shorter than %ld",
+                measuredDown, 2L * ENDPOINT_GUARD);
+    abandon("FAILED (travel too short - a false stop?)", LogLevel::Error);
+    return false;
+  }
   {
     motion_state::Guard g;
     g_motion.rawDown = measuredDown;
