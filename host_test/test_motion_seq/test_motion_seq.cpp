@@ -211,6 +211,62 @@ static void test_jam_backoff_direction_reverses_heading_up(void) {
   TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::move(-1000)"));
 }
 
+// --------------------------------------------------------------------------
+//  An endpoint offset edited mid-run (#85)
+// --------------------------------------------------------------------------
+// The web and panel endpoint editors are accepted while RUNNING. They move the
+// endpoint; the target the current stroke was issued with does not follow.
+static void editDownOffsetMidRun(int32_t offset) {
+  g_motion.downOffsetSteps = offset;
+  recomputeEffectiveEndpoints();
+}
+
+// The safety case: heading DOWN, a jam must back off UP even though the
+// target no longer equals endpointDown - otherwise the backoff drives further
+// into the jam.
+static void test_jam_after_mid_run_down_edit_backs_off_up(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  pump(3);
+  editDownOffsetMidRun(-3000);
+  TEST_ASSERT_EQUAL_INT32(17000, g_motion.endpointDown);
+  TEST_ASSERT_EQUAL_INT32(20000, g_motion.currentTarget);
+
+  fake::sg_source = sg_jammed;
+  pump(30);
+
+  TEST_ASSERT_EQUAL_UINT_MESSAGE(STALLED, g_motion.runState, fake::dump().c_str());
+  TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::move(-1000)"));
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::move(1000)"));
+}
+
+static void test_stroke_after_mid_run_down_edit_still_counts(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  pump(3);
+  editDownOffsetMidRun(-3000);
+
+  pump(80);
+
+  TEST_ASSERT_EQUAL_INT32(1, g_motion.counter);
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.currentTarget);
+}
+
+static void test_work_zone_follows_a_mid_run_down_edit(void) {
+  givenCalibrated(0, 20000, 10000);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  editDownOffsetMidRun(-4000);  // DOWN now 16000; the work zone starts at 10500
+
+  fake::sg_source = sg_jammed;
+  pump(15);
+
+  TEST_ASSERT_EQUAL_UINT_MESSAGE(RUNNING, g_motion.runState, fake::dump().c_str());
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
+}
+
 // A single high reading must NOT trip a jam (RUN_SG_HIGH_NEEDED == 2).
 static void test_single_high_reading_does_not_jam(void) {
   givenCalibrated(0, 20000, 0);
@@ -1162,6 +1218,9 @@ int main(void) {
   RUN_TEST(test_batch_completion_requests_graceful_stop);
   RUN_TEST(test_jam_stops_backs_off_and_latches_stalled);
   RUN_TEST(test_jam_backoff_direction_reverses_heading_up);
+  RUN_TEST(test_jam_after_mid_run_down_edit_backs_off_up);
+  RUN_TEST(test_stroke_after_mid_run_down_edit_still_counts);
+  RUN_TEST(test_work_zone_follows_a_mid_run_down_edit);
   RUN_TEST(test_single_high_reading_does_not_jam);
   RUN_TEST(test_accel_blanking_window_ignores_high_sg);
   RUN_TEST(test_work_zone_suppresses_jam_near_down);

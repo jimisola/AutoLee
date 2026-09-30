@@ -5,6 +5,7 @@
 // ============================================================================
 #pragma once
 #include <cstdint>
+#include <cstdlib>
 
 namespace autolee {
 
@@ -39,6 +40,13 @@ inline Endpoints computeEffectiveEndpoints(bool calibrated, long rawUp, long raw
     downOffset = (int32_t)(dnEff - rawDown);
   }
   return {upOffset, downOffset, upEff, dnEff};
+}
+
+// Which end a run target belongs to, by proximity rather than equality: an
+// endpoint offset edited mid-run moves the endpoint, not the target already
+// captured from it.
+inline bool targetIsDown(long target, long endpointUp, long endpointDown) {
+  return labs(target - endpointDown) <= labs(target - endpointUp);
 }
 
 }  // namespace autolee

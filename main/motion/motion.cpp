@@ -70,8 +70,13 @@ void motion_init() {
 static inline bool nearPos(long a, long b, long tol = 2) {
   return labs(a - b) <= tol;
 }
+static inline bool headingDown() {
+  return autolee::targetIsDown(g_motion.currentTarget, g_motion.endpointUp, g_motion.endpointDown);
+}
 static inline long flipTarget(long t) {
-  return (t == g_motion.endpointUp) ? g_motion.endpointDown : g_motion.endpointUp;
+  return autolee::targetIsDown(t, g_motion.endpointUp, g_motion.endpointDown)
+             ? g_motion.endpointUp
+             : g_motion.endpointDown;
 }
 
 // Runtime jam detection uses the host-tested StallCounter (review finding #4:
@@ -287,7 +292,7 @@ void handleMotion() {
       long pos = stepper::getCurrentPosition();
 
       if (!stepper::isRunning()) {
-        if (g_motion.currentTarget == g_motion.endpointDown) {
+        if (headingDown()) {
           // Duration of the stroke that just finished. lastDirectionChangeMs is
           // stamped where the move toward this target was issued (the flip
           // below, or startRunBetweenEndpoints()), so this is exactly the
@@ -360,7 +365,7 @@ void handleMotion() {
       if (sinceChange < accelWindowMs) break;
 
       // Work zone: skip SG near DOWN where primer-seating resistance is normal.
-      if (g_motion.currentTarget == g_motion.endpointDown &&
+      if (headingDown() &&
           autolee::inWorkZone(pos, g_motion.endpointDown, g_motion.sgWorkZoneSteps)) {
         resetStallCounter();
         break;
@@ -418,8 +423,7 @@ void handleMotion() {
           stepper::setSpeedInHz(CREEP_HOME_SPEED);
           stepper::setAcceleration(CREEP_HOME_ACCEL);
 
-          int32_t backoff = (g_motion.currentTarget == g_motion.endpointDown) ? -RUN_BACKOFF_STEPS
-                                                                              : +RUN_BACKOFF_STEPS;
+          int32_t backoff = headingDown() ? -RUN_BACKOFF_STEPS : +RUN_BACKOFF_STEPS;
           stepper::move(backoff);
           fas_wait_for_stop();
 
