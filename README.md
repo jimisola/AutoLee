@@ -29,7 +29,19 @@ The stall detection and jam protection features are designed to detect brass get
 
 **The Emergency Stop button is the only thing on this machine that protects people.** It is a normally-closed switch wired in series on the incoming DC rail, upstream of everything — so pressing it cuts power to the stepper driver *and* to the controller itself. It does not depend on the firmware running, responding, or being on the right screen. Fit it, wire it as shown in [docs/wiring.md](docs/wiring.md#power), test it before you first run the machine, and keep it within reach whenever the machine is powered.
 
-**LIABILITY DISCLAIMER:** This project is provided as-is with absolutely no warranty of any kind. The author(s) accept no responsibility or liability for any injury, damage, or loss resulting from building, modifying, or operating this machine. You build and use it entirely at your own risk.
+## ⚡ MAINS VOLTAGE WARNING — 36V VARIANT
+
+**The 36V variant uses an open-frame power supply with exposed screw terminals for 230 V AC mains. Mains voltage can kill. Mistakes in this wiring can cause electric shock, fire and death.**
+
+- **Only do the mains wiring if you know exactly what you are doing.** If in any doubt, have a qualified electrician do it, and follow the regulations where you live.
+- **Never work on the PSU while it is plugged in.** Unplug it and wait: an open-frame supply can hold a dangerous charge in its capacitors after disconnection.
+- **Always connect protective earth** to the PSU's earth (⏚) terminal.
+- **Never power the PSU unless it is closed inside its printed casing** — never open on the bench.
+- Use strain relief on the mains cable. Ferrules on clamp terminals, insulated fork or ring terminals on screw terminals, fully insulated female spades on the C14 inlet tabs — no bare, tinned or loose strands.
+- **Set the PSU's input voltage selector to your mains before first power-on** — 230 V in Europe, 110 V in the US. Set to 110 V and plugged into 230 V, the PSU is destroyed.
+- Double-check every connection before plugging in for the first time.
+
+**LIABILITY DISCLAIMER:** This project is provided as-is with absolutely no warranty of any kind. The author(s) accept no responsibility or liability for any injury, death, damage, or loss resulting from building, modifying, wiring (including mains wiring), or operating this machine. You build and use it entirely at your own risk.
 
 ---
 
@@ -121,7 +133,7 @@ This is expected after every E-stop — it is the machine refusing to drive to s
 | **[Bill of Materials — 24V](docs/24V/bill-of-materials.md) · [36V](docs/36V/bill-of-materials.md)** | Every part needed, with links |
 | **[Wiring](docs/wiring.md)** | Pin-by-pin connections + wiring diagrams (both variants) |
 
-Read the safety warning above first.
+Two power variants run the same firmware. **36V** (XT60 input, open-frame PSU in a printed casing) gives the motor more torque and is the one upstream recommends; **24V** (power brick into a DC jack) is the original build. Read the safety warning above first — and the mains warning too for 36V.
 
 ---
 

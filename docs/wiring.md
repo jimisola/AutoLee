@@ -39,6 +39,30 @@ full picture, including the fan supply, which differs between the variants.
 | PSU → Fan | See the variant wiring diagram — the fan supply is not the raw rail on every build |
 | GND | Common ground between all boards |
 
+### 36V power rails
+
+The 36V build does not run everything from the incoming rail. It steps down twice:
+
+| Connection | Details |
+|---|---|
+| Mains → C14 inlet → PSU L / N / ⏚ | Inside the PSU casing only — read the [mains voltage warning](../README.md#-mains-voltage-warning--36v-variant) first |
+| PSU 36 V → XT60 → On/Off switch → E-stop | 18 AWG; the main supply line into the machine |
+| 36 V → TMC5160 HVIN (8–60 V) | Motor power — the **only** 36 V load |
+| 36 V → 36→24 V step-down IN | |
+| 24 V → Fan | |
+| 24 V → TMC5160 control-connector **24V** pin | From the 24 V rail — **never 36 V** |
+| 24 V → 5 V regulator IN; 5 V OUT → ESP32-C6 5 V | Logic power |
+
+> ⚠️ **Set the 36→24 V step-down before connecting anything to it.** The module is adjustable
+> and does not necessarily arrive at 24 V. Power it from 36 V with **nothing connected to its
+> output**, measure the output with a multimeter, turn the trim pot until it reads **24.0 V**,
+> and only then wire the fan, the 5 V regulator and the TMC5160 24V pin. A mis-set step-down
+> can put up to 36 V on parts rated for 24 V.
+>
+> ⚠️ **TMC5160 24V pin:** BIGTREETECH specifies that the control connector's 24V pin must not
+> exceed 24 V whatever the motor supply is — exceeding it damages the driver. Only the HVIN
+> terminal takes 36 V.
+
 > **The Emergency Stop (#10) is normally-closed and cuts the whole rail — including
 > logic power.** Pressing it does not merely stop the motor: the ESP32-C6 loses its
 > 5 V supply along with the TMC5160, so the controller powers down mid-stroke. This
