@@ -155,10 +155,8 @@ void processPendingCommands() {
       startRunBetweenEndpoints();
       ui_update_run_button();
     } else {
-      requestGracefulStop();
+      requestGracefulStop();  // also ends any batch
       ui_update_run_button();
-      motion_state::Guard g;
-      g_motion.batchActive = false;
     }
   }
 

@@ -79,6 +79,22 @@ static inline long flipTarget(long t) {
              : g_motion.endpointDown;
 }
 
+// Lands a profile queued by setActiveProfile() while RUNNING. Callers push
+// the new speed (setSpeedInHz(ui_speed_hz)) before the next move.
+static void applyPendingProfile() {
+  const int8_t p = g_motion.pendingProfile;
+  if (p < 0) return;
+  {
+    motion_state::Guard g;
+    g_motion.activeProfile = (uint8_t)p;
+    g_motion.pendingProfile = -1;
+  }
+  webLog("Motion", "Profile %s now active", g_motion.profiles[p].name);
+  ui_update_speed_val();
+  ui_update_profile_screen();
+  ui_update_sg_val();
+}
+
 // Runtime jam detection uses the host-tested StallCounter (review finding #4:
 // tested == shipped) instead of an inline copy of the same sliding-counter
 // logic. runSGHighCount/runSGLowCount are mirrored from it purely so the
@@ -219,6 +235,7 @@ void startRunBetweenEndpoints() {
     return;
   }
   resetStallCounter();
+  applyPendingProfile();
 
   // sg_trip == 0 turns runtime jam detection off entirely (see handleMotion's
   // early break). That is a legitimate setting - jam detection guards brass,
@@ -274,12 +291,14 @@ void requestGracefulStop() {
     if (stopping) {
       g_motion.stopEntryMs = now;
       g_motion.currentTarget = up;
+      g_motion.batchActive = false;
     }
   }
   if (!stopping) {
     webLog("Motion", "Graceful stop ignored in state %u", (unsigned)g_motion.runState);
     return;
   }
+  applyPendingProfile();
   stepper::setAcceleration(RUN_DECEL);
   stepper::moveTo(up);
 }
@@ -341,6 +360,7 @@ void handleMotion() {
             break;
           }
         }
+        applyPendingProfile();
         const uint32_t now = millis();
         long target;
         {
@@ -435,6 +455,7 @@ void handleMotion() {
             // two can never be seen to disagree. uint16_t: wraps to 0 after
             // 65536 lifetime jams, which is well past diagnostic relevance.
             g_motion.stallCount++;
+            g_motion.batchActive = false;
             // Fail-safe: this arm only runs with runState == RUNNING, from which
             // the tested table always accepts Jam, so `latched` is true. If a
             // future change ever broke that invariant, leaving the state as-is
@@ -448,6 +469,7 @@ void handleMotion() {
             webLogLevel(LogLevel::Error, "Motion",
                         "BUG: Jam event rejected by FSM - latched STALLED anyway");
           resetStallCounter();
+          applyPendingProfile();
           showJamScreen();
         }
       }
@@ -495,6 +517,7 @@ void safeCreepHome() {
   {
     motion_state::Guard g;
     homing = applyMotorEventLocked(autolee::MotorEvent::ReturnHome);
+    if (homing) g_motion.batchActive = false;
   }
   // Rejected => neither STALLED nor IDLE (the two states the tested table
   // accepts ReturnHome from - IDLE so a reboot-stale position reference can be
@@ -686,9 +709,20 @@ static SearchOutcome move_until_stall(int dir, long &hit_pos, int32_t max_steps)
 
 void setActiveProfile(uint8_t idx) {
   if (idx >= NUM_PROFILES) return;
+  // Mid-run, swapping the trip now would judge the old speed's SG against the
+  // new profile's trip - a Slow -> Fast switch is an instant false jam.
+  if (g_motion.runState == RUNNING) {
+    {
+      motion_state::Guard g;
+      g_motion.pendingProfile = (int8_t)idx;
+    }
+    webLog("Motion", "Profile %s queued for the next stroke", g_motion.profiles[idx].name);
+    return;
+  }
   {
     motion_state::Guard g;
     g_motion.activeProfile = idx;
+    g_motion.pendingProfile = -1;
   }
   stepper::setSpeedInHz(ui_speed_hz);
 }
@@ -701,7 +735,10 @@ bool calibrateEndpointsSensorless() {
     // Invalidating the endpoints belongs to the same transaction - but only if
     // we actually entered CALIBRATING, otherwise a rejected request would
     // discard a good calibration.
-    if (entered) g_motion.endpointsCalibrated = false;
+    if (entered) {
+      g_motion.endpointsCalibrated = false;
+      g_motion.batchActive = false;
+    }
   }
   // Rejected => not IDLE (running, stopping, stalled, homing or already
   // calibrating). Never start a blind sensorless search from those states.
