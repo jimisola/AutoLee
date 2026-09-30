@@ -136,6 +136,7 @@ static autolee::GateInput gateInput() {
   in.calibrated = ms.endpointsCalibrated;
   in.positionStale = ms.positionReferenceStale;
   in.batchTarget = ms.batchTarget;
+  in.sgSetUp = jamDetectionSetUp(ms);
   return in;
 }
 
@@ -337,8 +338,10 @@ static std::string buildStateJSON() {
   st.currentMa = ms.runCurrentMa;
   st.profileIdx = ms.activeProfile;
   st.profileName = ms.profiles[ms.activeProfile].name;
+  const uint16_t floorMax = autolee::floorTripMax({SG_AUTO_STROKES, SG_AUTO_MARGIN, 0, 0});
   for (int i = 0; i < NUM_PROFILES; i++) {
-    st.profiles[i] = {ms.profiles[i].name, ms.profiles[i].speed_hz, ms.profiles[i].sg_trip};
+    st.profiles[i] = {ms.profiles[i].name, ms.profiles[i].speed_hz, ms.profiles[i].sg_trip,
+                      autolee::tripAtFloor(ms.profiles[i].sg_trip, floorMax)};
   }
   st.wifiStatus = wfStat;
   st.wifiSSID = wfSSID.c_str();
@@ -347,6 +350,12 @@ static std::string buildStateJSON() {
   st.batchTarget = ms.batchTarget;
   st.batchCount = ms.batchCount;
   st.batchActive = ms.batchActive;
+  st.sgSetUp = jamDetectionSetUp(ms);
+  st.sgCalCurrentMa = ms.sgCalCurrentMa;
+  st.autoSgActive = ms.autoSgActive;
+  st.autoSgProfile = ms.autoSgProfile;
+  st.autoSgStroke = ms.autoSgStroke;
+  st.autoSgStrokes = SG_AUTO_STROKES;
   // Drives the web UI's "DEFAULT PASSWORD IN USE / controls are locked" banner,
   // so it must track when that is actually true. On a rig that has never joined
   // a network nothing is locked (physical presence is the gate - see the
@@ -1361,8 +1370,8 @@ void setupWebServer() {
     if (hasValue) {
       if (!requireInt32(req, res, "value", v, err)) return err;
       // Range is enforced rather than clamped: sg_trip is the jam-detection
-      // threshold and 0 switches detection off entirely, so a request that
-      // clamped down to 0 would be a silent safety change. A deliberate 0 is
+      // threshold and 0 marks it unset (the press then refuses to run), so a
+      // request that clamped to 0 would be a silent change. A deliberate 0 is
       // still accepted - it is inside the range.
       if (v < RUN_SG_TRIP_MIN || v > RUN_SG_TRIP_MAX) {
         return sendBadParam(res, "value is outside the supported range (0-1023)");
@@ -1456,6 +1465,15 @@ void setupWebServer() {
     const autolee::Refusal r = autolee::gateCalibrate(gateInput());
     if (r != autolee::Refusal::None) return sendRefusal(res, r);
     motion_cmd::requestCalibrate();
+    return res->send(200, "text/plain", "ok");
+  });
+
+  // Runs the press with jam detection off to measure the trips. The web UI's
+  // confirm() says the press must be empty (docs/UX.md); the API does not ask.
+  server.on("/api/v1/motion/auto_sg", HTTP_POST, [](PsychicRequest *req, PsychicResponse *res) {
+    const autolee::Refusal r = autolee::gateAutoSg(gateInput());
+    if (r != autolee::Refusal::None) return sendRefusal(res, r);
+    motion_cmd::requestAutoSg();
     return res->send(200, "text/plain", "ok");
   });
 

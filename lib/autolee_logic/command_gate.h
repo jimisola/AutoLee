@@ -33,6 +33,7 @@ enum class Refusal : uint8_t {
   NotCalibrated,         // endpoints were never discovered
   PositionUnreferenced,  // calibration restored, axis not homed since
   NoBatchTarget,         // batch start with target 0
+  JamDetectionNotSetUp,  // a profile has no StallGuard trip; run Auto SG first
 };
 
 // The subset of MotionState the gates read. Passed by value: it is a snapshot,
@@ -43,11 +44,22 @@ struct GateInput {
   bool calibrated = false;
   bool positionStale = false;
   int32_t batchTarget = 0;
+  bool sgSetUp = false;  // every profile has a StallGuard trip (> 0)
 };
 
 // Begin a run between the endpoints. Mirrors, in order, the checks
 // startRunBetweenEndpoints() applies before it touches the TMC or the stepper.
 inline Refusal gateStart(const GateInput &in) {
+  if (!in.calibrated) return Refusal::NotCalibrated;
+  if (in.positionStale) return Refusal::PositionUnreferenced;
+  if (!in.sgSetUp) return Refusal::JamDetectionNotSetUp;
+  if (!canStart(in.state)) return Refusal::WrongState;
+  return Refusal::None;
+}
+
+// Auto SG is a run that measures the trips, so it needs everything a start
+// needs except the trips themselves - it is the way past that refusal.
+inline Refusal gateAutoSg(const GateInput &in) {
   if (!in.calibrated) return Refusal::NotCalibrated;
   if (in.positionStale) return Refusal::PositionUnreferenced;
   if (!canStart(in.state)) return Refusal::WrongState;
@@ -105,6 +117,8 @@ inline const char *refusalSlug(Refusal r) {
       return "position_unreferenced";
     case Refusal::NoBatchTarget:
       return "no_batch_target";
+    case Refusal::JamDetectionNotSetUp:
+      return "jam_detection_not_set_up";
     case Refusal::None:
       break;
   }
@@ -124,6 +138,8 @@ inline const char *refusalMessage(Refusal r) {
       return "position reference unconfirmed after a reboot - return home first";
     case Refusal::NoBatchTarget:
       return "no batch target set";
+    case Refusal::JamDetectionNotSetUp:
+      return "jam detection is not set up - run Auto SG with the press empty";
     case Refusal::None:
       break;
   }

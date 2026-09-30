@@ -30,6 +30,7 @@
 #include "batch.h"
 #include "calibration.h"
 #include "stroke_stats.h"
+#include "auto_sg.h"
 
 static inline uint32_t millis() {
   return (uint32_t)(esp_timer_get_time() / 1000);
@@ -94,6 +95,7 @@ static void applyPendingProfile() {
   ui_update_speed_val();
   ui_update_profile_screen();
   ui_update_sg_val();
+  ui_update_main_warning();  // the floor warning follows the active profile
 }
 
 // Runtime jam detection uses the host-tested StallCounter (review finding #4:
@@ -105,6 +107,18 @@ static autolee::StallCounter s_stall(RUN_SG_HIGH_NEEDED, RUN_SG_HIGH_SATURATION_
 
 static autolee::StrokeStats s_stroke;
 
+static constexpr autolee::AutoSgConfig kAutoSg{SG_AUTO_STROKES, SG_AUTO_MARGIN, RUN_SG_TRIP_MIN,
+                                               RUN_SG_TRIP_MAX};
+static autolee::AutoSg s_autoSg(kAutoSg);
+static uint8_t s_autoSgSavedProfile = 0;
+static uint16_t s_autoSgCurrentMa = 0;
+static uint32_t s_autoSgProfileStartMs = 0;
+
+// The trip the run compares against: 0 (detection off) while Auto SG measures.
+static inline uint16_t effectiveTrip() {
+  return g_motion.autoSgActive ? 0 : RUN_SG_TRIP;
+}
+
 // What the stroke's SG readings did - the numbers a trip is tuned against.
 // Also reported on a stop or jam, where the stroke that matters most would
 // otherwise go unreported.
@@ -112,11 +126,11 @@ static void logStrokeStats(const char *why, LogLevel level) {
   if (s_stroke.empty()) return;
   if (s_stroke.onlyFloor()) {
     webLogLevel(level, "Motion", "SG stroke %s: all %u readings at floor trip=%u spd=%lu", why,
-                s_stroke.floor(), RUN_SG_TRIP, (unsigned long)ui_speed_hz);
+                s_stroke.floor(), effectiveTrip(), (unsigned long)ui_speed_hz);
     return;
   }
   webLogLevel(level, "Motion", "SG stroke %s: max=%u min=%u floor=%u trip=%u spd=%lu", why,
-              s_stroke.max(), s_stroke.min(), s_stroke.floor(), RUN_SG_TRIP,
+              s_stroke.max(), s_stroke.min(), s_stroke.floor(), effectiveTrip(),
               (unsigned long)ui_speed_hz);
 }
 
@@ -224,6 +238,111 @@ void recomputeEffectiveEndpoints() {
 }
 
 // ==========================================================================
+//  AUTO SG
+// ==========================================================================
+// Ends a run of Auto SG. On success the measured trips go live together with
+// the current they hold at; otherwise nothing stored changes. Either way the
+// operator's own profile comes back through the queued-profile path, so it
+// lands as the run stops.
+static void endAutoSg(bool ok, const char *why) {
+  s_autoSg.abort();
+  uint16_t trips[NUM_PROFILES] = {};
+  if (ok)
+    for (uint8_t i = 0; i < NUM_PROFILES; i++) trips[i] = s_autoSg.tripFor(i);
+  {
+    motion_state::Guard g;
+    g_motion.autoSgActive = false;
+    g_motion.pendingProfile = (int8_t)s_autoSgSavedProfile;
+    if (ok) {
+      for (uint8_t i = 0; i < NUM_PROFILES; i++) g_motion.profiles[i].sg_trip = trips[i];
+      g_motion.sgCalCurrentMa = s_autoSgCurrentMa;
+    }
+  }
+  if (ok) {
+    for (uint8_t i = 0; i < NUM_PROFILES; i++) {
+      webLog("Motion", "Auto SG: %s max=%u +%u -> trip=%u%s", g_motion.profiles[i].name,
+             s_autoSg.measured(i), SG_AUTO_MARGIN, trips[i],
+             s_autoSg.floorOnly(i) ? " (floor only - block-test it)" : "");
+    }
+    webLogLevel(LogLevel::Warn, "Motion",
+                "Auto SG: done at %u mA - verify with a deliberate block on each profile",
+                s_autoSgCurrentMa);
+  } else {
+    webLogLevel(LogLevel::Warn, "Motion", "Auto SG: %s - stored trips unchanged", why);
+  }
+  ui_update_sg_val();
+  ui_update_profile_screen();
+  ui_update_main_warning();
+}
+
+// Feeds the stroke that just finished to Auto SG. Returns true when Auto SG
+// has ended, and the caller must stop the run instead of flipping.
+static bool autoSgStrokeDone() {
+  const autolee::AutoSg::Step step = s_autoSg.strokeDone(s_stroke);
+  {
+    motion_state::Guard g;
+    g_motion.autoSgProfile = s_autoSg.profile();
+    g_motion.autoSgStroke = s_autoSg.stroke();
+  }
+  switch (step) {
+    case autolee::AutoSg::Step::Continue:
+      return false;
+    case autolee::AutoSg::Step::NextProfile: {
+      const uint8_t done = (uint8_t)(s_autoSg.profile() - 1);
+      {
+        motion_state::Guard g;
+        g_motion.pendingProfile = (int8_t)s_autoSg.profile();
+      }
+      s_autoSgProfileStartMs = millis();
+      webLog("Motion", "Auto SG: %s max=%u; measuring %s", g_motion.profiles[done].name,
+             s_autoSg.measured(done), g_motion.profiles[s_autoSg.profile()].name);
+      return false;
+    }
+    case autolee::AutoSg::Step::Done:
+      if (g_motion.runCurrentMa != s_autoSgCurrentMa) {
+        endAutoSg(false, "the run current changed while measuring");
+      } else {
+        endAutoSg(true, nullptr);
+      }
+      return true;
+    case autolee::AutoSg::Step::Failed:
+      endAutoSg(false, "no StallGuard samples - does the work zone cover the whole stroke?");
+      return true;
+  }
+  return true;
+}
+
+bool startAutoSg() {
+  if (g_motion.runState != IDLE || g_motion.autoSgActive) return false;
+  s_autoSgSavedProfile = g_motion.activeProfile;
+  s_autoSgCurrentMa = g_motion.runCurrentMa;
+  s_autoSg.begin(NUM_PROFILES);
+  {
+    motion_state::Guard g;
+    g_motion.autoSgActive = true;
+    g_motion.autoSgProfile = 0;
+    g_motion.autoSgStroke = 0;
+    g_motion.pendingProfile = -1;
+    g_motion.activeProfile = 0;
+  }
+  webLogLevel(LogLevel::Warn, "Motion",
+              "Auto SG: start - %u strokes per profile, jam detection OFF, press must be EMPTY",
+              SG_AUTO_STROKES);
+  ui_update_speed_val();
+  ui_update_profile_screen();
+  ui_update_main_warning();
+  s_autoSgProfileStartMs = millis();
+  startRunBetweenEndpoints();
+  if (g_motion.runState != RUNNING) {
+    endAutoSg(false, "the run did not start");
+    applyPendingProfile();
+    stepper::setSpeedInHz(ui_speed_hz);
+    return false;
+  }
+  return true;
+}
+
+// ==========================================================================
 //  MOTION
 // ==========================================================================
 void startRunBetweenEndpoints() {
@@ -237,6 +356,12 @@ void startRunBetweenEndpoints() {
   if (g_motion.positionReferenceStale) {
     webLogLevel(LogLevel::Warn, "Motion",
                 "Start refused: position reference unconfirmed - return home first");
+    return;
+  }
+  // Every profile needs a trip before the press runs; Auto SG, which measures
+  // them, is the one run allowed without.
+  if (!jamDetectionSetUp(g_motion) && !g_motion.autoSgActive) {
+    webLogLevel(LogLevel::Warn, "Motion", "Start refused: jam detection not set up - run Auto SG");
     return;
   }
   const uint32_t now = millis();
@@ -257,14 +382,11 @@ void startRunBetweenEndpoints() {
 
   s_stroke.reset();
 
-  // sg_trip == 0 turns runtime jam detection off entirely (SG is still read
-  // and logged, which is how raw values are measured). That is a legitimate setting - jam detection
-  // guards brass, not people - but it persists across reboots and was previously silent, so a press
-  // could run indefinitely with no stall detection and nothing anywhere saying so. Say it, loudly,
-  // on every run start.
-  if (RUN_SG_TRIP == 0) {
+  // A trip at the SG floor relies on a stall spiking off it.
+  if (!g_motion.autoSgActive && autolee::tripAtFloor(RUN_SG_TRIP, autolee::floorTripMax(kAutoSg))) {
     webLogLevel(LogLevel::Warn, "Motion",
-                "Jam detection is DISABLED (sg_trip=0) - starting run with no stall protection");
+                "%s runs at the SG floor (trip %u) - jam detection is LIMITED",
+                g_motion.profiles[g_motion.activeProfile].name, RUN_SG_TRIP);
   }
 
   tmc5160::rms_current(g_motion.runCurrentMa);
@@ -319,6 +441,7 @@ void requestGracefulStop() {
     return;
   }
   logStrokeStats("STOPPED", LogLevel::Info);
+  if (g_motion.autoSgActive) endAutoSg(false, "stopped before it finished");
   applyPendingProfile();
   stepper::setAcceleration(RUN_DECEL);
   stepper::moveTo(up);
@@ -331,8 +454,16 @@ void handleMotion() {
     case RUNNING: {
       long pos = stepper::getCurrentPosition();
 
+      if (g_motion.autoSgActive && (millis() - s_autoSgProfileStartMs) > SG_AUTO_TIMEOUT_MS) {
+        endAutoSg(false, "timed out");
+        requestGracefulStop();
+        ui_update_run_button();
+        break;
+      }
+
       if (!stepper::isRunning()) {
-        if (headingDown()) {
+        // Auto SG strokes are measurements, not work cycles.
+        if (headingDown() && !g_motion.autoSgActive) {
           // Duration of the stroke that just finished. lastDirectionChangeMs is
           // stamped where the move toward this target was issued (the flip
           // below, or startRunBetweenEndpoints()), so this is exactly the
@@ -382,7 +513,13 @@ void handleMotion() {
           }
         }
         logStrokeStats(headingDown() ? "DOWN" : "UP", LogLevel::Debug);
+        const bool autoSgEnded = g_motion.autoSgActive && autoSgStrokeDone();
         s_stroke.reset();
+        if (autoSgEnded) {
+          requestGracefulStop();
+          ui_update_run_button();
+          break;
+        }
         applyPendingProfile();
         const uint32_t now = millis();
         long target;
@@ -403,6 +540,7 @@ void handleMotion() {
       // SG is read with the trip at 0 too: detection off is the state raw
       // values are measured in. Only the trip comparison below is gated.
       uint32_t sinceChange = millis() - g_motion.lastDirectionChangeMs;
+      const uint16_t trip = effectiveTrip();
 
       uint32_t accelWindowMs = autolee::accelBlankMs(ui_speed_hz, RUN_DECEL);
       if (sinceChange < accelWindowMs) break;
@@ -439,8 +577,8 @@ void handleMotion() {
       // the reading that matters; new maxima are logged as they happen.
       static uint32_t lastMaxLogMs = 0;
       if (newMax && (millis() - lastMaxLogMs) > RUN_SG_MAX_LOG_INTERVAL_MS) {
-        webLogLevel(LogLevel::Debug, "Motion", "SG new max=%u trip=%u pos=%ld t=%lu", sg,
-                    RUN_SG_TRIP, pos, (unsigned long)sinceChange);
+        webLogLevel(LogLevel::Debug, "Motion", "SG new max=%u trip=%u pos=%ld t=%lu", sg, trip, pos,
+                    (unsigned long)sinceChange);
         lastMaxLogMs = millis();
       }
 
@@ -449,15 +587,15 @@ void handleMotion() {
         int32_t distToTarget = labs(pos - g_motion.currentTarget);
         webLogLevel(LogLevel::Debug, "Motion",
                     "RUN SG=%u max=%u min=%u trip=%u%s pos=%ld dist=%ld t=%lu hi=%u/%u", sg,
-                    s_stroke.max(), s_stroke.min(), RUN_SG_TRIP, RUN_SG_TRIP == 0 ? " [OFF]" : "",
-                    pos, (long)distToTarget, (unsigned long)sinceChange, g_motion.runSGHighCount,
+                    s_stroke.max(), s_stroke.min(), trip, trip == 0 ? " [OFF]" : "", pos,
+                    (long)distToTarget, (unsigned long)sinceChange, g_motion.runSGHighCount,
                     RUN_SG_HIGH_NEEDED);
         lastSGPrintMs = millis();
       }
 
-      if (RUN_SG_TRIP == 0) break;
+      if (trip == 0) break;
 
-      const bool jam = s_stall.update(sg, RUN_SG_TRIP);
+      const bool jam = s_stall.update(sg, trip);
       {
         // Telemetry mirror of the host-tested counter - one guard so the pair
         // is never seen half-updated.
@@ -466,13 +604,13 @@ void handleMotion() {
         g_motion.runSGLowCount = s_stall.lowCount();
       }
 
-      if (sg > RUN_SG_TRIP) {
-        webLogLevel(LogLevel::Warn, "Motion", "SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg,
-                    RUN_SG_TRIP, g_motion.runSGHighCount, pos, (unsigned long)sinceChange);
+      if (sg > trip) {
+        webLogLevel(LogLevel::Warn, "Motion", "SG HIGH=%u trip=%u cnt=%u pos=%ld t=%lu", sg, trip,
+                    g_motion.runSGHighCount, pos, (unsigned long)sinceChange);
 
         if (jam) {
           webLogLevel(LogLevel::Error, "Motion", "JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg,
-                      RUN_SG_TRIP, pos, g_motion.currentTarget, g_motion.runSGHighCount);
+                      trip, pos, g_motion.currentTarget, g_motion.runSGHighCount);
           logStrokeStats("JAMMED", LogLevel::Warn);
           s_stroke.reset();
 
@@ -748,6 +886,10 @@ static SearchOutcome move_until_stall(int dir, long &hit_pos, int32_t max_steps)
 
 void setActiveProfile(uint8_t idx) {
   if (idx >= NUM_PROFILES) return;
+  if (g_motion.autoSgActive) {
+    webLog("Motion", "Profile change ignored while Auto SG measures");
+    return;
+  }
   // Mid-run, swapping the trip now would judge the old speed's SG against the
   // new profile's trip - a Slow -> Fast switch is an instant false jam.
   if (g_motion.runState == RUNNING) {

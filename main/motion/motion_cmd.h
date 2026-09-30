@@ -29,6 +29,7 @@ void requestToggleRun();            // RUN/STOP button (web + touch UI); counted
                                     // so rapid taps replay instead of coalescing
 void requestStop();                 // stop only (used by the OTA upload path)
 void requestCalibrate();            // begin sensorless calibration
+void requestAutoSg();               // measure every profile's StallGuard trip
 void requestReturnHome();           // jam-screen "return home"
 void requestBatchStart();           // start a batch run
 void requestProfile(uint8_t idx);   // switch speed profile

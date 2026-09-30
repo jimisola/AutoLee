@@ -89,8 +89,8 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
      this the machine can come back from a reboot with no stall protection and
      nothing on screen saying so. -->
 <div class="pw-alert" id="sgOffAlert" style="display:none">
-<div style="color:#FFD37C;font-weight:700;margin-bottom:4px">&#9888; JAM DETECTION DISABLED</div>
-<div style="color:#aaa;font-size:.8em">This profile's StallGuard trip is 0, so runs will not stop on a jam. Raise SG on the Config page to re-enable it.</div>
+<div id="sgAlertTitle" style="color:#FFD37C;font-weight:700;margin-bottom:4px"></div>
+<div id="sgAlertMsg" style="color:#aaa;font-size:.8em"></div>
 </div>
 
 <!-- Shown whenever the SSE stream is not delivering. Everything on this page
@@ -201,6 +201,9 @@ input[type=text],input[type=password],select{width:100%;padding:10px;margin-bott
 <div class="sec">
 <h2>Stall Guard (per profile)</h2>
 <div id="sgProfiles"></div>
+<div class="ea"><button class="btn btn-red btn-sm" id="asBtn" onclick="autoSg()">Auto SG</button></div>
+<div class="hint" id="asInfo"></div>
+<div class="hint">Auto SG runs every profile with jam detection off and sets each trip just above the highest reading. The press must be empty.</div>
 <hr>
 <div class="sr"><span class="l">Work Zone (steps)</span><span class="v" id="wzv">5500</span></div>
 <div class="hint">Skip SG near DOWN endpoint (primer push area)</div>
@@ -653,6 +656,7 @@ let sgBuilt=false;
 // apart from a bare blur. See setSg().
 const SG_MIN=0,SG_MAX=1023;
 let sgLast=[];
+function sgFlag(p){return p.sg===0?' <span style="color:var(--red)">not set</span>':p.floor?' <span style="color:#FFD37C">\u26A0 floor</span>':''}
 function buildSgControls(profiles,activeIdx){
   const c=document.getElementById('sgProfiles');
   if(!c)return;
@@ -665,7 +669,7 @@ function buildSgControls(profiles,activeIdx){
       const lbl=document.getElementById('sgLbl'+i);
       const inp=document.getElementById('sgIn'+i);
       const row=document.getElementById('sgRow'+i);
-      if(lbl) lbl.innerHTML=p.name+' ('+Math.round(p.hz/1000)+'kHz) <span style="color:'+(isActive?'var(--green)':'var(--muted)')+'">SG='+p.sg+'</span>';
+      if(lbl) lbl.innerHTML=p.name+' ('+Math.round(p.hz/1000)+'kHz) <span style="color:'+(isActive?'var(--green)':'var(--muted)')+'">SG='+p.sg+'</span>'+sgFlag(p);
       if(row) row.style.background=isActive?'#1a2a3a':'#161616';
       // Only update input if it's not focused (user might be typing)
       if(inp && document.activeElement!==inp) inp.value=p.sg;
@@ -680,7 +684,7 @@ function buildSgControls(profiles,activeIdx){
     const div=document.createElement('div');
     div.id='sgRow'+i;
     div.style.cssText='margin-bottom:8px;padding:6px 8px;border-radius:8px;background:'+(isActive?'#1a2a3a':'#161616');
-    div.innerHTML='<div class="sr" id="sgLbl'+i+'" style="margin-bottom:4px">'+p.name+' ('+Math.round(p.hz/1000)+'kHz) <span style="color:'+(isActive?'var(--green)':'var(--muted)')+'">SG='+p.sg+'</span></div>'
+    div.innerHTML='<div class="sr" id="sgLbl'+i+'" style="margin-bottom:4px">'+p.name+' ('+Math.round(p.hz/1000)+'kHz) <span style="color:'+(isActive?'var(--green)':'var(--muted)')+'">SG='+p.sg+'</span>'+sgFlag(p)+'</div>'
       +'<div style="display:flex;align-items:center;gap:8px">'
       +'<input type="text" inputmode="numeric" pattern="[0-9]*" id="sgIn'+i+'" value="'+p.sg+'" style="width:80px;padding:6px 8px;background:#222;border:1px solid #444;border-radius:6px;color:#fff;font-size:.9em;text-align:center" placeholder="0-1023">'
       +'<button class="btn btn-blue btn-sm" id="sgBtn'+i+'">Set</button>'
@@ -703,9 +707,18 @@ function upd(d){
   document.getElementById('pwAlert').style.display=d.defaultPassword?'block':'none';
   document.getElementById('ctr').textContent=d.counter;
   document.getElementById('sv').textContent=d.profileName+' \u2014 '+d.speed+'Hz (SG='+d.sgTrip+')';
-  // sgTrip 0 disables runtime jam detection entirely and persists across
-  // reboots - surface it rather than leaving it as a "0" nobody reads.
-  document.getElementById('sgOffAlert').style.display=d.sgTrip===0?'block':'none';
+  // Jam-detection status, most urgent first: measuring (detection off), not set
+  // up (the press refuses to run), or limited (the trip sits at the SG floor).
+  const sga=document.getElementById('sgOffAlert'),sgt=document.getElementById('sgAlertTitle'),sgm=document.getElementById('sgAlertMsg');
+  const ap=d.profiles&&d.profiles[d.profileIdx];
+  if(d.autoSgActive){sgt.textContent='\u23F3 AUTO SG MEASURING';sgm.textContent=d.profiles[d.autoSgProfile].name+': stroke '+d.autoSgStroke+'/'+d.autoSgStrokes+'. Jam detection is OFF - STOP aborts and keeps the stored trips.';sga.style.display='block'}
+  else if(!d.sgSetUp){sgt.textContent='\u26A0 JAM DETECTION NOT SET UP';sgm.textContent='A speed profile has no StallGuard trip, so the press will not run. Empty the press, then run Auto SG in the Stall Guard section.';sga.style.display='block'}
+  else if(ap&&ap.floor){sgt.textContent='\u26A0 JAM DETECT LIMITED';sgm.textContent=ap.name+'\'s trip sits at the StallGuard floor, so detection relies on a stall spiking off it. Block-test this profile.';sga.style.display='block'}
+  else{sga.style.display='none'}
+  const asb=document.getElementById('asBtn');
+  asb.disabled=d.autoSgActive;
+  asb.textContent=d.autoSgActive?'Measuring...':'Auto SG';
+  document.getElementById('asInfo').textContent=d.sgCalCurrentMa?('Measured at '+d.sgCalCurrentMa+' mA'+(d.sgCalCurrentMa!==d.currentMa?' - current has changed since, re-run Auto SG':'')):'Not measured yet';
     document.getElementById('cp').textContent=d.position;
     document.getElementById('wzv').textContent=d.workZone;
   if(d.wifiStatus){document.getElementById('wfStatus').textContent=d.wifiStatus;document.getElementById('wfSSID').textContent=d.wifiSSID;document.getElementById('wfIP').textContent=d.wifiIP;
@@ -797,6 +810,10 @@ function ctl(url,opts){
   }).catch(()=>{toast('AutoLee did not answer.');return false});
 }
 function toggleRun(){ctl('/api/v1/motion/toggle_run')}
+function autoSg(){
+  if(!confirm('Auto SG runs the press through every speed profile with jam detection OFF, then sets each trip just above the highest reading.\n\nThe press must be EMPTY - nothing in the shell holder or die. STOP aborts and keeps the current trips.\n\nStart Auto SG?'))return;
+  ctl('/api/v1/motion/auto_sg');
+}
 function setSg(p){
   const inp=document.getElementById('sgIn'+p);
   const raw=inp.value.trim();

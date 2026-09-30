@@ -63,6 +63,10 @@ void handleMotion();  // pump, call every loop iteration
 void startRunBetweenEndpoints();
 void requestGracefulStop();
 bool calibrateEndpointsSensorless();
+// Measure every profile's StallGuard trip: runs the press with jam detection
+// off (it must be empty) and ends with a graceful stop. False if it did not
+// start. Progress is in MotionState::autoSg*.
+bool startAutoSg();
 void safeCreepHome();
 // NOTE: there is deliberately no second "return home" entry point. An earlier
 // return_home_up_safe() lived here - a moveTo-with-stall-retry homing strategy

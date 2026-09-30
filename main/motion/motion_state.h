@@ -4,7 +4,8 @@
 
 #include "freertos/FreeRTOS.h"
 
-#include "config.h"  // SpeedProfile, NUM_PROFILES
+#include "auto_sg.h"  // autolee::allTripsSet()
+#include "config.h"   // SpeedProfile, NUM_PROFILES
 
 // ============================================================================
 //  Cross-task motion state - the READ half of the concurrency rework
@@ -79,11 +80,22 @@ struct MotionState {
   // speed and trip are only valid as a pair, and the stepper keeps the speed
   // of the move in flight. -1 = none. Not persisted.
   int8_t pendingProfile = -1;
+  // Trips ship as 0: the right value depends on the supply voltage, motor,
+  // current and mechanics of each press, so Auto SG measures them, and the
+  // press refuses to run until every profile has one. Speeds are persisted
+  // with the trips - a trip holds only at the speed it was set at.
   SpeedProfile profiles[NUM_PROFILES] = {
-      {"Slow", 15000, 350},
-      {"Normal", 35000, 15},
-      {"Fast", 45000, 1},
+      {"Slow", 15000, 0},
+      {"Normal", 30000, 0},
+      {"Fast", 40000, 0},
   };
+  uint16_t sgCalCurrentMa = 0;  // run current Auto SG last measured at; 0 = never
+
+  // Auto SG progress (runtime only). While active the run's jam detection is
+  // off and the strokes are not work cycles.
+  bool autoSgActive = false;
+  uint8_t autoSgProfile = 0;
+  uint16_t autoSgStroke = 0;
 
   uint16_t runCurrentMa = 3500;
   int32_t sgWorkZoneSteps = 5500;
@@ -159,5 +171,10 @@ inline MotionState snapshot() {
 // profile table itself). Still macros because they are used as lvalues; they
 // resolve to the LIVE state, so outside pump_task read the equivalent fields
 // off a snapshot instead, and only assign under a Guard.
+// Every profile has a StallGuard trip; 0 means "not set".
+inline bool jamDetectionSetUp(const MotionState &ms) {
+  return autolee::allTripsSet(NUM_PROFILES, [&ms](uint8_t i) { return ms.profiles[i].sg_trip; });
+}
+
 #define ui_speed_hz (g_motion.profiles[g_motion.activeProfile].speed_hz)
 #define RUN_SG_TRIP (g_motion.profiles[g_motion.activeProfile].sg_trip)

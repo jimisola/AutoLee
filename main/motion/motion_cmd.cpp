@@ -24,6 +24,7 @@ namespace {
 std::atomic<uint32_t> s_toggleRun{0};
 std::atomic<bool> s_stop{false};
 std::atomic<bool> s_calibrate{false};
+std::atomic<bool> s_autoSg{false};
 std::atomic<bool> s_returnHome{false};
 std::atomic<bool> s_batchStart{false};
 std::atomic<bool> s_uiRefresh{false};
@@ -44,6 +45,7 @@ autolee::GateInput gateInput() {
   in.calibrated = g_motion.endpointsCalibrated;
   in.positionStale = g_motion.positionReferenceStale;
   in.batchTarget = g_motion.batchTarget;
+  in.sgSetUp = jamDetectionSetUp(g_motion);
   return in;
 }
 
@@ -102,6 +104,9 @@ bool abortRequested() {
 void clearAbort() {
   s_abort.store(false);
 }
+void requestAutoSg() {
+  s_autoSg.store(true);
+}
 void requestProfile(uint8_t idx) {
   s_profile.store((int32_t)idx);
 }
@@ -128,6 +133,16 @@ void processPendingCommands() {
       calibrateEndpointsSensorless();
     else
       logRefusal("Motion", "Calibration", r);
+  }
+
+  if (s_autoSg.exchange(false)) {
+    const autolee::Refusal r = autolee::gateAutoSg(gateInput());
+    if (r == autolee::Refusal::None) {
+      startAutoSg();
+      ui_update_run_button();
+    } else {
+      logRefusal("Motion", "Auto SG", r);
+    }
   }
 
   if (s_returnHome.exchange(false)) {
@@ -202,6 +217,7 @@ void processPendingCommands() {
     ui_update_speed_val();
     ui_update_profile_screen();
     ui_update_sg_val();
+    ui_update_main_warning();
   }
 
   int32_t ma = s_currentMa.exchange(-1);
@@ -217,6 +233,12 @@ void processPendingCommands() {
     // HTTP task alongside pump_task's StallGuard reads.
     tmc5160::rms_current(clamped);
     webLog("Motion", "Current set to %u mA", clamped);
+    // SG_RESULT scales with coil current, so measured trips hold only at theirs.
+    if (g_motion.sgCalCurrentMa != 0 && clamped != g_motion.sgCalCurrentMa) {
+      webLogLevel(LogLevel::Warn, "Motion",
+                  "Stall trips were measured at %u mA - re-run Auto SG at %u mA",
+                  g_motion.sgCalCurrentMa, clamped);
+    }
   }
 
   if (s_logClear.exchange(false)) {

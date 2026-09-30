@@ -42,7 +42,7 @@ sequenceDiagram
     else well-formed
         HTTP->>Gate: gateBatchStart(snapshot())
         alt already refusable
-            Gate-->>HTTP: NoBatchTarget / NotCalibrated /<br/>PositionUnreferenced / WrongState
+            Gate-->>HTTP: NoBatchTarget / NotCalibrated /<br/>PositionUnreferenced / JamDetectionNotSetUp /<br/>WrongState
             HTTP-->>Op: 409 {"error":"…","message":"…"}
         else looks possible
             Gate-->>HTTP: None
@@ -93,8 +93,8 @@ See [`UX.md`](UX.md#refused-actions).
 | `403 default_password` | Factory password still in effect | auth middleware |
 | `200 ok` | Queued, not already refusable | — |
 
-Reason slugs are `wrong_state`, `not_calibrated`, `position_unreferenced` and
-`no_batch_target`. They are part of the published contract
+Reason slugs are `wrong_state`, `not_calibrated`, `position_unreferenced`,
+`no_batch_target` and `jam_detection_not_set_up`. They are part of the published contract
 ([`api/openapi.yaml`](../api/openapi.yaml)) and are pinned by
 `host_test/test_command_gate`.
 

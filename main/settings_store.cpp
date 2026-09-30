@@ -65,10 +65,17 @@ Persisted capture() {
   p.calibrationCount = ms.calibrationCount;
   p.otaCount = ms.otaCount;
   p.resetCount = ms.resetCount;
+  // A trip is stored with the speed it holds at, so a firmware that changes a
+  // profile's speed drops it on the next load instead of trusting it.
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) p.sgTripSpeedHz[i] = ms.profiles[i].speed_hz;
+  p.sgCalCurrentMa = ms.sgCalCurrentMa;
   return p;
 }
 
-void apply(const Persisted &p) {
+// Returns how many stored trips were dropped for not matching their profile's
+// compiled speed.
+uint8_t apply(const Persisted &p) {
+  uint8_t dropped = 0;
   motion_state::Guard g;
   g_motion.runCurrentMa = p.runCurrentMa;
   g_motion.rawUp = p.rawUp;
@@ -77,7 +84,13 @@ void apply(const Persisted &p) {
   g_motion.downOffsetSteps = p.downOffsetSteps;
   g_motion.sgWorkZoneSteps = p.sgWorkZoneSteps;
   g_motion.counter = p.counter;
-  for (uint8_t i = 0; i < NUM_PROFILES; i++) g_motion.profiles[i].sg_trip = p.sgTrip[i];
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) {
+    const uint16_t trip =
+        tripAtCompiledSpeed(p.sgTrip[i], p.sgTripSpeedHz[i], g_motion.profiles[i].speed_hz);
+    if (trip != p.sgTrip[i]) dropped++;
+    g_motion.profiles[i].sg_trip = trip;
+  }
+  g_motion.sgCalCurrentMa = p.sgCalCurrentMa;
   g_motion.activeProfile = p.activeProfile;
   g_motion.endpointsCalibrated = p.endpointsCalibrated != 0;
   g_motion.lifetimeCycles = p.lifetimeCycles;
@@ -94,6 +107,7 @@ void apply(const Persisted &p) {
   // hard stop. Same guard as the fields above so a snapshotting reader never
   // sees "calibrated" without the matching staleness.
   if (g_motion.endpointsCalibrated) g_motion.positionReferenceStale = true;
+  return dropped;
 }
 
 // Restore exactly the fields capture()/apply() cover to MotionState's
@@ -121,6 +135,7 @@ void applyCompiledDefaults() {
   g_motion.sgWorkZoneSteps = def.sgWorkZoneSteps;
   g_motion.counter = def.counter;
   for (uint8_t i = 0; i < NUM_PROFILES; i++) g_motion.profiles[i].sg_trip = def.profiles[i].sg_trip;
+  g_motion.sgCalCurrentMa = def.sgCalCurrentMa;
   g_motion.activeProfile = def.activeProfile;
   // The lifetime health counters are part of the persisted set, so they are
   // part of what a deliberate "reset to defaults" clears - the operator asked
@@ -234,7 +249,13 @@ void load() {
   if (why) {
     fallbackToDefaults(why);
   } else {
-    apply(p);
+    const uint8_t dropped = apply(p);
+    if (dropped) {
+      webLogLevel(LogLevel::Warn, "Settings",
+                  "%u stall trip(s) were set at a different profile speed and were cleared - "
+                  "run Auto SG",
+                  (unsigned)dropped);
+    }
     if (migrated) {
       webLog("Settings", "Migrated from v%u to v%u", (unsigned)foundVersion, (unsigned)kVersion);
     }

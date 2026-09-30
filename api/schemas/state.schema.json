@@ -11,7 +11,8 @@
     "upOffset", "downOffset", "position", "sgTrip", "workZone", "currentMa",
     "profileIdx", "profileName", "profiles",
     "wifiStatus", "wifiSSID", "wifiIP", "wifiHostname",
-    "batchTarget", "batchCount", "batchActive"
+    "batchTarget", "batchCount", "batchActive",
+    "sgSetUp", "sgCalCurrentMa", "autoSgActive", "autoSgProfile", "autoSgStroke", "autoSgStrokes"
   ],
   "properties": {
     "version": { "type": "string" },
@@ -49,11 +50,20 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "hz", "sg"],
+        "required": ["name", "hz", "sg", "floor"],
         "properties": {
           "name": { "type": "string" },
           "hz": { "type": "integer", "minimum": 0 },
-          "sg": { "type": "integer", "minimum": 0, "maximum": 1023 }
+          "sg": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1023,
+            "description": "StallGuard trip; a jam is SG_RESULT above it. 0 means not set, and the press refuses to run until every profile has one (see sgSetUp)."
+          },
+          "floor": {
+            "type": "boolean",
+            "description": "The trip sits at the SG floor (Auto SG read only 0/1 at this speed). Detection then relies on a stall spiking off the floor and is limited; block-test the profile."
+          }
         }
       }
     },
@@ -66,6 +76,19 @@
     },
     "batchTarget": { "type": "integer", "minimum": 0 },
     "batchCount": { "type": "integer", "minimum": 0 },
-    "batchActive": { "type": "boolean" }
+    "batchActive": { "type": "boolean" },
+    "sgSetUp": {
+      "type": "boolean",
+      "description": "Every profile has a StallGuard trip. While false the device refuses to start a run (409 jam_detection_not_set_up); POST /api/v1/motion/auto_sg sets them."
+    },
+    "sgCalCurrentMa": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Run current Auto SG last measured at, in mA. 0 if it never ran. Trips hold only at this current."
+    },
+    "autoSgActive": { "type": "boolean", "description": "Auto SG is measuring; jam detection is off for this run." },
+    "autoSgProfile": { "type": "integer", "minimum": 0, "maximum": 2, "description": "Profile being measured while autoSgActive." },
+    "autoSgStroke": { "type": "integer", "minimum": 0, "description": "Measured strokes so far on that profile." },
+    "autoSgStrokes": { "type": "integer", "minimum": 0, "description": "Strokes Auto SG measures per profile." }
   }
 }

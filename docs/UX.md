@@ -21,6 +21,7 @@ are cheap precisely because their state is re-derivable.
 | 2 | Loss of access; recovery costs a trip to the machine | Reset Pwd, Reset WiFi | two-tap arm | `confirm()` |
 | 3 | Cheap, re-derivable state | Reset Count, Clear Log | none — but the control must be a visible, labelled button | none |
 | 4 | Moves or reboots the press | OTA upload | (not offered on the panel) | `confirm()`, and the text must say a running press is stopped |
+| 5 | Runs the press with jam detection off | Auto SG | two-tap arm | `confirm()`, and the text must say the press has to be empty |
 
 ### The gates
 
@@ -43,7 +44,7 @@ cheap enough to skip confirmation, it still has to look like a control.
 ## Refused actions
 
 A command the press cannot carry out — no calibration, an unreferenced axis, no
-batch target, wrong state — must say so on the surface the tap came from. Both
+StallGuard trips, no batch target, wrong state — must say so on the surface the tap came from. Both
 UIs answer with the same sentence, `autolee::refusalMessage()` in
 [`lib/autolee_logic/command_gate.h`](../lib/autolee_logic/command_gate.h).
 
