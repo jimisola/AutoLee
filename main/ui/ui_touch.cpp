@@ -67,7 +67,8 @@ static bool ui_lock(const char *what) {
 // ==========================================================================
 //  LVGL UI HELPERS
 // ==========================================================================
-static void confirm_disarm_all();  // defined with the ConfirmArm helpers below
+static void confirm_disarm_all();            // defined with the ConfirmArm helpers below
+static void wifi_toggle_show(bool enabled);  // ditto
 
 void go(lv_obj_t *scr) {
   // lv_scr_load touches LVGL internals, so it must hold the port lock. go() is
@@ -545,7 +546,10 @@ static std::string qrEscape(const std::string &in) {
 
 void ui_update_wifi_label() {
   if (!ui_lock("ui_update_wifi_label")) return;
-  const bool apSetup = wifi_mgr::isApMode() && !wifi_mgr::isConnected();
+  const bool enabled = wifi_mgr::isEnabled();
+  const bool apSetup = enabled && wifi_mgr::isApMode() && !wifi_mgr::isConnected();
+
+  wifi_toggle_show(enabled);
 
   // AP-setup view: the join QR + the key text.
   if (wifi_qr && lbl_wifi_key) {
@@ -593,7 +597,10 @@ void ui_update_wifi_label() {
       if (card) lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
     } else {
       if (card) lv_obj_remove_flag(card, LV_OBJ_FLAG_HIDDEN);
-      if (wifi_mgr::isConnected()) {
+      if (!enabled) {
+        lv_label_set_text(lbl_wifi_status,
+                          "WiFi is off\n\nNo network and no setup AP. Turn it on to join one.");
+      } else if (wifi_mgr::isConnected()) {
         // Three labelled lines. The SSID used to be unlabelled, which was
         // fine when it was the only bare string; with an address and a name
         // under it, an unlabelled first line reads as part of the same list.
@@ -607,9 +614,9 @@ void ui_update_wifi_label() {
     }
   }
 
-  // Nothing to reset while unconfigured - hide the button in AP-setup mode.
+  // Nothing to reset while unconfigured or switched off.
   if (btn_wifi_reset) {
-    if (apSetup)
+    if (apSetup || !enabled)
       lv_obj_add_flag(btn_wifi_reset, LV_OBJ_FLAG_HIDDEN);
     else
       lv_obj_remove_flag(btn_wifi_reset, LV_OBJ_FLAG_HIDDEN);
@@ -850,6 +857,9 @@ static ConfirmArm arm_reset_cal{nullptr, nullptr, "Reset Cal", 0xB42318};
 static ConfirmArm arm_reset_pwd{nullptr, nullptr, "Reset Pwd", 0xB42318};
 static ConfirmArm arm_reset_wifi{nullptr, nullptr, "Reset WiFi", 0xB42318};
 static ConfirmArm arm_auto_sg{nullptr, nullptr, "Auto SG", 0xB42318};
+// The radio switch. Only "off" costs access, so only it arms; the idle label
+// and colour follow the WiFi state (ui_update_wifi_label()).
+static ConfirmArm arm_wifi_toggle{nullptr, nullptr, "WiFi Off", 0xB42318};
 
 static void confirm_set_label(ConfirmArm &a, const char *txt, uint32_t color) {
   if (!a.btn) return;
@@ -896,6 +906,7 @@ static void confirm_disarm_all() {
   confirm_disarm(arm_reset_pwd);
   confirm_disarm(arm_reset_wifi);
   confirm_disarm(arm_auto_sg);
+  confirm_disarm(arm_wifi_toggle);
 }
 
 static void on_reset_cal(lv_event_t *e) {
@@ -944,6 +955,27 @@ static void on_reset_wifi(lv_event_t *e) {
   // callback returns immediately; the WiFi screen's status updates via
   // ui_update_wifi_label() when the task finishes.
   wifi_mgr::requestResetToSetupAp();
+}
+
+static void wifi_toggle_show(bool enabled) {
+  arm_wifi_toggle.idleText = enabled ? "WiFi Off" : "WiFi On";
+  arm_wifi_toggle.idleColor = enabled ? 0xB42318 : 0x1F6FEB;
+  if (!arm_wifi_toggle.timer) {
+    confirm_set_label(arm_wifi_toggle, arm_wifi_toggle.idleText, arm_wifi_toggle.idleColor);
+  }
+}
+
+// Off costs access (docs/UX.md class 2), so it two-tap arms; on restores it
+// and does not. Either way the switch runs on wifi_mgr's own task, and
+// ui_update_wifi_label() redraws the screen when it finishes.
+static void on_wifi_toggle(lv_event_t *e) {
+  if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+  const bool enabled = wifi_mgr::isEnabled();
+  if (enabled && !confirm_tap(arm_wifi_toggle)) return;
+  confirm_disarm(arm_wifi_toggle);
+  if (wifi_mgr::requestEnabled(!enabled)) {
+    confirm_set_label(arm_wifi_toggle, enabled ? "Stopping" : "Starting", 0x444444);
+  }
 }
 
 // The counter is capped for display only - motion.cpp keeps counting past
@@ -1358,16 +1390,21 @@ static void build_wifi_screen() {
   lv_obj_t *b_wifi_reset = make_btn(wc, "Reset WiFi", 140, 44, 0xB42318, &lv_font_montserrat_20);
   btn_wifi_reset = b_wifi_reset;  // for visibility toggling in ui_update_wifi_label
   arm_reset_wifi.btn = b_wifi_reset;
-  lv_obj_t *b_back_w = make_btn(wn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
-  lv_obj_align(b_back_w, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_t *b_back_w = make_btn(wn, "Back", 62, 40, 0x2A2A2A, &lv_font_montserrat_16);
+  lv_obj_align(b_back_w, LV_ALIGN_LEFT_MID, 0, 0);
   btn_wifi_back = b_back_w;  // hidden in AP-setup mode; Skip takes its spot in the nav bar
+  // The radio switch shares the nav bar so it is there in every view,
+  // including the setup AP's.
+  arm_wifi_toggle.btn = make_btn(wn, "WiFi Off", 86, 40, 0xB42318, &lv_font_montserrat_16);
+  lv_obj_align(arm_wifi_toggle.btn, LV_ALIGN_RIGHT_MID, 0, 0);
+  lv_obj_add_event_cb(arm_wifi_toggle.btn, on_wifi_toggle, LV_EVENT_CLICKED, nullptr);
 
   // AP-setup only: let a user who doesn't want WiFi leave the auto-shown QR
   // screen and use the press touch-only. Lives in the nav bar, in Back's spot,
   // so the bar is never an empty rectangle (Back and Skip toggle inversely).
   // The device stays in AP mode; WiFi can be configured later via Config -> WiFi.
-  btn_wifi_skip = make_btn(wn, "Skip", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
-  lv_obj_align(btn_wifi_skip, LV_ALIGN_CENTER, 0, 0);
+  btn_wifi_skip = make_btn(wn, "Skip", 62, 40, 0x2A2A2A, &lv_font_montserrat_16);
+  lv_obj_align(btn_wifi_skip, LV_ALIGN_LEFT_MID, 0, 0);
   lv_obj_add_flag(btn_wifi_skip, LV_OBJ_FLAG_HIDDEN);
 
   lv_obj_add_event_cb(

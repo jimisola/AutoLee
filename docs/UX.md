@@ -18,7 +18,7 @@ are cheap precisely because their state is re-derivable.
 | Class | What it costs | Examples | Panel gate | Web gate |
 |---|---|---|---|---|
 | 1 | Irreversible loss of a physical measurement | Reset Cal | two-tap arm | `confirm()` |
-| 2 | Loss of access; recovery costs a trip to the machine | Reset Pwd, Reset WiFi | two-tap arm | `confirm()` |
+| 2 | Loss of access; recovery costs a trip to the machine | Reset Pwd, Reset WiFi, WiFi Off | two-tap arm | `confirm()` (WiFi Off: not offered on the web) |
 | 3 | Cheap, re-derivable state | Reset Count, Clear Log | none — but the control must be a visible, labelled button | none |
 | 4 | Moves or reboots the press | OTA upload | (not offered on the panel) | `confirm()`, and the text must say a running press is stopped |
 | 5 | Runs the press with jam detection off | Auto SG | two-tap arm | `confirm()`, and the text must say the press has to be empty |
