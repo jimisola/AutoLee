@@ -137,7 +137,7 @@ static constexpr long HOME_FINAL_TOL = 50;
 //  RUNTIME STALL DETECTION
 // ==========================================================================
 static constexpr uint16_t RUN_SG_TRIP_MIN = 0;
-static constexpr uint16_t RUN_SG_TRIP_MAX = 500;
+static constexpr uint16_t RUN_SG_TRIP_MAX = 1023;   // the full SG_RESULT range
 static constexpr int32_t RUN_BACKOFF_STEPS = 1000;  // steps to back off after jam
 static constexpr uint8_t RUN_SG_HIGH_NEEDED = 2;    // need this many high readings to trigger jam
 // Extra headroom the high-reading counter may climb past RUN_SG_HIGH_NEEDED
@@ -148,6 +148,7 @@ static constexpr uint8_t RUN_SG_HIGH_SATURATION_MARGIN = 4;
 static constexpr uint8_t RUN_SG_LOW_DECAY_COUNT = 3;
 // Throttle for the periodic RUN-phase SG telemetry line to the web log.
 static constexpr uint32_t RUN_SG_LOG_INTERVAL_MS = 500;
+static constexpr uint32_t RUN_SG_MAX_LOG_INTERVAL_MS = 150;  // throttle for "SG new max" lines
 // Throttle for the periodic calibration (move-until-stall) SG telemetry line.
 static constexpr uint32_t CAL_MUS_LOG_INTERVAL_MS = 400;
 

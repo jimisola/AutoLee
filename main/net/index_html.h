@@ -647,11 +647,11 @@ function buildProfileBtns(profiles,activeIdx){
 }
 
 let sgBuilt=false;
-// Mirrors RUN_SG_TRIP_MIN/MAX in main/config.h (and the "0 - 500" hint the rows
+// Mirrors RUN_SG_TRIP_MIN/MAX in main/config.h (and the "0 - 1023" hint the rows
 // render). sgLast[i] is the last value the firmware reported for profile i - the
 // value an invalid entry is reverted to, and the one used to tell a real edit
 // apart from a bare blur. See setSg().
-const SG_MIN=0,SG_MAX=500;
+const SG_MIN=0,SG_MAX=1023;
 let sgLast=[];
 function buildSgControls(profiles,activeIdx){
   const c=document.getElementById('sgProfiles');
@@ -682,7 +682,7 @@ function buildSgControls(profiles,activeIdx){
     div.style.cssText='margin-bottom:8px;padding:6px 8px;border-radius:8px;background:'+(isActive?'#1a2a3a':'#161616');
     div.innerHTML='<div class="sr" id="sgLbl'+i+'" style="margin-bottom:4px">'+p.name+' ('+Math.round(p.hz/1000)+'kHz) <span style="color:'+(isActive?'var(--green)':'var(--muted)')+'">SG='+p.sg+'</span></div>'
       +'<div style="display:flex;align-items:center;gap:8px">'
-      +'<input type="text" inputmode="numeric" pattern="[0-9]*" id="sgIn'+i+'" value="'+p.sg+'" style="width:80px;padding:6px 8px;background:#222;border:1px solid #444;border-radius:6px;color:#fff;font-size:.9em;text-align:center" placeholder="0-500">'
+      +'<input type="text" inputmode="numeric" pattern="[0-9]*" id="sgIn'+i+'" value="'+p.sg+'" style="width:80px;padding:6px 8px;background:#222;border:1px solid #444;border-radius:6px;color:#fff;font-size:.9em;text-align:center" placeholder="0-1023">'
       +'<button class="btn btn-blue btn-sm" id="sgBtn'+i+'">Set</button>'
       +'<span style="color:var(--dim);font-size:.7em">0 – 500</span></div>';
     c.appendChild(div);

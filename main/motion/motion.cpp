@@ -29,6 +29,7 @@
 #include "sg_blanking.h"
 #include "batch.h"
 #include "calibration.h"
+#include "stroke_stats.h"
 
 static inline uint32_t millis() {
   return (uint32_t)(esp_timer_get_time() / 1000);
@@ -101,6 +102,23 @@ static void applyPendingProfile() {
 // telemetry lines keep reporting the same numbers.
 static autolee::StallCounter s_stall(RUN_SG_HIGH_NEEDED, RUN_SG_HIGH_SATURATION_MARGIN,
                                      RUN_SG_LOW_DECAY_COUNT);
+
+static autolee::StrokeStats s_stroke;
+
+// What the stroke's SG readings did - the numbers a trip is tuned against.
+// Also reported on a stop or jam, where the stroke that matters most would
+// otherwise go unreported.
+static void logStrokeStats(const char *why, LogLevel level) {
+  if (s_stroke.empty()) return;
+  if (s_stroke.onlyFloor()) {
+    webLogLevel(level, "Motion", "SG stroke %s: all %u readings at floor trip=%u spd=%lu", why,
+                s_stroke.floor(), RUN_SG_TRIP, (unsigned long)ui_speed_hz);
+    return;
+  }
+  webLogLevel(level, "Motion", "SG stroke %s: max=%u min=%u floor=%u trip=%u spd=%lu", why,
+              s_stroke.max(), s_stroke.min(), s_stroke.floor(), RUN_SG_TRIP,
+              (unsigned long)ui_speed_hz);
+}
 
 static inline void resetStallCounter() {
   s_stall.reset();
@@ -237,11 +255,13 @@ void startRunBetweenEndpoints() {
   resetStallCounter();
   applyPendingProfile();
 
-  // sg_trip == 0 turns runtime jam detection off entirely (see handleMotion's
-  // early break). That is a legitimate setting - jam detection guards brass,
-  // not people - but it persists across reboots and was previously silent, so
-  // a press could run indefinitely with no stall detection and nothing
-  // anywhere saying so. Say it, loudly, on every run start.
+  s_stroke.reset();
+
+  // sg_trip == 0 turns runtime jam detection off entirely (SG is still read
+  // and logged, which is how raw values are measured). That is a legitimate setting - jam detection
+  // guards brass, not people - but it persists across reboots and was previously silent, so a press
+  // could run indefinitely with no stall detection and nothing anywhere saying so. Say it, loudly,
+  // on every run start.
   if (RUN_SG_TRIP == 0) {
     webLogLevel(LogLevel::Warn, "Motion",
                 "Jam detection is DISABLED (sg_trip=0) - starting run with no stall protection");
@@ -298,6 +318,7 @@ void requestGracefulStop() {
     webLog("Motion", "Graceful stop ignored in state %u", (unsigned)g_motion.runState);
     return;
   }
+  logStrokeStats("STOPPED", LogLevel::Info);
   applyPendingProfile();
   stepper::setAcceleration(RUN_DECEL);
   stepper::moveTo(up);
@@ -360,6 +381,8 @@ void handleMotion() {
             break;
           }
         }
+        logStrokeStats(headingDown() ? "DOWN" : "UP", LogLevel::Debug);
+        s_stroke.reset();
         applyPendingProfile();
         const uint32_t now = millis();
         long target;
@@ -376,9 +399,9 @@ void handleMotion() {
         break;
       }
 
-      // --- Runtime stall detection ---
-      if (RUN_SG_TRIP == 0) break;
-
+      // --- Runtime SG monitoring and stall detection ---
+      // SG is read with the trip at 0 too: detection off is the state raw
+      // values are measured in. Only the trip comparison below is gated.
       uint32_t sinceChange = millis() - g_motion.lastDirectionChangeMs;
 
       uint32_t accelWindowMs = autolee::accelBlankMs(ui_speed_hz, RUN_DECEL);
@@ -409,16 +432,30 @@ void handleMotion() {
       }
 
       uint16_t sg = read_sg();
-      if (sg <= 1) break;
+      const bool newMax = s_stroke.add(sg);
+      if (sg <= autolee::kSgFloor) break;
+
+      // The periodic line below steps right over a ~2 ms load spike, which is
+      // the reading that matters; new maxima are logged as they happen.
+      static uint32_t lastMaxLogMs = 0;
+      if (newMax && (millis() - lastMaxLogMs) > RUN_SG_MAX_LOG_INTERVAL_MS) {
+        webLogLevel(LogLevel::Debug, "Motion", "SG new max=%u trip=%u pos=%ld t=%lu", sg,
+                    RUN_SG_TRIP, pos, (unsigned long)sinceChange);
+        lastMaxLogMs = millis();
+      }
 
       static uint32_t lastSGPrintMs = 0;
       if ((millis() - lastSGPrintMs) > RUN_SG_LOG_INTERVAL_MS) {
         int32_t distToTarget = labs(pos - g_motion.currentTarget);
-        webLogLevel(LogLevel::Debug, "Motion", "RUN SG=%u trip=%u pos=%ld dist=%ld t=%lu hi=%u/%u",
-                    sg, RUN_SG_TRIP, pos, (long)distToTarget, (unsigned long)sinceChange,
-                    g_motion.runSGHighCount, RUN_SG_HIGH_NEEDED);
+        webLogLevel(LogLevel::Debug, "Motion",
+                    "RUN SG=%u max=%u min=%u trip=%u%s pos=%ld dist=%ld t=%lu hi=%u/%u", sg,
+                    s_stroke.max(), s_stroke.min(), RUN_SG_TRIP, RUN_SG_TRIP == 0 ? " [OFF]" : "",
+                    pos, (long)distToTarget, (unsigned long)sinceChange, g_motion.runSGHighCount,
+                    RUN_SG_HIGH_NEEDED);
         lastSGPrintMs = millis();
       }
+
+      if (RUN_SG_TRIP == 0) break;
 
       const bool jam = s_stall.update(sg, RUN_SG_TRIP);
       {
@@ -436,6 +473,8 @@ void handleMotion() {
         if (jam) {
           webLogLevel(LogLevel::Error, "Motion", "JAM! SG=%u trip=%u pos=%ld tgt=%ld cnt=%u", sg,
                       RUN_SG_TRIP, pos, g_motion.currentTarget, g_motion.runSGHighCount);
+          logStrokeStats("JAMMED", LogLevel::Warn);
+          s_stroke.reset();
 
           stepper::forceStop();
           fas_wait_for_stop();
