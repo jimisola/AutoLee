@@ -488,7 +488,8 @@ ESP‑IDF `captive_portal` + `http_server` SSE examples.
   now true for the run-state transitions themselves: `motorTransition()` /
   `canStart()` (`motor_fsm.h`) are called from `motion.cpp` and `motion_cmd.cpp`
   — see #4b above.
-- Karl's TMC tuning (TOFF=4, TBL=1, INTPOL) applied.
+- Karl's TMC tuning applied: INTPOL, and TOFF=5/TBL=2 as of upstream v1.28
+  (v1.10.0 had TOFF=4/TBL=1).
 
 **Still requires the motor/TMC5160 rig before it can be trusted:**
 - [ ] Calibration finds both mechanical stops.
