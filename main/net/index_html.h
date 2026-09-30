@@ -684,7 +684,7 @@ function buildSgControls(profiles,activeIdx){
       +'<div style="display:flex;align-items:center;gap:8px">'
       +'<input type="text" inputmode="numeric" pattern="[0-9]*" id="sgIn'+i+'" value="'+p.sg+'" style="width:80px;padding:6px 8px;background:#222;border:1px solid #444;border-radius:6px;color:#fff;font-size:.9em;text-align:center" placeholder="0-1023">'
       +'<button class="btn btn-blue btn-sm" id="sgBtn'+i+'">Set</button>'
-      +'<span style="color:var(--dim);font-size:.7em">0 – 500</span></div>';
+      +'<span style="color:var(--dim);font-size:.7em">0 – 1023</span></div>';
     c.appendChild(div);
     // Attach event listeners properly (not via inline onclick)
     document.getElementById('sgBtn'+i).addEventListener('click',function(){setSg(i)});
