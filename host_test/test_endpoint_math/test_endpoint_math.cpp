@@ -61,6 +61,23 @@ void test_guard_enforced_and_downoffset_backcomputed() {
   TEST_ASSERT_EQUAL_INT32(-50, e.downOffset);   // dnEff - rawDown = 50 - 100
 }
 
+void test_target_at_an_endpoint_is_classified_by_it() {
+  TEST_ASSERT_TRUE(targetIsDown(20000, 0, 20000));
+  TEST_ASSERT_FALSE(targetIsDown(0, 0, 20000));
+}
+
+// The case exact equality got wrong: DOWN was edited after the target was
+// captured from it, so the target now matches neither endpoint.
+void test_stale_down_target_is_still_down() {
+  TEST_ASSERT_TRUE(targetIsDown(20000, 0, 17000));  // DOWN made shallower
+  TEST_ASSERT_TRUE(targetIsDown(20000, 0, 23000));  // DOWN made deeper
+}
+
+void test_stale_up_target_is_still_up() {
+  TEST_ASSERT_FALSE(targetIsDown(0, 800, 20000));
+  TEST_ASSERT_FALSE(targetIsDown(0, -800, 20000));
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_clamp_basic);
@@ -69,5 +86,8 @@ int main(int, char **) {
   RUN_TEST(test_offsets_are_clamped);
   RUN_TEST(test_offsets_clamped_low_side);
   RUN_TEST(test_guard_enforced_and_downoffset_backcomputed);
+  RUN_TEST(test_target_at_an_endpoint_is_classified_by_it);
+  RUN_TEST(test_stale_down_target_is_still_down);
+  RUN_TEST(test_stale_up_target_is_still_up);
   return UNITY_END();
 }
