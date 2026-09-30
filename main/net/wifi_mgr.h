@@ -21,6 +21,14 @@ void stopForReboot();
 
 bool isConnected();
 bool isApMode();
+
+// The operator's radio switch. Off stops the driver - no network, no setup AP -
+// and persists across reboots; on rejoins the stored network or brings up the
+// setup AP, as at boot. Applied live on its own task, like startLiveSwitch();
+// false if another transition is in flight. Only the panel calls it: switching
+// off from the web UI would cut off the caller.
+bool isEnabled();
+bool requestEnabled(bool on);
 // True once the device has ever reached GOT_IP on a real network. Latched in
 // NVS and never cleared, including by clearCredentials() - a WiFi reset must not
 // discard a web password the operator already set. Drives the web auth policy:

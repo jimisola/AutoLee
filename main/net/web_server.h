@@ -3,6 +3,9 @@
 // Web server (native ESP-IDF via PsychicHttp), ported from src/web_server.cpp.
 // See docs/PLAN.md Phase 5.
 void setupWebServer();
+// Starts the server if it is not running yet: it cannot start with no network
+// up, which is every boot with the radio switched off (wifi_mgr).
+void webServerEnsureStarted();
 void broadcastState();   // sse_task (app_main.cpp): SSE state + log push, rate-limited to
                          // SSE_INTERVAL_MS. Deliberately NOT called from pump_task - its
                          // blocking socket send() must never share a task/watchdog with

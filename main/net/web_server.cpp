@@ -1709,8 +1709,20 @@ void setupWebServer() {
     server.onNotFound(redirectToRoot);
   }
 
-  server.begin();
-  ESP_LOGI(TAG, "Web server started on port 80");
+  webServerEnsureStarted();
+}
+
+// PsychicHttp refuses to start with no interface up - which is every boot with
+// the radio switched off - so starting is retried when WiFi comes back on.
+void webServerEnsureStarted() {
+  static bool s_started = false;
+  if (s_started) return;
+  if (server.begin() == ESP_OK) {
+    s_started = true;
+    ESP_LOGI(TAG, "Web server started on port 80");
+  } else {
+    ESP_LOGW(TAG, "Web server not started - no network yet");
+  }
 }
 
 static uint32_t s_lastSSEMs = 0;

@@ -37,7 +37,13 @@ void say(const std::string &text) {
   }
 }
 
+const char *kWifiOff = "WiFi is switched off - turn it on from the panel (Config -> WiFi)\n";
+
 void handle_wifi_scan() {
+  if (!wifi_mgr::isEnabled()) {
+    say(kWifiOff);
+    return;
+  }
   if (wifi_mgr::transitionInFlight()) {
     say("a WiFi change is in progress - try again in a few seconds\n");
     return;
@@ -54,6 +60,10 @@ void handle_wifi_scan() {
 }
 
 void handle_wifi_info() {
+  if (!wifi_mgr::isEnabled()) {
+    say(kWifiOff);
+    return;
+  }
   autolee::LinkInfo link;
   if (wifi_mgr::staLink(link)) {
     say(autolee::format_link(link));

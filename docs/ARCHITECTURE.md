@@ -139,7 +139,8 @@ inherited from the Arduino firmware and produced a whole category of field
 bugs: the GPIO8/TMC_CS strapping hang, a `vTaskDelete`-inside-lwIP deadlock,
 the lost first LVGL flush.) `wifi_mgr::startLiveSwitch()` and
 `wifi_mgr::requestResetToSetupAp()` each spawn a short-lived task
-(`wifi_switch` / `wifi_reset`, priority 3, self-deleting) that reconfigures the
+(`wifi_switch` / `wifi_reset`, priority 3, self-deleting), as does the panel's
+radio switch, `wifi_mgr::requestEnabled()` (`wifi_off` / `wifi_on`) that reconfigures the
 running WiFi driver and then updates the LCD WiFi screen. A single in-flight
 guard (`s_switching`) serializes them — callers get `false` (HTTP maps it to
 409) instead of a second concurrent transition. They touch no motion state and

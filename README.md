@@ -105,6 +105,7 @@ This is expected after every E-stop — it is the machine refusing to drive to s
 
 ### WiFi & Networking
 - **Auto-connect** — attempts saved credentials on boot, falls back to AP if it fails
+- **Radio switch** — Config → WiFi → **WiFi Off** (two-tap) turns the radio off entirely: no network, no setup AP, remembered across restarts. **WiFi On** brings it back without a restart. Only on the touch panel, since switching off from the web UI would cut off the browser doing it
 - **Captive portal** — WPA2 AP mode (`AutoLee-Setup`, per-device key shown on the LCD as a join QR) with DNS redirect so any joined device gets the setup page automatically
 - **Works with no network at all** — press Skip on the setup screen and the press is fully usable from the touch UI and from a phone on its own AP, with no web password required; being able to read the AP key off the screen *is* the access control. A web password only becomes mandatory once the device has joined a WiFi network for the first time
 - **Network scanner** — scans available WiFi networks and presents them in a dropdown

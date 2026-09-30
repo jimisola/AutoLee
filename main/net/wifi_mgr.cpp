@@ -18,6 +18,7 @@
 #include "wifi_scan.h"  // autolee::Survey, strongest_per_ssid(), bssid_to_string()
 #include "globals.h"    // webLog(), uiRepaintRequested
 #include "ui_touch.h"
+#include "web_server.h"  // webServerEnsureStarted()
 
 namespace wifi_mgr {
 
@@ -40,6 +41,11 @@ static constexpr int kConnectedBit = BIT0;
 // credentials still stored - cannot silently reopen an already-networked rig.
 static const char *kNvsJoinedKey = "joined";
 static bool s_ever_joined = false;
+
+// The operator's radio switch (panel only). Persisted; absent means on, so a
+// fresh device still comes up with its setup AP.
+static const char *kNvsOffKey = "wifioff";
+static volatile bool s_disabled = false;
 
 static const char *kNvsApKeyKey = "apkey";
 // Per-device WPA2 key for the setup AP. Generated once and persisted, so it's
@@ -102,6 +108,7 @@ static std::string s_connected_ssid;
 static void markEverJoined();
 // Defined below start(), which calls it.
 static void startSetupAp(bool wifi_already_started);
+static void bringUp();
 
 static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t event_id, void *data) {
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -123,7 +130,7 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
     // races the config change with the OLD credentials - the "sta is
     // connecting, cannot set config" failure the first hardware self-test
     // caught.
-    if ((!s_ap_mode && !s_switching) || s_sta_retry) esp_wifi_connect();
+    if (!s_disabled && ((!s_ap_mode && !s_switching) || s_sta_retry)) esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
     // Clear the flag so isConnected() stops lying the moment the link drops.
     s_connected = false;
@@ -140,8 +147,9 @@ static void wifi_event_handler(void *, esp_event_base_t event_base, int32_t even
     // Same condition as STA_START above, for the same reasons - in particular
     // the !s_switching arm: switch_task's own initial disconnect (issued
     // BEFORE the new config is applied) must not be auto-retried with the old
-    // credentials.
-    if ((!s_ap_mode && !s_switching) || s_sta_retry) esp_wifi_connect();
+    // credentials. And never once the operator has switched the radio off:
+    // stopping the driver posts a disconnect of its own.
+    if (!s_disabled && ((!s_ap_mode && !s_switching) || s_sta_retry)) esp_wifi_connect();
   } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     (void)data;
     // (Re)connected - restore the flag so a recovered link reads as connected.
@@ -226,6 +234,21 @@ static void markEverJoined() {
   if (nvs_set_u8(h, kNvsJoinedKey, 1) == ESP_OK) nvs_commit(h);
   nvs_close(h);
   ESP_LOGW(TAG, "First join to a network - a web password change is now required");
+}
+
+static void loadDisabled() {
+  nvs_handle_t h;
+  if (nvs_open(kNvsNamespace, NVS_READONLY, &h) != ESP_OK) return;
+  uint8_t raw = 0;
+  if (nvs_get_u8(h, kNvsOffKey, &raw) == ESP_OK) s_disabled = (raw != 0);
+  nvs_close(h);
+}
+
+static void storeDisabled(bool off) {
+  nvs_handle_t h;
+  if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return;
+  if (nvs_set_u8(h, kNvsOffKey, off ? 1 : 0) == ESP_OK) nvs_commit(h);
+  nvs_close(h);
 }
 
 static bool load_credentials(std::string &ssid, std::string &pass) {
@@ -580,10 +603,30 @@ void start() {
   esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, nullptr,
                                       nullptr);
 
+  loadDisabled();
+  if (s_disabled) {
+    // Driver initialised but never started: no radio, no AP, nothing to join.
+    ESP_LOGW(TAG, "WiFi is switched off - turn it on from the panel (Config -> WiFi)");
+    return;
+  }
+  bringUp();
+}
+
+// The boot join: stored network if there is one, otherwise (or on failure) the
+// setup AP. Also the re-enable path, where it runs from enable_task with the
+// driver stopped - the same state as at boot.
+static void bringUp() {
+  bool started = false;  // connect_sta() starts the driver
   std::string ssid, pass;
   if (load_credentials(ssid, pass)) {
+    started = true;
     ESP_LOGI(TAG, "connecting to '%s'...", ssid.c_str());
-    if (connect_sta(ssid, pass, WIFI_CONNECT_TIMEOUT_MS)) {
+    // connect_sta() relies on the STA_START handler to connect, which a
+    // transition task otherwise suppresses.
+    s_sta_retry = s_switching;
+    const bool joined = connect_sta(ssid, pass, WIFI_CONNECT_TIMEOUT_MS);
+    s_sta_retry = false;
+    if (joined) {
       s_connected = true;
       s_ap_mode = false;
       s_connected_ssid = ssid;
@@ -596,7 +639,7 @@ void start() {
   }
 
   if (!s_connected) {
-    startSetupAp(false);
+    startSetupAp(started);
   }
 }
 
@@ -800,7 +843,7 @@ bool transitionInFlight() {
 }
 
 bool startLiveSwitch() {
-  if (!claimTransition()) return false;
+  if (s_disabled || !claimTransition()) return false;
   if (xTaskCreate(switch_task, "wifi_switch", 6144, nullptr, 3, nullptr) != pdPASS) {
     s_switching = false;
     return false;
@@ -833,8 +876,54 @@ static void reset_task(void *) {
 }
 
 bool requestResetToSetupAp() {
-  if (!claimTransition()) return false;
+  if (s_disabled || !claimTransition()) return false;
   if (xTaskCreate(reset_task, "wifi_reset", 6144, nullptr, 3, nullptr) != pdPASS) {
+    s_switching = false;
+    return false;
+  }
+  return true;
+}
+
+static void disable_task(void *) {
+  s_disabled = true;
+  storeDisabled(true);
+  if (s_dns_handle) {
+    stop_dns_server(s_dns_handle);  // graceful since the lib patch - see dns_server.c
+    s_dns_handle = nullptr;
+  }
+  esp_wifi_disconnect();
+  esp_wifi_stop();
+  s_connected = false;
+  s_ap_mode = false;
+  s_connected_ssid.clear();
+  webLog("WiFi", "Switched off from the panel");
+  s_switching = false;
+  ui_update_wifi_label();
+  uiRepaintRequested = true;
+  vTaskDelete(nullptr);
+}
+
+static void enable_task(void *) {
+  s_disabled = false;
+  storeDisabled(false);
+  webLog("WiFi", "Switched on from the panel");
+  bringUp();
+  webServerEnsureStarted();
+  s_switching = false;
+  ui_update_wifi_label();
+  uiRepaintRequested = true;
+  vTaskDelete(nullptr);
+}
+
+bool isEnabled() {
+  return !s_disabled;
+}
+
+bool requestEnabled(bool on) {
+  if (on == !s_disabled) return true;  // already there
+  if (!claimTransition()) return false;
+  if (xTaskCreate(on ? enable_task : disable_task, on ? "wifi_on" : "wifi_off", 6144, nullptr, 3,
+                  nullptr) != pdPASS) {
     s_switching = false;
     return false;
   }
