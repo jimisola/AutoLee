@@ -267,6 +267,61 @@ static void test_work_zone_follows_a_mid_run_down_edit(void) {
   TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
 }
 
+// --------------------------------------------------------------------------
+//  SG telemetry (#89)
+// --------------------------------------------------------------------------
+// Trip 0 switches detection off, not measurement: SG is still read and the
+// stroke reported, which is how raw values are measured for tuning.
+static void test_trip_zero_still_reads_and_reports_sg(void) {
+  givenCalibrated(0, 20000, 0);
+  RUN_SG_TRIP = 0;
+  fake::sg_source = sg_jammed;
+  startRunBetweenEndpoints();
+
+  pump(80);  // a full downstroke
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("[OFF]"), fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("SG stroke DOWN: max=500"));
+}
+
+// The stroke that matters most after a jam is the one that jammed.
+static void test_jam_reports_the_jammed_stroke(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  pump(14);
+  fake::sg_source = sg_jammed;
+  pump(10);
+
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("SG stroke JAMMED: max=500 min=5"),
+                           fake::dump().c_str());
+}
+
+static void test_stop_reports_the_unfinished_stroke(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  pump(20);
+
+  requestGracefulStop();
+
+  TEST_ASSERT_TRUE(fake::logContains("SG stroke STOPPED: max=5 min=5"));
+}
+
+static void test_floor_only_stroke_is_reported_as_floor(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = []() -> uint16_t { return 1; };
+  startRunBetweenEndpoints();
+
+  pump(80);
+
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("SG stroke DOWN: all"), fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("readings at floor"));
+}
+
 // A single high reading must NOT trip a jam (RUN_SG_HIGH_NEEDED == 2).
 static void test_single_high_reading_does_not_jam(void) {
   givenCalibrated(0, 20000, 0);
@@ -1351,6 +1406,10 @@ int main(void) {
   RUN_TEST(test_jam_after_mid_run_down_edit_backs_off_up);
   RUN_TEST(test_stroke_after_mid_run_down_edit_still_counts);
   RUN_TEST(test_work_zone_follows_a_mid_run_down_edit);
+  RUN_TEST(test_trip_zero_still_reads_and_reports_sg);
+  RUN_TEST(test_jam_reports_the_jammed_stroke);
+  RUN_TEST(test_stop_reports_the_unfinished_stroke);
+  RUN_TEST(test_floor_only_stroke_is_reported_as_floor);
   RUN_TEST(test_single_high_reading_does_not_jam);
   RUN_TEST(test_accel_blanking_window_ignores_high_sg);
   RUN_TEST(test_work_zone_suppresses_jam_near_down);

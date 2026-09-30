@@ -1365,7 +1365,7 @@ void setupWebServer() {
       // clamped down to 0 would be a silent safety change. A deliberate 0 is
       // still accepted - it is inside the range.
       if (v < RUN_SG_TRIP_MIN || v > RUN_SG_TRIP_MAX) {
-        return sendBadParam(res, "value is outside the supported range (0-500)");
+        return sendBadParam(res, "value is outside the supported range (0-1023)");
       }
     } else {
       int32_t d;

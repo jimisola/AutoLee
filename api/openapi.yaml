@@ -121,8 +121,8 @@ paths:
       tags: [Motion]
       operationId: setSgTrip
       parameters:
-        - { name: value, in: query, required: false, description: "Absolute trip. 0 disables jam detection for that profile - a legitimate setting, and reported in the state payload's `sgTrip`. Mutually exclusive with `delta`.", schema: { type: integer, minimum: 0, maximum: 500 } }
-        - { name: delta, in: query, required: false, description: "Relative adjustment, saturating at 0 and 500. Mutually exclusive with `value`.", schema: { type: integer } }
+        - { name: value, in: query, required: false, description: "Absolute trip. 0 disables jam detection for that profile - a legitimate setting, and reported in the state payload's `sgTrip`. Mutually exclusive with `delta`.", schema: { type: integer, minimum: 0, maximum: 1023 } }
+        - { name: delta, in: query, required: false, description: "Relative adjustment, saturating at 0 and 1023. Mutually exclusive with `value`.", schema: { type: integer } }
         - { name: profile, in: query, required: false, description: "Target profile (defaults to active)", schema: { type: integer, enum: [0, 1, 2] } }
       responses:
         "200": { $ref: "#/components/responses/Ok" }
