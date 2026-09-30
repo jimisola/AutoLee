@@ -1038,6 +1038,82 @@ static void test_set_active_profile_pushes_new_speed(void) {
 // startRunBetweenEndpoints() refuses. The batch must not be armed on the way in,
 // or both UIs report "Running: 0/N" on a press that is standing still, with no
 // way out but a toggle.
+// Mid-run the switch waits for the next stroke: applying the Fast trip (1) to
+// SG measured at Normal speed would read as a jam at once (#87).
+static void test_profile_switch_mid_run_waits_for_the_next_stroke(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;  // 5: below Normal's trip (15), above Fast's (1)
+  startRunBetweenEndpoints();
+  pump(20);
+
+  setActiveProfile(2);
+  TEST_ASSERT_EQUAL_UINT8(1, g_motion.activeProfile);
+  TEST_ASSERT_EQUAL_INT8(2, g_motion.pendingProfile);
+  TEST_ASSERT_FALSE(fake::saw("stepper::setSpeedInHz(45000)"));
+
+  pump(40);  // finish the downstroke
+
+  TEST_ASSERT_EQUAL_UINT_MESSAGE(RUNNING, g_motion.runState, fake::dump().c_str());
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
+  TEST_ASSERT_EQUAL_UINT8(2, g_motion.activeProfile);
+  TEST_ASSERT_EQUAL_INT8(-1, g_motion.pendingProfile);
+  ASSERT_BEFORE("stepper::setSpeedInHz(45000)", "stepper::moveTo(0)");
+}
+
+static void test_profile_queued_mid_run_lands_on_stop(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  setActiveProfile(0);
+
+  requestGracefulStop();
+
+  TEST_ASSERT_EQUAL_UINT8(0, g_motion.activeProfile);
+  TEST_ASSERT_EQUAL_INT8(-1, g_motion.pendingProfile);
+}
+
+// A batch ends on every stop path, not only toggle-stop and completion (#87).
+static void armBatchRun() {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_quiet;
+  startRunBetweenEndpoints();
+  g_motion.batchActive = true;
+  g_motion.batchTarget = 10;
+}
+
+static void test_jam_ends_the_batch(void) {
+  armBatchRun();
+  fake::sg_source = sg_jammed;
+  pump(30);
+  TEST_ASSERT_EQUAL_UINT(STALLED, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+}
+
+static void test_stop_route_ends_the_batch(void) {
+  armBatchRun();
+  motion_cmd::requestStop();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+}
+
+static void test_return_home_ends_the_batch(void) {
+  givenCalibrated(0, 20000, 5000);
+  g_motion.runState = STALLED;
+  g_motion.batchActive = true;
+  givenPress(0, 40000);
+  safeCreepHome();
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+}
+
+static void test_calibration_ends_the_batch(void) {
+  g_motion.runState = IDLE;
+  g_motion.batchActive = true;
+  givenPress(-2000, 40000);
+  calibrateEndpointsSensorless();
+  TEST_ASSERT_FALSE(g_motion.batchActive);
+}
+
 static void test_batch_start_refused_when_position_reference_stale(void) {
   givenCalibrated(0, 20000, 0);
   g_motion.positionReferenceStale = true;
@@ -1311,6 +1387,12 @@ int main(void) {
   RUN_TEST(test_handle_motion_is_inert_in_blocking_states);
   RUN_TEST(test_effective_endpoints_are_zero_until_calibrated);
   RUN_TEST(test_set_active_profile_pushes_new_speed);
+  RUN_TEST(test_profile_switch_mid_run_waits_for_the_next_stroke);
+  RUN_TEST(test_profile_queued_mid_run_lands_on_stop);
+  RUN_TEST(test_jam_ends_the_batch);
+  RUN_TEST(test_stop_route_ends_the_batch);
+  RUN_TEST(test_return_home_ends_the_batch);
+  RUN_TEST(test_calibration_ends_the_batch);
   RUN_TEST(test_batch_start_refused_when_position_reference_stale);
   RUN_TEST(test_batch_start_arms_the_batch_when_referenced);
   RUN_TEST(test_batch_start_refusals_are_reported);

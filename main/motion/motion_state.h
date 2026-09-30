@@ -75,6 +75,10 @@ struct MotionState {
   int32_t downOffsetSteps = 0;
 
   uint8_t activeProfile = 1;  // default to Normal
+  // A profile requested while RUNNING, applied at the next direction change:
+  // speed and trip are only valid as a pair, and the stepper keeps the speed
+  // of the move in flight. -1 = none. Not persisted.
+  int8_t pendingProfile = -1;
   SpeedProfile profiles[NUM_PROFILES] = {
       {"Slow", 15000, 350},
       {"Normal", 35000, 15},
