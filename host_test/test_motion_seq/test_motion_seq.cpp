@@ -776,6 +776,60 @@ static void test_calibration_fails_on_the_down_search(void) {
   TEST_ASSERT_TRUE(fake::saw("tmc5160::rms_current(3500)"));  // run current restored
 }
 
+// Started with the ram near the bottom: the premove must stop at the DOWN stop
+// and back off, not drive on into it at calibration current (#86).
+static void test_calibration_premove_stops_at_a_nearby_down_stop(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 3000);  // DOWN stop inside the 5500-step premove
+
+  const bool ok = calibrateEndpointsSensorless();
+
+  TEST_ASSERT_TRUE_MESSAGE(ok, fake::dump().c_str());
+  TEST_ASSERT_TRUE(fake::logContains("premove hit a stop"));
+  ASSERT_BEFORE("stepper::move(5500)", "stepper::forceStop");
+  // premove, UP and DOWN searches each end in a forceStop
+  TEST_ASSERT_EQUAL_INT(3, fake::countOf("stepper::forceStop"));
+}
+
+// A false stop moments into the DOWN search leaves a travel no press has. It
+// must be rejected rather than stored as the DOWN endpoint (#86).
+static uint16_t sg_false_stop_early_in_down_search() {
+  const bool downSearch =
+      fake::countOf("stepper::setCurrentPosition(0)") == 1 && fake::sim.target > fake::sim.position;
+  if (downSearch && fake::sim.position > 150 && fake::sim.position < 400) return 4;
+  return fake::stalled() ? fake::sim.sgStalled : fake::sim.sgBaseline;
+}
+
+static void test_calibration_rejects_a_travel_too_short_to_be_real(void) {
+  g_motion.runState = IDLE;
+  givenPress(-2000, 40000);
+  fake::sim.stepsPerMsOverride = 4;
+  fake::sg_source = sg_false_stop_early_in_down_search;
+
+  TEST_ASSERT_FALSE(calibrateEndpointsSensorless());
+
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("travel too short"), fake::dump().c_str());
+  TEST_ASSERT_FALSE(g_motion.endpointsCalibrated);
+  TEST_ASSERT_TRUE(g_motion.positionReferenceStale);
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+}
+
+// A stop reached after the old early window (300 ms / 1200 steps) but before
+// the dynamic trip is ready (~620 ms) used to be seen by neither detector and
+// was averaged into the baseline. The early trip now covers it (#86).
+static void test_stop_between_early_window_and_dynamic_trip_is_caught_early(void) {
+  givenCalibrated(0, 20000, 9000);
+  g_motion.runState = STALLED;
+  givenPress(7200, 40000);  // 1800 steps away: reached at ~450 ms
+  fake::sim.stepsPerMsOverride = 4;
+
+  safeCreepHome();
+
+  TEST_ASSERT_TRUE_MESSAGE(fake::logContains("MUS: EARLY HIT"), fake::dump().c_str());
+  TEST_ASSERT_FALSE(fake::logContains("MUS: DYN HIT"));
+  TEST_ASSERT_FALSE(fake::logContains("MUS: baseline="));
+}
+
 static void test_calibration_rejected_while_running(void) {
   givenCalibrated(0, 20000, 0);
   fake::sg_source = sg_quiet;
@@ -1242,6 +1296,9 @@ int main(void) {
   RUN_TEST(test_calibration_finds_both_stops_and_rezeros);
   RUN_TEST(test_calibration_fails_cleanly_without_a_stop);
   RUN_TEST(test_calibration_fails_on_the_down_search);
+  RUN_TEST(test_calibration_premove_stops_at_a_nearby_down_stop);
+  RUN_TEST(test_calibration_rejects_a_travel_too_short_to_be_real);
+  RUN_TEST(test_stop_between_early_window_and_dynamic_trip_is_caught_early);
   RUN_TEST(test_calibration_rejected_while_running);
   RUN_TEST(test_creep_home_finds_stop_rezeros_and_returns_idle);
   RUN_TEST(test_creep_home_early_trip_catches_an_immediate_stop);

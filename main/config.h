@@ -113,8 +113,6 @@ static constexpr uint8_t CAL_HIT_CONFIRM = 2;
 // so position 0 sits just off the hard stop (used at both endpoints + home).
 static constexpr int32_t CAL_OVERSHOOT_BACKOFF_STEPS = 300;
 
-static constexpr uint32_t EARLY_WINDOW_MS = 300;
-static constexpr int32_t EARLY_WINDOW_DST_MAX = 1200;
 static constexpr uint32_t EARLY_MIN_TIME_MS = 50;
 static constexpr int32_t EARLY_MIN_MOVE_STEPS = 200;
 static constexpr uint16_t EARLY_TRIP = CAL_ABS_MIN;
