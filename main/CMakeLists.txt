@@ -6,7 +6,7 @@ idf_component_register(
     SRCS "app_main.cpp" "globals.cpp" "settings_store.cpp"
          "drivers/display_touch.cpp" "drivers/axs5106l_touch.cpp"
          "drivers/tmc5160_hal.cpp" "drivers/tmc5160_ctrl.cpp"
-         "drivers/stepper.cpp" "drivers/stepper_motor_encoder.c"
+         "drivers/stepper.cpp"
          "motion/motion.cpp" "motion/motion_cmd.cpp" "motion/motion_state.cpp"
          "net/wifi_mgr.cpp" "net/web_server.cpp"
          "ui/ui_touch.cpp"

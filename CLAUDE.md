@@ -78,7 +78,7 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
   pre-commit run --all-files
   ```
   `.clang-format` covers `main/`, `lib/` and `host_test/`; vendored third-party code (`lib/tmc_api`,
-  `lib/psychic_http`, `lib/dns_server`, `main/drivers/stepper_motor_encoder.*`) is excluded in
+  `lib/psychic_http`, `lib/dns_server`) is excluded in
   `.pre-commit-config.yaml` and must stay byte-identical to upstream — never reformat it. The
   clang-format hook rewrites files in place, so a first run failing and a second passing is the
   normal path, not an error; re-stage what it changed. Two checks in that workflow are *not* in
@@ -101,7 +101,7 @@ module boundary the compiler enforces:
 | Dir | Holds |
 |---|---|
 | `main/` | `app_main.cpp` (entry), `config.h`, `globals.{h,cpp}` |
-| `main/drivers/` | `display_touch`, `axs5106l_touch`, `tmc5160_hal`, `tmc5160_ctrl`, `stepper`, `stepper_motor_encoder` |
+| `main/drivers/` | `display_touch`, `axs5106l_touch`, `tmc5160_hal`, `tmc5160_ctrl`, `stepper` |
 | `main/motion/` | `motion.{h,cpp}` — the safety-critical run/jam/calibration/homing state machine |
 | `main/net/` | `wifi_mgr`, `web_server`, `index_html.h` |
 | `main/ui/` | `ui_touch` — the on-device LVGL UI |
