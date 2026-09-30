@@ -26,7 +26,7 @@ compiler-enforced module boundary.
 | Path | Purpose |
 |---|---|
 | `main/` | `app_main.cpp` (entry point), `config.h` (pins, speed profiles, tuning constants), `globals.{h,cpp}` (cross-module mutable state). |
-| `main/drivers/` | `display_touch`, `axs5106l_touch`, `tmc5160_hal`, `tmc5160_ctrl`, `stepper`, `stepper_motor_encoder`. |
+| `main/drivers/` | `display_touch`, `axs5106l_touch`, `tmc5160_hal`, `tmc5160_ctrl`, `stepper`. |
 | `main/motion/` | `motion.{h,cpp}` — the safety-critical run / jam-detection / calibration / homing state machine. |
 | `main/net/` | `wifi_mgr`, `web_server`, `index_html.h` (the compiled-in web UI). |
 | `main/ui/` | `ui_touch` — the on-device LVGL UI. |

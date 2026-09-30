@@ -1,7 +1,6 @@
 #include "tmc5160_ctrl.h"
 #include "tmc5160_hal.h"
 
-#include <cmath>
 #include "driver/gpio.h"
 
 extern "C" {
@@ -9,6 +8,7 @@ extern "C" {
 }
 
 #include "config.h"  // TMC_DIAG_PIN
+#include "tmc_current.h"
 
 namespace tmc5160 {
 
@@ -38,6 +38,12 @@ void init(spi_host_device_t spi_host, float r_sense_ohm) {
   // 16/24/36/54 clock counts). We use TMC-API's field writes throughout, so we
   // are not exposed to that particular trap - but the value below is the raw
   // TBL field encoding, not a clock count.
+  // GCONF as TMCStepper's begin() leaves it (0): multistep_filt off. StealthChop
+  // only, so inert here, but it keeps the register the one the press ran on.
+  tmc5160_fieldWrite(kIcID, TMC5160_MULTISTEP_FILT_FIELD, 0);
+  // CHOPCONF bit 17 is vsense on the TMC2130/5130 and reserved on the TMC5160;
+  // earlier builds of this port set it, and it survives until a power cycle.
+  tmc5160_fieldWrite(kIcID, TMC5160_VSENSE_FIELD, 0);
   tmc5160_fieldWrite(kIcID, TMC5160_TOFF_FIELD, 5);
   tmc5160_fieldWrite(kIcID, TMC5160_TBL_FIELD, 2);
   tmc5160_fieldWrite(kIcID, TMC5160_INTPOL_FIELD, 1);
@@ -56,25 +62,13 @@ void init(spi_host_device_t spi_host, float r_sense_ohm) {
   tmc5160_fieldWrite(kIcID, TMC5160_DIAG1_POSCOMP_PUSHPULL_FIELD, 1);  // "diag1_pushpull"
 }
 
-// Same formula TMCStepper uses for TMC5130/5160-family chips: CS =
-// 32*sqrt2*I/1000*(Rsense+0.02)/Vfs - 1, picking the low-sensitivity full-scale voltage (0.180V,
-// vsense=1) when the high-sensitivity range (0.325V) would clip the 5-bit CS field below its usable
-// floor.
+// TMCStepper's TMC5160 algorithm (see tmc_current.h): GLOBAL_SCALER plus CS,
+// hold at half the run current. 3500 mA -> GLOBAL_SCALER 130, IRUN 20, IHOLD 10.
 void rms_current(uint16_t mA) {
-  constexpr float kSqrt2 = 1.41421356f;
-  float cs = 32.0f * kSqrt2 * (mA / 1000.0f) * (s_rSenseOhm + 0.02f) / 0.325f - 1.0f;
-  bool vsense = false;
-  if (cs < 16.0f) {
-    vsense = true;
-    cs = 32.0f * kSqrt2 * (mA / 1000.0f) * (s_rSenseOhm + 0.02f) / 0.180f - 1.0f;
-  }
-  if (cs > 31.0f) cs = 31.0f;
-  if (cs < 0.0f) cs = 0.0f;
-
-  tmc5160_fieldWrite(kIcID, TMC5160_VSENSE_FIELD, vsense ? 1 : 0);
-  tmc5160_fieldWrite(kIcID, TMC5160_IRUN_FIELD, (uint32_t)lroundf(cs));
-  tmc5160_fieldWrite(kIcID, TMC5160_IHOLD_FIELD,
-                     (uint32_t)lroundf(cs));  // hold = run (no idle current cut)
+  const autolee::TmcCurrent c = autolee::tmc5160Current(mA, s_rSenseOhm);
+  tmc5160_fieldWrite(kIcID, TMC5160_GLOBAL_SCALER_FIELD, c.globalScaler);
+  tmc5160_fieldWrite(kIcID, TMC5160_IRUN_FIELD, c.irun);
+  tmc5160_fieldWrite(kIcID, TMC5160_IHOLD_FIELD, c.ihold);
 }
 
 void en_pwm_mode(bool enabled) {

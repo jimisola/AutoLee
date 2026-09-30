@@ -99,6 +99,10 @@ static constexpr uint32_t CAL_ACCEL = 25000;
 // this as a travel limit - it is only the granularity at which the hardware
 // counter hands off to the accumulator.
 static constexpr int32_t STEP_COUNT_WRAP = 30000;
+// The driver stays energised this long after a move, then drops (the Arduino
+// firmware's FastAccelStepper setDelayToDisable(1000)). Covers the gap between
+// strokes and between a jam and its back-off, so the ram is held while it matters.
+static constexpr uint32_t STEPPER_DISABLE_DELAY_MS = 1000;
 // Relative distance a single hard-stop search may travel. This legitimately
 // exceeds STEP_COUNT_WRAP (real travel is measured in the tens of thousands of
 // steps - see host_test/test_settings_blob's fixture at 41000), which is
