@@ -42,9 +42,9 @@ The stall detection and jam protection features are designed to detect brass get
 - **Safe return-home** — after a jam or stall, creeps back to UP stop using calibration speed with stall detection and retries
 
 ### Speed Profiles
-- **Three preset profiles** — Slow (15 kHz, SG=350), Normal (35 kHz, SG=15), Fast (45 kHz, SG=1)
+- **Three preset profiles** — Slow (15 kHz), Normal (30 kHz), Fast (40 kHz)
 - **Per-profile StallGuard threshold** — each speed has its own SG trip value, eliminating false jams when changing speed
-- **One-tap switching** — change profile from the touchscreen or web UI; speed and SG update together instantly
+- **One-tap switching** — change profile from the touchscreen or web UI; speed and SG change together, at the next stroke if the press is running
 - **Fine-tune SG per profile** — type a value directly into text inputs on the web Configuration page, or use ±1/±5 buttons on the touch screen
 
 ### Motor Current
@@ -53,6 +53,8 @@ The stall detection and jam protection features are designed to detect brass get
 - **Live adjustment** — takes effect immediately, no restart needed
 
 ### Jam Detection & Protection
+- **Auto SG** — measures each profile's StallGuard trip on your press: with the press **empty**, it runs every profile with jam detection off and sets each trip one count above the highest reading. Trips ship unset and the press **will not run until every profile has one** (Auto SG, or set by hand); a trip is dropped if a firmware update changes its profile's speed. Verify each profile afterwards with a deliberate block
+- **Jam detect limited warning** — a profile whose trip sits at the StallGuard floor (common at speed on 24 V) is flagged on both UIs; detection there relies on a stall spiking off the floor
 - **Runtime StallGuard monitoring** — reads SG2 via median-of-5 filtered SPI during operation
 - **Sliding counter stall detection** — requires multiple consecutive high-SG readings to trigger (rejects transient spikes)
 - **Work zone blanking** — skips SG monitoring near the DOWN endpoint where primer seating resistance is normal

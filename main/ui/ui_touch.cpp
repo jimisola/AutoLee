@@ -302,6 +302,21 @@ void ui_update_main_warning() {
       if (main_warn_lbl) lv_label_set_text(main_warn_lbl, "TAP: RETURN HOME");
       lv_obj_add_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+    } else if (ms.autoSgActive) {
+      if (main_warn_lbl)
+        lv_label_set_text_fmt(main_warn_lbl, "AUTO SG %s", ms.profiles[ms.autoSgProfile].name);
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+    } else if (!jamDetectionSetUp(ms)) {
+      if (main_warn_lbl) lv_label_set_text(main_warn_lbl, "JAM DETECT NOT SET");
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
+    } else if (autolee::tripAtFloor(
+                   ms.profiles[ms.activeProfile].sg_trip,
+                   autolee::floorTripMax({SG_AUTO_STROKES, SG_AUTO_MARGIN, 0, 0}))) {
+      if (main_warn_lbl) lv_label_set_text(main_warn_lbl, "JAM DETECT LIMITED");
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
     } else {
       lv_obj_remove_flag(main_warn, LV_OBJ_FLAG_CLICKABLE);
       lv_obj_add_flag(main_warn, LV_OBJ_FLAG_HIDDEN);
@@ -834,6 +849,7 @@ struct ConfirmArm {
 static ConfirmArm arm_reset_cal{nullptr, nullptr, "Reset Cal", 0xB42318};
 static ConfirmArm arm_reset_pwd{nullptr, nullptr, "Reset Pwd", 0xB42318};
 static ConfirmArm arm_reset_wifi{nullptr, nullptr, "Reset WiFi", 0xB42318};
+static ConfirmArm arm_auto_sg{nullptr, nullptr, "Auto SG", 0xB42318};
 
 static void confirm_set_label(ConfirmArm &a, const char *txt, uint32_t color) {
   if (!a.btn) return;
@@ -879,6 +895,7 @@ static void confirm_disarm_all() {
   confirm_disarm(arm_reset_cal);
   confirm_disarm(arm_reset_pwd);
   confirm_disarm(arm_reset_wifi);
+  confirm_disarm(arm_auto_sg);
 }
 
 static void on_reset_cal(lv_event_t *e) {
@@ -1415,7 +1432,7 @@ static void build_stall_screen() {
   lv_obj_center(lbl_sg_val);
 
   lv_obj_t *sg_hint = lv_label_create(sg_card);
-  lv_label_set_text(sg_hint, "0=off  lower=sensitive");
+  lv_label_set_text(sg_hint, "lower = more sensitive");
   lv_obj_set_style_text_color(sg_hint, lv_color_hex(0x888888), LV_PART_MAIN);
   lv_obj_set_style_text_font(sg_hint, &lv_font_montserrat_12, LV_PART_MAIN);
   lv_obj_align(sg_hint, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -1447,14 +1464,29 @@ static void build_stall_screen() {
       RUN_SG_TRIP = (uint16_t)clampi(v, (int32_t)RUN_SG_TRIP_MIN, (int32_t)RUN_SG_TRIP_MAX);
     }
     ui_update_sg_val();
+    ui_update_main_warning();
   };
   lv_obj_add_event_cb(sgM5, sg_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-5);
   lv_obj_add_event_cb(sgM1, sg_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
   lv_obj_add_event_cb(sgP1, sg_cb, LV_EVENT_CLICKED, (void *)(intptr_t)+1);
   lv_obj_add_event_cb(sgP5, sg_cb, LV_EVENT_CLICKED, (void *)(intptr_t)+5);
 
-  lv_obj_t *b_back_ss = make_btn(ssn, "Back", 140, 44, 0x2A2A2A, &lv_font_montserrat_20);
-  lv_obj_align(b_back_ss, LV_ALIGN_CENTER, 0, 0);
+  // The content area is full, so Auto SG shares the nav bar with Back. Two-tap
+  // arm: it runs the press with jam detection off (docs/UX.md).
+  lv_obj_t *b_back_ss = make_btn(ssn, "Back", 62, 40, 0x2A2A2A, &lv_font_montserrat_16);
+  lv_obj_align(b_back_ss, LV_ALIGN_LEFT_MID, 0, 0);
+  arm_auto_sg.btn = make_btn(ssn, "Auto SG", 86, 40, 0xB42318, &lv_font_montserrat_16);
+  lv_obj_align(arm_auto_sg.btn, LV_ALIGN_RIGHT_MID, 0, 0);
+  lv_obj_add_event_cb(
+      arm_auto_sg.btn,
+      [](lv_event_t *e) {
+        if (lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+        if (!confirm_tap(arm_auto_sg)) return;
+        confirm_disarm(arm_auto_sg);
+        // Deferred and gated on pump_task; a refusal comes back as the banner.
+        motion_cmd::requestAutoSg();
+      },
+      LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(
       b_back_ss,
       [](lv_event_t *e) {

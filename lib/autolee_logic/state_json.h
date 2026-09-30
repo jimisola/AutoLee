@@ -18,6 +18,7 @@ struct ProfileView {
   const char *name;
   uint32_t hz;
   uint16_t sg;
+  bool floor;  // trip sits at the SG floor: detection relies on spikes off it
 };
 
 struct DeviceState {
@@ -52,6 +53,13 @@ struct DeviceState {
   const char *wifiHostname;  // "<name>.local", or "" when not advertised
   long batchTarget, batchCount;
   bool batchActive;
+  // Every profile has a StallGuard trip; false means the press refuses to run.
+  bool sgSetUp;
+  uint16_t sgCalCurrentMa;  // run current Auto SG measured at; 0 = never
+  bool autoSgActive;
+  uint8_t autoSgProfile;   // profile being measured
+  uint16_t autoSgStroke;   // measured strokes so far on that profile
+  uint16_t autoSgStrokes;  // strokes per profile
 };
 
 // Serialize into `out` (size `n`). Returns the snprintf return value (number of
@@ -68,20 +76,25 @@ inline int buildStateJson(const DeviceState &s, char *out, size_t n) {
       "\"upOffset\":%ld,\"downOffset\":%ld,\"position\":%ld,\"sgTrip\":%u,"
       "\"workZone\":%ld,\"currentMa\":%u,"
       "\"profileIdx\":%u,\"profileName\":\"%s\","
-      "\"profiles\":[{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u},"
-      "{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u},"
-      "{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u}],"
+      "\"profiles\":[{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u,\"floor\":%s},"
+      "{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u,\"floor\":%s},"
+      "{\"name\":\"%s\",\"hz\":%lu,\"sg\":%u,\"floor\":%s}],"
       "\"wifiStatus\":\"%s\",\"wifiSSID\":\"%s\",\"wifiIP\":\"%s\","
       "\"wifiHostname\":\"%s\","
-      "\"batchTarget\":%ld,\"batchCount\":%ld,\"batchActive\":%s}",
+      "\"batchTarget\":%ld,\"batchCount\":%ld,\"batchActive\":%s,"
+      "\"sgSetUp\":%s,\"sgCalCurrentMa\":%u,\"autoSgActive\":%s,\"autoSgProfile\":%u,"
+      "\"autoSgStroke\":%u,\"autoSgStrokes\":%u}",
       s.version, s.state, s.defaultPassword ? "true" : "false", s.counter, (unsigned long)s.speed,
       s.calibrated ? "true" : "false", s.positionStale ? "true" : "false", s.rawUp, s.rawDown,
       s.endpointUp, s.endpointDown, (long)s.upOffset, (long)s.downOffset, s.position, s.sgTrip,
       (long)s.workZone, s.currentMa, s.profileIdx, s.profileName, s.profiles[0].name,
-      (unsigned long)s.profiles[0].hz, s.profiles[0].sg, s.profiles[1].name,
-      (unsigned long)s.profiles[1].hz, s.profiles[1].sg, s.profiles[2].name,
-      (unsigned long)s.profiles[2].hz, s.profiles[2].sg, s.wifiStatus, ssidEscaped, s.wifiIP,
-      s.wifiHostname, s.batchTarget, s.batchCount, s.batchActive ? "true" : "false");
+      (unsigned long)s.profiles[0].hz, s.profiles[0].sg, s.profiles[0].floor ? "true" : "false",
+      s.profiles[1].name, (unsigned long)s.profiles[1].hz, s.profiles[1].sg,
+      s.profiles[1].floor ? "true" : "false", s.profiles[2].name, (unsigned long)s.profiles[2].hz,
+      s.profiles[2].sg, s.profiles[2].floor ? "true" : "false", s.wifiStatus, ssidEscaped, s.wifiIP,
+      s.wifiHostname, s.batchTarget, s.batchCount, s.batchActive ? "true" : "false",
+      s.sgSetUp ? "true" : "false", s.sgCalCurrentMa, s.autoSgActive ? "true" : "false",
+      s.autoSgProfile, s.autoSgStroke, s.autoSgStrokes);
 }
 
 }  // namespace autolee

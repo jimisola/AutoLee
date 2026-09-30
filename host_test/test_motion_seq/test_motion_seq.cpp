@@ -25,9 +25,19 @@
 // --------------------------------------------------------------------------
 //  Harness
 // --------------------------------------------------------------------------
+// A press whose jam detection is set up. Trips ship as 0 (the press then
+// refuses to run), so every test that runs needs some; these are the old
+// shipped values, which the trip-relative SG sources below are written for.
+static void givenTripsSetUp() {
+  g_motion.profiles[0].sg_trip = 350;
+  g_motion.profiles[1].sg_trip = 15;
+  g_motion.profiles[2].sg_trip = 1;
+}
+
 void setUp(void) {
   fake::reset();
   g_motion = MotionState{};
+  givenTripsSetUp();
 }
 
 void tearDown(void) {
@@ -94,7 +104,7 @@ static void test_start_enters_sensorless_then_moves(void) {
   TEST_ASSERT_TRUE(fake::saw("tmc5160::TCOOLTHRS(1048575)"));
   TEST_ASSERT_TRUE(fake::saw("tmc5160::sgt(-1)"));
   ASSERT_BEFORE("tmc5160::sgt(-1)", "stepper::moveTo(20000)");
-  ASSERT_BEFORE("stepper::setSpeedInHz(35000)", "stepper::moveTo(20000)");
+  ASSERT_BEFORE("stepper::setSpeedInHz(30000)", "stepper::moveTo(20000)");
   TEST_ASSERT_EQUAL_INT(1, fake::countOf("stepper::moveTo(20000)"));
 }
 
@@ -117,7 +127,7 @@ static void test_endpoint_arrival_flips_target_and_counts(void) {
   fake::sg_source = sg_quiet;
   startRunBetweenEndpoints();
 
-  pump(80);  // 20000 steps at 35 steps/ms == 58 ticks
+  pump(80);  // 20000 steps at 30 steps/ms == 67 ticks
 
   TEST_ASSERT_EQUAL_INT32(1, g_motion.counter);
   TEST_ASSERT_EQUAL_INT32(0, g_motion.currentTarget);  // flipped back to UP
@@ -270,15 +280,15 @@ static void test_work_zone_follows_a_mid_run_down_edit(void) {
 // --------------------------------------------------------------------------
 //  SG telemetry (#89)
 // --------------------------------------------------------------------------
-// Trip 0 switches detection off, not measurement: SG is still read and the
-// stroke reported, which is how raw values are measured for tuning.
-static void test_trip_zero_still_reads_and_reports_sg(void) {
+// Detection off is not measurement off: while Auto SG runs with an effective
+// trip of 0, SG is still read and each stroke reported - it is what Auto SG
+// measures with.
+static void test_detection_off_still_reads_and_reports_sg(void) {
   givenCalibrated(0, 20000, 0);
-  RUN_SG_TRIP = 0;
   fake::sg_source = sg_jammed;
-  startRunBetweenEndpoints();
+  TEST_ASSERT_TRUE(startAutoSg());
 
-  pump(80);  // a full downstroke
+  pump(150);  // a full downstroke on Slow: 20000 steps at 15 steps/ms == 134 ticks
 
   TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
   TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
@@ -328,7 +338,7 @@ static void test_single_high_reading_does_not_jam(void) {
   fake::sg_source = sg_quiet;
   startRunBetweenEndpoints();
 
-  // Past the accel blanking window (accelBlankMs(35000, 800000) == 123 ms),
+  // Past the accel blanking window (accelBlankMs(30000, 800000) == 117 ms),
   // outside the work zone, outside the decel window.
   pump(14);
   // One high reading = one full read_sg(), i.e. five SG_RESULT samples (the
@@ -349,7 +359,7 @@ static void test_accel_blanking_window_ignores_high_sg(void) {
   fake::sg_source = sg_jammed;
   startRunBetweenEndpoints();
 
-  pump(11);  // 110 ms < 123 ms accel blank
+  pump(11);  // 110 ms < 117 ms accel blank
 
   TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
   TEST_ASSERT_FALSE(fake::logContains("SG HIGH"));
@@ -377,10 +387,10 @@ static void test_decel_blanking_suppresses_jam_near_target(void) {
   givenCalibrated(0, 20000, 20000);
   fake::sg_source = sg_quiet;
   startRunBetweenEndpoints();  // heading UP, target 0
-  // High SG only once inside decelBlankSteps(35000, 800000) == 1265 of the target.
-  fake::sg_source = []() -> uint16_t { return fake::sim.position < 1265 ? 500 : 5; };
+  // High SG only once inside decelBlankSteps(30000, 800000) == 1062 of the target.
+  fake::sg_source = []() -> uint16_t { return fake::sim.position < 1062 ? 500 : 5; };
 
-  pump(70);  // 20000 steps at 35 steps/ms == 58 ticks, so this reaches UP
+  pump(75);  // 20000 steps at 30 steps/ms == 67 ticks, so this reaches UP
 
   TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
   TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
@@ -408,7 +418,7 @@ static void test_successful_stroke_records_cycle_time(void) {
   const uint32_t t0 = fake::millis_now();
   startRunBetweenEndpoints();
 
-  pump(80);  // 20000 steps at 35 steps/ms == 58 ticks, so exactly one arrival
+  pump(80);  // 20000 steps at 30 steps/ms == 67 ticks, so exactly one arrival
 
   TEST_ASSERT_EQUAL_INT32(1, g_motion.counter);
   const uint32_t elapsed = fake::millis_now() - t0;
@@ -557,6 +567,7 @@ static void test_failed_calibration_does_not_count(void) {
   // Rejected outright by the FSM (not IDLE): nothing ran, nothing counted.
   fake::reset();
   g_motion = MotionState{};
+  givenTripsSetUp();
   givenCalibrated(0, 20000, 0);
   fake::sg_source = sg_quiet;
   startRunBetweenEndpoints();
@@ -1071,7 +1082,7 @@ static void test_set_active_profile_pushes_new_speed(void) {
 
   setActiveProfile(2);  // Fast
   TEST_ASSERT_EQUAL_UINT8(2, g_motion.activeProfile);
-  TEST_ASSERT_TRUE(fake::saw("stepper::setSpeedInHz(45000)"));
+  TEST_ASSERT_TRUE(fake::saw("stepper::setSpeedInHz(40000)"));
 
   fake::events.clear();
   setActiveProfile(NUM_PROFILES);  // out of range: ignored
@@ -1104,15 +1115,15 @@ static void test_profile_switch_mid_run_waits_for_the_next_stroke(void) {
   setActiveProfile(2);
   TEST_ASSERT_EQUAL_UINT8(1, g_motion.activeProfile);
   TEST_ASSERT_EQUAL_INT8(2, g_motion.pendingProfile);
-  TEST_ASSERT_FALSE(fake::saw("stepper::setSpeedInHz(45000)"));
+  TEST_ASSERT_FALSE(fake::saw("stepper::setSpeedInHz(40000)"));
 
-  pump(40);  // finish the downstroke
+  pump(50);  // finish the downstroke
 
   TEST_ASSERT_EQUAL_UINT_MESSAGE(RUNNING, g_motion.runState, fake::dump().c_str());
   TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
   TEST_ASSERT_EQUAL_UINT8(2, g_motion.activeProfile);
   TEST_ASSERT_EQUAL_INT8(-1, g_motion.pendingProfile);
-  ASSERT_BEFORE("stepper::setSpeedInHz(45000)", "stepper::moveTo(0)");
+  ASSERT_BEFORE("stepper::setSpeedInHz(40000)", "stepper::moveTo(0)");
 }
 
 static void test_profile_queued_mid_run_lands_on_stop(void) {
@@ -1167,6 +1178,122 @@ static void test_calibration_ends_the_batch(void) {
   givenPress(-2000, 40000);
   calibrateEndpointsSensorless();
   TEST_ASSERT_FALSE(g_motion.batchActive);
+}
+
+// --------------------------------------------------------------------------
+//  Auto SG and the jam-detection lockout (#90)
+// --------------------------------------------------------------------------
+// Clean SG that differs per profile speed, so each measured trip is traceable.
+static uint16_t sg_by_speed() {
+  switch (fake::sim.speedHz) {
+    case 15000:
+      return 40;
+    case 30000:
+      return 20;
+    case 40000:
+      return 8;
+    default:
+      return 5;
+  }
+}
+
+static void pumpUntilIdle(int maxIterations) {
+  for (int i = 0; i < maxIterations && g_motion.runState != IDLE; i++) pump(1);
+}
+
+static void test_auto_sg_measures_every_profile_and_sets_the_trips(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.activeProfile = 1;
+  fake::sg_source = sg_by_speed;
+
+  TEST_ASSERT_TRUE(startAutoSg());
+  TEST_ASSERT_TRUE(g_motion.autoSgActive);
+  pumpUntilIdle(6000);
+
+  TEST_ASSERT_EQUAL_UINT_MESSAGE(IDLE, g_motion.runState, fake::dump().c_str());
+  TEST_ASSERT_FALSE(g_motion.autoSgActive);
+  TEST_ASSERT_EQUAL_UINT16(41, g_motion.profiles[0].sg_trip);
+  TEST_ASSERT_EQUAL_UINT16(21, g_motion.profiles[1].sg_trip);
+  TEST_ASSERT_EQUAL_UINT16(9, g_motion.profiles[2].sg_trip);
+  TEST_ASSERT_EQUAL_UINT16(3500, g_motion.sgCalCurrentMa);
+  // The operator's profile comes back; detection was off, so nothing jammed.
+  TEST_ASSERT_EQUAL_UINT8(1, g_motion.activeProfile);
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::forceStop"));
+  // Measurement strokes are not work cycles.
+  TEST_ASSERT_EQUAL_INT32(0, g_motion.counter);
+  TEST_ASSERT_EQUAL_UINT32(0, g_motion.lifetimeCycles);
+  TEST_ASSERT_TRUE(fake::logContains("Auto SG: done"));
+}
+
+// Stopping mid-way leaves every stored trip as it was.
+static void test_stopping_auto_sg_keeps_the_stored_trips(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.activeProfile = 2;
+  fake::sg_source = sg_by_speed;
+  startAutoSg();
+  pump(300);
+
+  motion_cmd::requestToggleRun();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(STOPPING, g_motion.runState);
+  TEST_ASSERT_FALSE(g_motion.autoSgActive);
+  TEST_ASSERT_EQUAL_UINT16(350, g_motion.profiles[0].sg_trip);
+  TEST_ASSERT_EQUAL_UINT16(15, g_motion.profiles[1].sg_trip);
+  TEST_ASSERT_EQUAL_UINT16(1, g_motion.profiles[2].sg_trip);
+  TEST_ASSERT_EQUAL_UINT8(2, g_motion.activeProfile);
+  TEST_ASSERT_TRUE(fake::logContains("stored trips unchanged"));
+}
+
+static void test_start_refused_until_every_profile_has_a_trip(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.profiles[2].sg_trip = 0;
+
+  startRunBetweenEndpoints();
+
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+  TEST_ASSERT_EQUAL_INT(0, fake::countOf("stepper::moveTo(20000)"));
+  TEST_ASSERT_TRUE(fake::logContains("jam detection not set up"));
+}
+
+// Auto SG is how the lockout is cleared, so it must start without trips.
+static void test_auto_sg_starts_on_a_press_with_no_trips(void) {
+  givenCalibrated(0, 20000, 0);
+  for (auto &p : g_motion.profiles) p.sg_trip = 0;
+  fake::sg_source = sg_by_speed;
+
+  motion_cmd::requestAutoSg();
+  motion_cmd::processPendingCommands();
+
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_TRUE(g_motion.autoSgActive);
+  TEST_ASSERT_EQUAL_UINT8(0, g_motion.activeProfile);
+}
+
+static void test_auto_sg_refused_when_uncalibrated(void) {
+  g_motion.runState = IDLE;
+  motion_cmd::requestAutoSg();
+  motion_cmd::processPendingCommands();
+  TEST_ASSERT_FALSE(g_motion.autoSgActive);
+  TEST_ASSERT_EQUAL_UINT(IDLE, g_motion.runState);
+}
+
+// Auto SG owns the profile sequence while it runs.
+static void test_profile_change_is_ignored_during_auto_sg(void) {
+  givenCalibrated(0, 20000, 0);
+  fake::sg_source = sg_by_speed;
+  startAutoSg();
+  setActiveProfile(2);
+  TEST_ASSERT_EQUAL_UINT8(0, g_motion.activeProfile);
+  TEST_ASSERT_EQUAL_INT8(-1, g_motion.pendingProfile);
+}
+
+static void test_run_on_a_floor_trip_warns_that_detection_is_limited(void) {
+  givenCalibrated(0, 20000, 0);
+  g_motion.activeProfile = 2;  // Fast, trip 1
+  startRunBetweenEndpoints();
+  TEST_ASSERT_EQUAL_UINT(RUNNING, g_motion.runState);
+  TEST_ASSERT_TRUE(fake::logContains("LIMITED"));
 }
 
 static void test_batch_start_refused_when_position_reference_stale(void) {
@@ -1406,7 +1533,7 @@ int main(void) {
   RUN_TEST(test_jam_after_mid_run_down_edit_backs_off_up);
   RUN_TEST(test_stroke_after_mid_run_down_edit_still_counts);
   RUN_TEST(test_work_zone_follows_a_mid_run_down_edit);
-  RUN_TEST(test_trip_zero_still_reads_and_reports_sg);
+  RUN_TEST(test_detection_off_still_reads_and_reports_sg);
   RUN_TEST(test_jam_reports_the_jammed_stroke);
   RUN_TEST(test_stop_reports_the_unfinished_stroke);
   RUN_TEST(test_floor_only_stroke_is_reported_as_floor);
@@ -1452,6 +1579,13 @@ int main(void) {
   RUN_TEST(test_stop_route_ends_the_batch);
   RUN_TEST(test_return_home_ends_the_batch);
   RUN_TEST(test_calibration_ends_the_batch);
+  RUN_TEST(test_auto_sg_measures_every_profile_and_sets_the_trips);
+  RUN_TEST(test_stopping_auto_sg_keeps_the_stored_trips);
+  RUN_TEST(test_start_refused_until_every_profile_has_a_trip);
+  RUN_TEST(test_auto_sg_starts_on_a_press_with_no_trips);
+  RUN_TEST(test_auto_sg_refused_when_uncalibrated);
+  RUN_TEST(test_profile_change_is_ignored_during_auto_sg);
+  RUN_TEST(test_run_on_a_floor_trip_warns_that_detection_is_limited);
   RUN_TEST(test_batch_start_refused_when_position_reference_stale);
   RUN_TEST(test_batch_start_arms_the_batch_when_referenced);
   RUN_TEST(test_batch_start_refusals_are_reported);

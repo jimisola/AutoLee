@@ -53,7 +53,7 @@
 namespace settings_store {
 
 // Bump whenever the persisted field set changes - and follow the recipe above.
-constexpr uint16_t kVersion = 3;
+constexpr uint16_t kVersion = 4;
 
 // ---------------------------------------------------------------------------
 //  Version 1 (shipped 2026-07)
@@ -177,20 +177,63 @@ static_assert(offsetof(PersistedV3, lifetimeCycles) == sizeof(PersistedV2),
               "V3's new field must start exactly where V2 ended");
 static_assert(NUM_PROFILES == 3, "PersistedV3::sgTrip sizing assumes 3 profiles");
 
+// ---------------------------------------------------------------------------
+//  Version 4 - StallGuard trips carry the speed and current they hold at
+// ---------------------------------------------------------------------------
+// Every V3 field at the same offsets, plus what a trip is only valid with:
+// SG_RESULT depends strongly on step rate and scales with coil current, so a
+// trip set at one profile speed means nothing at another. sgTripSpeedHz[i] is
+// the speed profile i had when the blob was written; on load a trip whose
+// speed no longer matches the compiled profile is dropped (see
+// tripAtCompiledSpeed()). sgCalCurrentMa is the run current Auto SG measured
+// at, 0 if it never ran.
+//
+// V3 ends at 56, 4-aligned: the three uint32_t go at 56/60/64, the uint16_t at
+// 68 and a reserved uint16_t at 70, for 72 bytes and no padding.
+struct PersistedV4 {
+  // --- carried over from V3, byte-identical ---
+  uint16_t version;
+  uint16_t runCurrentMa;
+  int32_t rawUp;
+  int32_t rawDown;
+  int32_t upOffsetSteps;
+  int32_t downOffsetSteps;
+  int32_t sgWorkZoneSteps;
+  int32_t counter;
+  uint16_t sgTrip[NUM_PROFILES];
+  uint8_t activeProfile;
+  uint8_t endpointsCalibrated;  // uint8_t, not bool: fixed on-flash width
+  uint32_t totalCycleTimeMs;
+  uint32_t longestCycleMs;
+  uint16_t stallCount;
+  uint16_t calibrationCount;
+  uint16_t otaCount;
+  uint16_t resetCount;
+  uint32_t lifetimeCycles;
+  // --- new in V4 ---
+  uint32_t sgTripSpeedHz[NUM_PROFILES];
+  uint16_t sgCalCurrentMa;
+  uint16_t reserved;  // explicit, so no padding byte reaches the memcmp() dirty check
+};
+static_assert(sizeof(PersistedV4) == 72,
+              "PersistedV4 must stay padding-free - see the offsets comment above");
+static_assert(offsetof(PersistedV4, sgTripSpeedHz) == sizeof(PersistedV3),
+              "V4's new fields must start exactly where V3 ended");
+static_assert(NUM_PROFILES == 3, "PersistedV4 array sizing assumes 3 profiles");
+
 // The layout the firmware works with in RAM. Repoint this (not PersistedV1)
 // when a new version is introduced.
-using Persisted = PersistedV3;
+using Persisted = PersistedV4;
 
 // Largest blob any known version occupies - the read buffer settings_store.cpp
-// sizes its nvs_get_blob() against. Extend with max(...) when a longer version
-// is added; a stored blob bigger than this is rejected as a size mismatch.
-// Versions have only ever grown, so V3 is the largest; the expression is kept
-// explicit rather than collapsed to sizeof(Persisted) so a future version that
-// somehow shrinks cannot silently undersize the read buffer for older blobs.
-constexpr size_t kMaxBlobBytes =
-    sizeof(PersistedV1) > sizeof(PersistedV2)
-        ? (sizeof(PersistedV1) > sizeof(PersistedV3) ? sizeof(PersistedV1) : sizeof(PersistedV3))
-        : (sizeof(PersistedV2) > sizeof(PersistedV3) ? sizeof(PersistedV2) : sizeof(PersistedV3));
+// sizes its nvs_get_blob() against; a stored blob bigger than this is rejected
+// as a size mismatch. Spelled out over every version rather than
+// sizeof(Persisted), so a version that ever shrinks cannot undersize it.
+constexpr size_t maxBytes(size_t a, size_t b) {
+  return a > b ? a : b;
+}
+constexpr size_t kMaxBlobBytes = maxBytes(maxBytes(sizeof(PersistedV1), sizeof(PersistedV2)),
+                                          maxBytes(sizeof(PersistedV3), sizeof(PersistedV4)));
 
 // ---------------------------------------------------------------------------
 //  Per-version validation
@@ -303,10 +346,46 @@ inline bool validateV3(const PersistedV3 &p) {
   return true;
 }
 
+// Validates the V4 LAYOUT: V3's body, plus the measurement current, which a
+// live setter bounds (0 = Auto SG never ran). The speeds get no bounds check:
+// they are not validated but compared, and a mismatch drops the trip rather
+// than the whole blob.
+inline bool validateV4(const PersistedV4 &p) {
+  if (p.runCurrentMa < RUN_CURRENT_MIN || p.runCurrentMa > RUN_CURRENT_MAX) return false;
+  if (p.sgWorkZoneSteps < SG_WORK_ZONE_MIN || p.sgWorkZoneSteps > SG_WORK_ZONE_MAX) return false;
+  if (p.activeProfile >= NUM_PROFILES) return false;
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) {
+    if (p.sgTrip[i] < RUN_SG_TRIP_MIN || p.sgTrip[i] > RUN_SG_TRIP_MAX) return false;
+  }
+  if (p.upOffsetSteps < OFFSET_MIN || p.upOffsetSteps > OFFSET_MAX) return false;
+  if (p.downOffsetSteps < OFFSET_MIN || p.downOffsetSteps > OFFSET_MAX) return false;
+  if (p.counter < 0) return false;
+  if (p.endpointsCalibrated > 1) return false;
+  if (p.sgCalCurrentMa != 0 &&
+      (p.sgCalCurrentMa < RUN_CURRENT_MIN || p.sgCalCurrentMa > RUN_CURRENT_MAX))
+    return false;
+
+  // Geometry sanity - identical to V1's (see there for the reasoning).
+  if (p.rawUp < -CAL_SEARCH_STEPS || p.rawUp > CAL_SEARCH_STEPS) return false;
+  if (p.rawDown < -CAL_SEARCH_STEPS || p.rawDown > CAL_SEARCH_STEPS) return false;
+  if (p.endpointsCalibrated) {
+    const int32_t travel = p.rawDown - p.rawUp;
+    if (travel <= 2 * ENDPOINT_GUARD || travel > CAL_SEARCH_STEPS) return false;
+  }
+  return true;
+}
+
 // Validation of the CURRENT layout, used by the direct (version == kVersion)
 // load path. Repoint at validateV<new> together with `Persisted`.
 inline bool validate(const Persisted &p) {
-  return validateV3(p);
+  return validateV4(p);
+}
+
+// A stored trip holds only at the speed it was set at. One written when the
+// profile ran at a different speed - or before v4 recorded speeds at all (0) -
+// is dropped to 0, which re-arms the jam-detection lockout until Auto SG runs.
+inline uint16_t tripAtCompiledSpeed(uint16_t trip, uint32_t storedHz, uint32_t compiledHz) {
+  return storedHz == compiledHz ? trip : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -374,6 +453,36 @@ inline void migrate_v2_to_v3(const PersistedV2 &in, PersistedV3 &out) {
   out.lifetimeCycles = (uint32_t)in.counter;
 }
 
+// v3 -> v4: everything carried over; the speeds are unknown (0), so every
+// carried trip is dropped on load. That is the intent, not a side effect: no
+// v3 firmware recorded what speed its trips were set at, and v4 ships with
+// changed profile speeds and chopper timing, under which they do not hold.
+inline void migrate_v3_to_v4(const PersistedV3 &in, PersistedV4 &out) {
+  out = PersistedV4{};  // zero-init first: no byte left indeterminate
+  out.version = 4;
+  out.runCurrentMa = in.runCurrentMa;
+  out.rawUp = in.rawUp;
+  out.rawDown = in.rawDown;
+  out.upOffsetSteps = in.upOffsetSteps;
+  out.downOffsetSteps = in.downOffsetSteps;
+  out.sgWorkZoneSteps = in.sgWorkZoneSteps;
+  out.counter = in.counter;
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) out.sgTrip[i] = in.sgTrip[i];
+  out.activeProfile = in.activeProfile;
+  out.endpointsCalibrated = in.endpointsCalibrated;
+  out.totalCycleTimeMs = in.totalCycleTimeMs;
+  out.longestCycleMs = in.longestCycleMs;
+  out.stallCount = in.stallCount;
+  out.calibrationCount = in.calibrationCount;
+  out.otaCount = in.otaCount;
+  out.resetCount = in.resetCount;
+  out.lifetimeCycles = in.lifetimeCycles;
+  // New in v4 - explicit, not merely inherited from the zero-init above.
+  for (uint8_t i = 0; i < NUM_PROFILES; i++) out.sgTripSpeedHz[i] = 0;
+  out.sgCalCurrentMa = 0;
+  out.reserved = 0;
+}
+
 // ---------------------------------------------------------------------------
 //  Dispatch
 // ---------------------------------------------------------------------------
@@ -393,6 +502,7 @@ inline bool peekBlobVersion(const void *data, size_t len, uint16_t &out) {
   static_assert(offsetof(PersistedV1, version) == 0, "version must lead every blob layout");
   static_assert(offsetof(PersistedV2, version) == 0, "version must lead every blob layout");
   static_assert(offsetof(PersistedV3, version) == 0, "version must lead every blob layout");
+  static_assert(offsetof(PersistedV4, version) == 0, "version must lead every blob layout");
   if (data == nullptr || len < sizeof(uint16_t)) return false;
   std::memcpy(&out, data, sizeof(uint16_t));
   return true;
@@ -425,7 +535,9 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
       migrate_v1_to_v2(v1, v2);
       PersistedV3 v3{};
       migrate_v2_to_v3(v2, v3);
-      out = v3;
+      PersistedV4 v4{};
+      migrate_v3_to_v4(v3, v4);
+      out = v4;
       return ParseResult::Ok;
     }
     case 2: {
@@ -435,7 +547,9 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
       if (!validateV2(v2)) return ParseResult::Invalid;
       PersistedV3 v3{};
       migrate_v2_to_v3(v2, v3);
-      out = v3;
+      PersistedV4 v4{};
+      migrate_v3_to_v4(v3, v4);
+      out = v4;
       return ParseResult::Ok;
     }
     case 3: {
@@ -443,7 +557,17 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
       if (len != sizeof(v3)) return ParseResult::SizeMismatch;
       std::memcpy(&v3, data, sizeof(v3));
       if (!validateV3(v3)) return ParseResult::Invalid;
-      out = v3;  // current version: nothing to migrate
+      PersistedV4 v4{};
+      migrate_v3_to_v4(v3, v4);
+      out = v4;
+      return ParseResult::Ok;
+    }
+    case 4: {
+      PersistedV4 v4{};
+      if (len != sizeof(v4)) return ParseResult::SizeMismatch;
+      std::memcpy(&v4, data, sizeof(v4));
+      if (!validateV4(v4)) return ParseResult::Invalid;
+      out = v4;  // current version: nothing to migrate
       return ParseResult::Ok;
     }
     default:
@@ -456,7 +580,7 @@ inline ParseResult parseAndMigrate(const void *data, size_t len, Persisted &out,
 // Step 6 of the recipe above, enforced by the compiler: bumping kVersion
 // without extending parseAndMigrate()'s switch breaks the build here.
 static_assert(
-    kVersion == 3,
+    kVersion == 4,
     "kVersion was bumped - add the new `case` and the migrate_vN_to_vN+1() step to "
     "parseAndMigrate(), then update this assert. See the recipe at the top of this file.");
 

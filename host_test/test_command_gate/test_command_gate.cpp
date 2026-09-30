@@ -15,6 +15,7 @@ static GateInput ready() {
   in.calibrated = true;
   in.positionStale = false;
   in.batchTarget = 0;
+  in.sgSetUp = true;
   return in;
 }
 
@@ -207,6 +208,57 @@ void test_settings_reset_only_when_fully_idle() {
 }
 
 // ---------------------------------------------------------------------------
+//  Jam detection set-up and Auto SG
+// ---------------------------------------------------------------------------
+void test_start_refused_until_jam_detection_is_set_up() {
+  GateInput in = ready();
+  in.sgSetUp = false;
+  TEST_ASSERT_EQUAL(Refusal::JamDetectionNotSetUp, gateStart(in));
+  TEST_ASSERT_EQUAL(Refusal::JamDetectionNotSetUp, gateToggleRun(in));
+  in.batchTarget = 10;
+  TEST_ASSERT_EQUAL(Refusal::JamDetectionNotSetUp, gateBatchStart(in));
+}
+
+// Calibration and the axis reference come first: each refusal names the next
+// thing to do, and Auto SG itself needs both.
+void test_calibration_and_reference_outrank_jam_detection() {
+  GateInput in = ready();
+  in.sgSetUp = false;
+  in.positionStale = true;
+  TEST_ASSERT_EQUAL(Refusal::PositionUnreferenced, gateStart(in));
+  in.calibrated = false;
+  TEST_ASSERT_EQUAL(Refusal::NotCalibrated, gateStart(in));
+}
+
+// A running press's toggle is a stop, whatever the trips are.
+void test_stop_is_never_refused_for_jam_detection() {
+  GateInput in = ready();
+  in.sgSetUp = false;
+  in.state = MotorState::Running;
+  TEST_ASSERT_EQUAL(Refusal::None, gateToggleRun(in));
+}
+
+// Auto SG is the way past the jam-detection refusal, so it cannot have it.
+void test_auto_sg_needs_calibration_and_reference_but_not_trips() {
+  GateInput in = ready();
+  in.sgSetUp = false;
+  TEST_ASSERT_EQUAL(Refusal::None, gateAutoSg(in));
+  in.positionStale = true;
+  TEST_ASSERT_EQUAL(Refusal::PositionUnreferenced, gateAutoSg(in));
+  in.calibrated = false;
+  TEST_ASSERT_EQUAL(Refusal::NotCalibrated, gateAutoSg(in));
+}
+
+void test_auto_sg_only_from_idle() {
+  for (MotorState st : {MotorState::Running, MotorState::Stopping, MotorState::Calibrating,
+                        MotorState::Stalled, MotorState::Homing}) {
+    GateInput in = ready();
+    in.state = st;
+    TEST_ASSERT_EQUAL(Refusal::WrongState, gateAutoSg(in));
+  }
+}
+
+// ---------------------------------------------------------------------------
 //  Reporting
 // ---------------------------------------------------------------------------
 // The slugs are the "error" field of the HTTP error body and are therefore part
@@ -216,11 +268,12 @@ void test_slugs_are_the_documented_tokens() {
   TEST_ASSERT_EQUAL_STRING("not_calibrated", refusalSlug(Refusal::NotCalibrated));
   TEST_ASSERT_EQUAL_STRING("position_unreferenced", refusalSlug(Refusal::PositionUnreferenced));
   TEST_ASSERT_EQUAL_STRING("no_batch_target", refusalSlug(Refusal::NoBatchTarget));
+  TEST_ASSERT_EQUAL_STRING("jam_detection_not_set_up", refusalSlug(Refusal::JamDetectionNotSetUp));
 }
 
 void test_every_refusal_has_a_distinct_slug_and_a_message() {
   const Refusal all[] = {Refusal::WrongState, Refusal::NotCalibrated, Refusal::PositionUnreferenced,
-                         Refusal::NoBatchTarget};
+                         Refusal::NoBatchTarget, Refusal::JamDetectionNotSetUp};
   for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
     TEST_ASSERT_NOT_NULL(refusalSlug(all[i]));
     TEST_ASSERT_NOT_NULL(refusalMessage(all[i]));
@@ -238,8 +291,9 @@ void test_every_refusal_has_a_distinct_slug_and_a_message() {
 // The JSON error body embeds both unescaped, so neither may contain a character
 // that would have to be escaped (or would end the string early).
 void test_reporting_strings_are_json_safe() {
-  const Refusal all[] = {Refusal::None, Refusal::WrongState, Refusal::NotCalibrated,
-                         Refusal::PositionUnreferenced, Refusal::NoBatchTarget};
+  const Refusal all[] = {Refusal::None,          Refusal::WrongState,
+                         Refusal::NotCalibrated, Refusal::PositionUnreferenced,
+                         Refusal::NoBatchTarget, Refusal::JamDetectionNotSetUp};
   for (Refusal r : all) {
     for (const char *s : {refusalSlug(r), refusalMessage(r)}) {
       for (const char *p = s; *p; p++) {
@@ -268,6 +322,11 @@ int main() {
   RUN_TEST(test_calibrate_only_from_idle);
   RUN_TEST(test_return_home_from_idle_and_stalled_regardless_of_calibration);
   RUN_TEST(test_settings_reset_only_when_fully_idle);
+  RUN_TEST(test_start_refused_until_jam_detection_is_set_up);
+  RUN_TEST(test_calibration_and_reference_outrank_jam_detection);
+  RUN_TEST(test_stop_is_never_refused_for_jam_detection);
+  RUN_TEST(test_auto_sg_needs_calibration_and_reference_but_not_trips);
+  RUN_TEST(test_auto_sg_only_from_idle);
   RUN_TEST(test_slugs_are_the_documented_tokens);
   RUN_TEST(test_every_refusal_has_a_distinct_slug_and_a_message);
   RUN_TEST(test_reporting_strings_are_json_safe);

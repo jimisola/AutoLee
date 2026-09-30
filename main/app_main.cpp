@@ -272,6 +272,12 @@ extern "C" void app_main(void) {
                       "on a new or factory-reset device; otherwise the stored calibration was "
                       "unreadable.");
   }
+  if (!jamDetectionSetUp(g_motion)) {
+    g_boot_report.add("sg-trips-not-set",
+                      "At least one speed profile has no stall trip, so the press will not run. "
+                      "Run Auto SG with the press empty. Trips are cleared when a firmware "
+                      "update changes a profile's speed.");
+  }
 
   lv_display_t *disp = display_touch_init();
 

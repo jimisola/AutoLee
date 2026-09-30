@@ -152,6 +152,17 @@ static constexpr uint32_t RUN_SG_MAX_LOG_INTERVAL_MS = 150;  // throttle for "SG
 // Throttle for the periodic calibration (move-until-stall) SG telemetry line.
 static constexpr uint32_t CAL_MUS_LOG_INTERVAL_MS = 400;
 
+// ==========================================================================
+//  AUTO SG (lib/autolee_logic/auto_sg.h)
+// ==========================================================================
+// Each profile runs SG_AUTO_STROKES measured strokes with detection off, and
+// its trip becomes the highest SG seen + SG_AUTO_MARGIN. The margin is one
+// count on purpose - see AutoSgConfig. Only valid at the run current it was
+// measured at, which is stored with the trips.
+static constexpr uint16_t SG_AUTO_STROKES = 12;
+static constexpr uint16_t SG_AUTO_MARGIN = 1;
+static constexpr uint32_t SG_AUTO_TIMEOUT_MS = 120000;  // per profile
+
 // Work zone: skip SG monitoring near the DOWN endpoint where the tool
 // does useful work (e.g. pushing primers). The resistance here is normal
 // and would false-trigger stall detection at low trip thresholds.

@@ -69,7 +69,9 @@
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
     /** Size of memory available for `lv_malloc()` in bytes (>= 2kB) */
-    #define LV_MEM_SIZE (64 * 1024U)          /**< [bytes] */
+    /* 80 KB, not 64: the built UI already held 92% of 64 KB, and an allocation
+     * failure halts in LV_ASSERT_HANDLER - a silent black-screen hang. */
+    #define LV_MEM_SIZE (80 * 1024U)          /**< [bytes] */
 
     /** Set an address for the memory pool instead of allocating it as a normal array. Can be in external SRAM too. */
     #define LV_MEM_ADR 0     /**< 0: unused*/

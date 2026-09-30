@@ -121,7 +121,7 @@ paths:
       tags: [Motion]
       operationId: setSgTrip
       parameters:
-        - { name: value, in: query, required: false, description: "Absolute trip. 0 disables jam detection for that profile - a legitimate setting, and reported in the state payload's `sgTrip`. Mutually exclusive with `delta`.", schema: { type: integer, minimum: 0, maximum: 1023 } }
+        - { name: value, in: query, required: false, description: "Absolute trip. 0 marks the profile's trip as not set, and the press then refuses to run until every profile has one (see `sgSetUp`). Mutually exclusive with `delta`.", schema: { type: integer, minimum: 0, maximum: 1023 } }
         - { name: delta, in: query, required: false, description: "Relative adjustment, saturating at 0 and 1023. Mutually exclusive with `value`.", schema: { type: integer } }
         - { name: profile, in: query, required: false, description: "Target profile (defaults to active)", schema: { type: integer, enum: [0, 1, 2] } }
       responses:
@@ -194,6 +194,26 @@ paths:
         not that calibration succeeded. 409 if the press is not idle.
       tags: [Motion]
       operationId: calibrate
+      responses:
+        "200": { $ref: "#/components/responses/Ok" }
+        "409": { $ref: "#/components/responses/Refused" }
+        "403": { $ref: "#/components/responses/DefaultPasswordActive" }
+
+  /api/v1/motion/auto_sg:
+    post:
+      summary: Measure every speed profile's StallGuard trip (Auto SG)
+      description: >
+        Runs each profile for a fixed number of strokes with jam detection OFF,
+        records the highest StallGuard reading, and sets that profile's trip one
+        count above it, together with the run current it was measured at. The
+        press must be empty. Clears the `jam_detection_not_set_up` refusal, so it
+        is itself allowed without trips; it needs a calibrated, referenced, idle
+        press. Watch `autoSgActive`/`autoSgProfile`/`autoSgStroke` in the state;
+        `POST /api/v1/motion/stop` (or toggle_run) aborts it and leaves the stored
+        trips unchanged. Deferred to the motion task and re-checked there; 200
+        means queued, not measured.
+      tags: [Motion]
+      operationId: autoSg
       responses:
         "200": { $ref: "#/components/responses/Ok" }
         "409": { $ref: "#/components/responses/Refused" }
@@ -521,7 +541,8 @@ paths:
                           type: string
                           description: >
                             Stable identifier, e.g. `nvs-erased`, `not-calibrated`,
-                            `display-init-failed`, `ota-rolled-back`. New codes may be added;
+                            `sg-trips-not-set`, `display-init-failed`,
+                            `ota-rolled-back`. New codes may be added;
                             treat an unknown one as displayable rather than an error.
                         detail:
                           type: string
@@ -697,6 +718,7 @@ components:
             - not_calibrated
             - position_unreferenced
             - no_batch_target
+            - jam_detection_not_set_up
             - default_password
         message: { type: string }
 
@@ -717,7 +739,8 @@ components:
       description: >
         Refused: the request is well-formed but the press cannot carry it out
         from its current state. `error` is one of `wrong_state`,
-        `not_calibrated`, `position_unreferenced` or `no_batch_target`.
+        `not_calibrated`, `position_unreferenced`, `no_batch_target` or
+        `jam_detection_not_set_up` (a profile has no StallGuard trip - run Auto SG).
 
         This check is advisory: the command is deferred to the motion task,
         which re-checks the same rule when it applies it and remains
