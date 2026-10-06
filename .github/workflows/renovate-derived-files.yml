@@ -1,0 +1,140 @@
+name: Renovate derived files
+
+# The hosted Renovate app bumps main/idf_component.yml (and the ESP-IDF pin) but
+# cannot run `idf.py reconfigure`, so dependencies.lock is left behind;
+# `postUpgradeTasks` would do it, but runs only self-hosted. This regenerates
+# the lock on Renovate's own branches and pushes it (#106).
+#
+# A `paths:` filter is safe here, unlike in the other workflows: nothing in it
+# is a required check, so a run that never happens blocks nothing.
+on:
+  pull_request:
+    paths:
+      - main/idf_component.yml
+      # The ESP-IDF pin: the lock records the IDF version it was solved with.
+      - .github/actions/setup-esp-idf/action.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate-derived-files-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Runs the PR's code (CMake, the component manager) and so holds no secret.
+  # The push token exists only in the job below, which runs nothing from the
+  # PR but `git apply`.
+  derive:
+    name: renovate derived files
+    if: startsWith(github.head_ref, 'renovate/') && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The branch itself, not the merge commit `pull_request` checks out:
+          # the patch is applied to the branch.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: ./.github/actions/setup-esp-idf
+
+      # Build directory and SDKCONFIG outside the tree, so the lock is the only
+      # tracked file this can change.
+      - name: Regenerate dependencies.lock
+        run: |
+          # shellcheck source=/dev/null
+          . ~/esp-idf/export.sh > /dev/null
+          idf.py -B "$RUNNER_TEMP/build" -D SDKCONFIG="$RUNNER_TEMP/sdkconfig" reconfigure
+
+      - name: Collect the derived files
+        id: diff
+        run: |
+          set -euo pipefail
+          git diff --binary -- dependencies.lock > "$RUNNER_TEMP/derived.patch"
+          if [ -s "$RUNNER_TEMP/derived.patch" ]; then
+            cat "$RUNNER_TEMP/derived.patch"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nothing to regenerate."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.diff.outputs.changed == 'true'
+        with:
+          name: derived-patch
+          path: ${{ runner.temp }}/derived.patch
+          if-no-files-found: error
+
+  commit:
+    name: renovate derived files (commit)
+    needs: derive
+    if: needs.derive.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the App is configured
+        env:
+          APP_ID: ${{ secrets.RENOVATE_DERIVED_FILES_APP_ID }}
+          PRIVATE_KEY: ${{ secrets.RENOVATE_DERIVED_FILES_PRIVATE_KEY }}
+        run: |
+          if [ -z "$APP_ID" ] || [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::RENOVATE_DERIVED_FILES_APP_ID and RENOVATE_DERIVED_FILES_PRIVATE_KEY must be set (#106)."
+            exit 1
+          fi
+
+      # An App token, not GITHUB_TOKEN: a push made with GITHUB_TOKEN starts no
+      # workflows, so the required checks would never run on the new head.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          app-id: ${{ secrets.RENOVATE_DERIVED_FILES_APP_ID }}
+          private-key: ${{ secrets.RENOVATE_DERIVED_FILES_PRIVATE_KEY }}
+          permission-contents: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.head_ref }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: derived-patch
+          path: ${{ runner.temp }}/derived
+
+      - name: Commit and push
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          BRANCH: ${{ github.head_ref }}
+          DERIVED_FROM: ${{ github.event.pull_request.head.sha }}
+          PATCH: ${{ runner.temp }}/derived/derived.patch
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A newer push to the branch gets a run of its own; this patch was
+          # computed against a head that is no longer there.
+          if [ "$(git rev-parse HEAD)" != "$DERIVED_FROM" ]; then
+            echo "::notice::$BRANCH moved past $DERIVED_FROM; leaving it to that push's run."
+            exit 0
+          fi
+
+          UNEXPECTED="$(git apply --numstat "$PATCH" | cut -f3 | grep -vxF dependencies.lock || true)"
+          if [ -n "$UNEXPECTED" ]; then
+            echo "::error::The patch touches files it has no business with: $UNEXPECTED"
+            exit 1
+          fi
+          git apply "$PATCH"
+
+          BOT="${APP_SLUG}[bot]"
+          BOT_ID="$(gh api "/users/${BOT}" --jq .id)"
+          git config user.name "$BOT"
+          git config user.email "${BOT_ID}+${BOT}@users.noreply.github.com"
+          git add -- dependencies.lock
+          git commit -s -m "chore: regenerate dependencies.lock" \
+            -m "Written by .github/workflows/renovate-derived-files.yml."
+          # persist-credentials: false, so push to an explicit tokenised URL
+          # rather than leaving a credential in .git/config (as release.yml does).
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:${BRANCH}"

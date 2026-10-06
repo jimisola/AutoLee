@@ -98,6 +98,16 @@ jobs:
           path: ~/.ccache
           key: ${{ steps.ccache.outputs.cache-primary-key }}
 
+      # The build re-solves main/idf_component.yml and rewrites the lock in
+      # place, so a stale committed lock would otherwise pass silently (#106).
+      - name: Check dependencies.lock is current
+        if: steps.areas.outputs.firmware != 'false'
+        run: |
+          if ! git diff --exit-code -- dependencies.lock; then
+            echo "::error::dependencies.lock does not match main/idf_component.yml and the pinned ESP-IDF. Run idf.py reconfigure and commit the lock."
+            exit 1
+          fi
+
   host-tests:
     name: host tests
     runs-on: ubuntu-latest
