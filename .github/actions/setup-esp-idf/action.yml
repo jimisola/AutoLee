@@ -1,0 +1,59 @@
+name: Setup ESP-IDF
+description: >-
+  Install the pinned ESP-IDF with only the esp32c6 tools, from a cache when one
+  exists, at ~/esp-idf. Callers run `. ~/esp-idf/export.sh` before idf.py.
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the version and cache key
+      id: idf
+      shell: bash
+      env:
+        # The one ESP-IDF pin for CI, releases and the lock regeneration.
+        # renovate: datasource=github-releases depName=espressif/esp-idf
+        version: "v6.1"
+        # Re-keys when the install below changes, not just the version.
+        RECIPE: ${{ hashFiles('.github/actions/setup-esp-idf/action.yml') }}
+      run: |
+        set -euo pipefail
+        # The cached venv points at the runner's python3, so its minor is in the key.
+        PY="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+        {
+          echo "version=$version"
+          echo "key=esp-idf-$version-esp32c6-$ImageOS-py$PY-${RECIPE:0:12}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore ESP-IDF
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/esp-idf
+          ~/.espressif
+        key: ${{ steps.idf.outputs.key }}
+
+    # esp32c6 only: espressif/install-esp-idf-action installs every target's
+    # toolchain, which was two thirds of the firmware job.
+    - name: Install ESP-IDF
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        IDF_VERSION: ${{ steps.idf.outputs.version }}
+      run: |
+        set -euo pipefail
+        git clone --quiet --depth 1 --branch "$IDF_VERSION" --recursive --shallow-submodules \
+          --jobs 8 https://github.com/espressif/esp-idf.git ~/esp-idf
+        ~/esp-idf/install.sh esp32c6
+        rm -rf ~/.espressif/dist
+
+    # From main only: the cache is ~1 GB, and one saved per pull request would
+    # evict the shared one.
+    - name: Save ESP-IDF
+      if: steps.cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/esp-idf
+          ~/.espressif
+        key: ${{ steps.idf.outputs.key }}

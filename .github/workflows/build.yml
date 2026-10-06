@@ -24,22 +24,79 @@ on:
 permissions:
   contents: read
 
+# A superseded push should not keep running. The literal prefix keeps this
+# group apart from the other workflows release.yml calls, where
+# github.workflow is the caller's name for all of them.
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Both jobs are required checks, so they always run and report, and skip their
+# steps instead when .github/scripts/changed_areas.py says the pull request
+# cannot affect them. Only an explicit 'false' skips: if the classifier fails,
+# its output is empty and everything runs.
 jobs:
   firmware:
     name: firmware (esp32c6)
     runs-on: ubuntu-latest
+    env:
+      IDF_CCACHE_ENABLE: "1"
+      # IDF writes picolibc.specs into the build directory, and ccache's default
+      # compiler_check hashes its mtime: a restored cache would never hit.
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 200M
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
+          # The merge commit and its first parent, for the classifier.
+          fetch-depth: 2
+
+      - name: Classify the change
+        id: areas
+        continue-on-error: true
+        run: python3 .github/scripts/changed_areas.py >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup-esp-idf
+        if: steps.areas.outputs.firmware != 'false'
+
+      - name: Install ccache
+        if: steps.areas.outputs.firmware != 'false'
+        run: sudo apt-get install -y --no-install-recommends ccache
+
+      # Saved from main only, so pull requests all start from one warm cache
+      # rather than each adding their own.
+      - name: Restore the compiler cache
+        if: steps.areas.outputs.firmware != 'false'
+        id: ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          # renovate: datasource=github-releases depName=espressif/esp-idf
-          version: "v6.1"
+          path: ~/.ccache
+          key: >-
+            ccache-esp32c6-${{ hashFiles('main/**', 'lib/**', 'include/**', 'CMakeLists.txt',
+            'sdkconfig.defaults', 'partitions.csv', 'dependencies.lock',
+            '.github/workflows/build.yml', '.github/actions/setup-esp-idf/action.yml') }}
+          restore-keys: ccache-esp32c6-
+
       - name: Build
+        if: steps.areas.outputs.firmware != 'false'
         run: |
+          # shellcheck source=/dev/null
+          . ~/esp-idf/export.sh > /dev/null
+          export CCACHE_DIR=~/.ccache
+          ccache --zero-stats
           idf.py set-target esp32c6
           idf.py build
+          ccache --show-stats
+
+      - name: Save the compiler cache
+        if: >-
+          steps.areas.outputs.firmware != 'false' && github.ref == 'refs/heads/main'
+          && steps.ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.ccache
+          key: ${{ steps.ccache.outputs.cache-primary-key }}
 
   host-tests:
     name: host tests
@@ -48,6 +105,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 2
+
+      - name: Classify the change
+        id: areas
+        continue-on-error: true
+        run: python3 .github/scripts/changed_areas.py >> "$GITHUB_OUTPUT"
+
       # host_test/ is a native host build - it only needs one vendored
       # source file from ESP-IDF (components/unity), not a toolchain.
       # install-esp-idf-action was tried first, but its cross-toolchain
@@ -57,6 +121,7 @@ jobs:
       # system-level change (e.g. gcc specs) the action makes, not a
       # process-env one. Sparse-clone just the one directory needed instead.
       - name: Fetch Unity source (the one thing host_test/ needs from ESP-IDF)
+        if: steps.areas.outputs.firmware != 'false'
         # components/unity/unity in the esp-idf repo is a submodule of
         # ThrowTheSwitch/Unity - clone that directly into the same path
         # shape host_test/CMakeLists.txt expects ($IDF_PATH/components/
@@ -70,12 +135,14 @@ jobs:
           git -C /tmp/esp-idf-unity/components/unity/unity checkout -q FETCH_HEAD
           echo "IDF_PATH=/tmp/esp-idf-unity" >> "$GITHUB_ENV"
       - name: Configure, build, and run
+        if: steps.areas.outputs.firmware != 'false'
         working-directory: host_test
         run: |
           cmake -B build -DAUTOLEE_COVERAGE=ON
           cmake --build build -j
           cd build && ctest --output-on-failure
       - name: Coverage report
+        if: steps.areas.outputs.firmware != 'false'
         working-directory: host_test
         run: |
           pip install -r ../.github/requirements-ci.txt
