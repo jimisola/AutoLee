@@ -542,3 +542,4 @@ ESP‑IDF `captive_portal` + `http_server` SSE examples.
   So the lever if the slot ever gets tight is mbedTLS, not libc. Worth knowing: this firmware
   serves plain HTTP and uses Digest (MD5) auth — mbedTLS is pulled in because `lib/psychic_http`
   requires `esp_https_server`, not because anything here terminates TLS.
+
