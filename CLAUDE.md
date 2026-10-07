@@ -35,8 +35,9 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
 
 - **Board:** ESP32-C6 (WaveShare 1.47" Touch LCD module).
 - **Toolchain:** ESP-IDF >= 6.0, enforced by `main/idf_component.yml`'s `idf: ">=6.0"`; CI and
-  releases pin **v6.0.2**, the version this port is built and tested against (native RMT+PCNT
-  stepper via `main/drivers/stepper.*`, not FastAccelStepper, which was dropped - see ADR 0001).
+  releases pin one version in `.github/actions/setup-esp-idf/action.yml`, the version this port is
+  built and tested against (native RMT+PCNT stepper via `main/drivers/stepper.*`, not
+  FastAccelStepper, which was dropped - see ADR 0001).
   5.x no longer builds: 6.0 typed `esp_lcd`'s cs/dc/reset config members as `gpio_num_t`, stopped
   re-exporting FreeRTOS headers transitively, and turned on `-Werror=missing-field-initializers`
   (see the pragma around `DNS_SERVER_CONFIG_SINGLE` in `main/net/wifi_mgr.cpp`).
@@ -72,6 +73,10 @@ idf.py -p /dev/ttyACM0 flash monitor   # adjust the port for your OS
   mapping RELEASING.md documents, the `tag_pattern`, and how the release notes render. It runs the
   real `git-cliff` against throwaway git repos, and skips itself if `git-cliff` is not on `PATH`.
   Edit `cliff.toml` and run `pytest tools/tests`.
+- **CI skips work, never required jobs:** a required check that does not report blocks the PR, and
+  one skipped through `needs:` reports green. So jobs always run and skip their *steps* when
+  `.github/scripts/changed_areas.py` says the PR cannot affect them (tested in
+  `tools/tests/test_changed_areas.py`). A new top-level path runs everything until it gets a rule.
 - **Lint + format:** run before every commit — `.github/workflows/lint.yml` enforces exactly this
   and it is the cheapest CI job to go red on:
   ```bash

@@ -352,10 +352,8 @@ jobs:
           # Tags 0.1.0 and 1.0.0 predate this and stay lightweight.
           git tag -a -m "$VERSION" "$VERSION"
 
-      - uses: espressif/install-esp-idf-action@8fc05d1470d5591417e7a3707a1f2bec178db4ae # v1
-        with:
-          # renovate: datasource=github-releases depName=espressif/esp-idf
-          version: "v6.1"
+      # No ccache here: a release is built from scratch.
+      - uses: ./.github/actions/setup-esp-idf
 
       - name: Build and package
         id: build
@@ -363,6 +361,8 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
+          # shellcheck source=/dev/null
+          . ~/esp-idf/export.sh > /dev/null
 
           # set-target is what runs CMake configure, and configure is when
           # PROJECT_VER is captured from `git describe`. The tag above therefore

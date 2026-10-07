@@ -16,6 +16,11 @@ on:
 permissions:
   contents: read
 
+# A superseded push should not keep running.
+concurrency:
+  group: semantic-pr-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   semantic-pr:
     name: conventional commit title

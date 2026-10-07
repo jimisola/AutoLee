@@ -59,7 +59,8 @@ automatically by the ESP-IDF Component Manager on first build; `dependencies.loc
 for reproducibility. `managed_components/` (the downloaded source) is gitignored.
 
 > **ESP-IDF >= 6.0**, enforced by `main/idf_component.yml`'s `idf: ">=6.0"`; CI and releases pin
-> **v6.0.2**, the version this port is built and tested against. ESP32-C6 itself only needs 5.1+,
+> one version, in `.github/actions/setup-esp-idf/action.yml` — the version this port is built and
+> tested against. ESP32-C6 itself only needs 5.1+,
 > and the project sat on 5.3 until the 6.0 move — but 5.x no longer compiles this source, because
 > 6.0 typed `esp_lcd`'s cs/dc/reset config members as `gpio_num_t`, stopped re-exporting FreeRTOS
 > headers transitively, and turned on `-Werror=missing-field-initializers`. All three are handled

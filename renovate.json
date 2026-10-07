@@ -65,7 +65,7 @@
   },
 
   "customManagers": [
-    // The ESP-IDF version the workflows install. It is an *action input*, not a
+    // The ESP-IDF version CI installs (.github/actions/setup-esp-idf). It is not a
     // dependency declaration, so no built-in manager reads it - the same blind
     // spot the component manifest had. ESP-IDF 6.1 shipped and nothing noticed;
     // that is what this closes.
@@ -75,7 +75,7 @@
     // comment rather than by widening a regex.
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "managerFilePatterns": ["/^\\.github/(workflows|actions)/.+\\.ya?ml$/"],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+version: \"(?<currentValue>[^\"]+)\""
       ],
@@ -131,9 +131,9 @@
       // a decision, not as a PR that looks like the others.
       "allowedVersions": "<7",
       "description": "ESP-IDF minor/patch tracked; a new major is deliberate, see main/idf_component.yml.",
-      // The version is pinned separately in build.yml and release.yml -
-      // without a group a bump opens one PR per file, and they can land days
-      // apart with the two workflows on different toolchains in between.
+      // One pin today, in .github/actions/setup-esp-idf. The group is for any
+      // second one: without it a bump opens one PR per file, and they can land
+      // days apart on different toolchains.
       "groupName": "ESP-IDF"
     },
     {
