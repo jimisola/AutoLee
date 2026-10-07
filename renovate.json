@@ -15,6 +15,11 @@
   // kept by writing JSONC, which Renovate parses for .json.
   "forkProcessing": "enabled",
 
+  // .github/workflows/renovate-derived-files.yml commits the regenerated
+  // dependencies.lock to Renovate's branches as this App. Without this Renovate
+  // takes the branch as edited by someone else and stops rebasing it.
+  "gitIgnoredAuthors": ["/^\\d+\\+autolee-renovate-derived-files\\[bot\\]@users\\.noreply\\.github\\.com$/"],
+
   // Every dependency surface in the repo. github-actions and pip_requirements
   // (.github/requirements-ci.txt) moved here from .github/dependabot.yml, which
   // this change deletes: one mechanism, one automerge policy.
