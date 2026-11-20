@@ -12,7 +12,7 @@ runs:
       env:
         # The one ESP-IDF pin for CI, releases and the lock regeneration.
         # renovate: datasource=github-releases depName=espressif/esp-idf
-        version: "v6.1"
+        version: "v6.1.1"
         # Re-keys when the install below changes, not just the version.
         RECIPE: ${{ hashFiles('.github/actions/setup-esp-idf/action.yml') }}
       run: |
