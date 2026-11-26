@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Repository overrides. Everything else comes from the central config
+# (<owner>/coderabbit) via `inheritance: true`.
+# https://docs.coderabbit.ai/configuration/central-configuration
+inheritance: true
+
+reviews:
+  path_filters:
+    - "!dependencies.lock"
+    # Vendored upstream code; must stay byte-identical.
+    - "!lib/tmc_api/**"
+    - "!lib/psychic_http/**"
+    - "!lib/dns_server/**"
+  path_instructions:
+    - path: "main/motion/**"
+      instructions: >-
+        Safety-critical: this firmware drives a press that can crush hands.
+        Flag any weakening of stop, backoff, homing or StallGuard logic.
+    - path: "main/drivers/tmc5160*"
+      instructions: >-
+        The display CS must be forced HIGH before every StallGuard SPI read
+        (shared SPI bus). Flag changes that break this.
+    - path: "api/**"
+      instructions: >-
+        External contract. Must stay in sync with state_json in
+        lib/autolee_logic and api/schemas/state.schema.json.
