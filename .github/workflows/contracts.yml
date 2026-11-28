@@ -145,7 +145,7 @@ jobs:
         id: openapi
         if: steps.areas.outputs.contracts != 'false' && steps.base.outputs.openapi-existed == 'true'
         continue-on-error: true
-        uses: oasdiff/oasdiff-action/breaking@14ca7009a63c417dfe27b7c44359c4bcccaf8eee # v0.2.1
+        uses: oasdiff/oasdiff-action/breaking@8bf13f088a1c9fd69292cb7694a35b0da07b5915 # v0.2.2
         with:
           base: ".contracts-base/api/openapi.yaml"
           revision: "api/openapi.yaml"
